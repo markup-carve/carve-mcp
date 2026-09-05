@@ -2,6 +2,7 @@
   "name": "@markup-carve/carve-mcp",
   "version": "0.1.0",
   "description": "Model Context Protocol server for authoring and converting Carve documents",
+  "mcpName": "io.github.markup-carve/carve",
   "type": "module",
   "bin": {
     "carve-mcp": "dist/index.js"
@@ -14,6 +15,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "prepack": "npm run build",
+    "release:check": "npm run check && npm test && npm run build && node scripts/release-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -24,6 +26,16 @@
     "type": "git",
     "url": "git+https://github.com/markup-carve/carve-mcp.git"
   },
+  "homepage": "https://markup-carve.github.io/carve/",
+  "bugs": {
+    "url": "https://github.com/markup-carve/carve-mcp/issues"
+  },
+  "keywords": [
+    "carve",
+    "markup",
+    "mcp",
+    "model-context-protocol"
+  ],
   "license": "MIT",
   "publishConfig": {
     "access": "public"
