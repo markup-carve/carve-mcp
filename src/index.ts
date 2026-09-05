@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { createServer } from './server.js';
+import { parseArgs } from './args.js';
 
-const server = createServer();
+const { roots, allowWrite } = parseArgs(process.argv.slice(2));
+const server = await createServer({ roots, allowWrite });
 const transport = new StdioServerTransport();
 transport.onerror = (error) => {
   console.error(`carve-mcp transport error: ${error.message}`);
