@@ -1,8 +1,8 @@
 # Carve MCP server
 
 Give MCP-compatible assistants the same Carve parser, linter, formatter, and
-renderers used by the JavaScript implementation, without giving the server
-filesystem or network access.
+renderers used by the JavaScript implementation. Filesystem access is absent by
+default and can be enabled for explicitly configured document roots.
 
 ## Tools
 
@@ -24,7 +24,24 @@ Callers handling trusted documents can opt in with `allowRawHtml`; dangerous URL
 sanitization remains enabled unless explicitly disabled.
 
 All tools accept source text directly. Inputs are limited to 1 MB, and no tool
-reads or writes files.
+reads or writes files unless a workspace root is configured at startup.
+
+By default the server has no filesystem access. To opt into workspace reads,
+configure one or more roots at startup:
+
+```sh
+node dist/index.js --root /absolute/project/path
+```
+
+`carve_workspace_info` lists the root indexes used by `carve_read_file` without
+exposing host paths. Reads are limited to common text-document extensions and
+exclude hidden paths and dependency directories.
+
+Add `--allow-write` to register `carve_write_file`. Writes default to dry runs,
+stay inside canonicalized roots, preserve existing file modes, and require the
+previously read SHA-256 when overwriting a file. This detects concurrent
+changes. MCP's newer protocol no longer asks clients for roots, so startup
+configuration keeps the permission boundary explicit across protocol versions.
 
 ## Resources
 

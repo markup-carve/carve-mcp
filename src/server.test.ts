@@ -7,7 +7,7 @@ describe('MCP server', () => {
   afterEach(async () => Promise.all(closeables.splice(0).map((item) => item.close())));
 
   it('advertises and invokes the core tools over MCP', async () => {
-    const server = createServer();
+    const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     closeables.push(client, server);
@@ -37,7 +37,7 @@ describe('MCP server', () => {
   });
 
   it('lists and reads versioned authoring resources', async () => {
-    const server = createServer();
+    const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     closeables.push(client, server);
@@ -54,7 +54,7 @@ describe('MCP server', () => {
   });
 
   it('returns an MCP tool error for oversized input', async () => {
-    const server = createServer();
+    const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     closeables.push(client, server);

@@ -4,6 +4,7 @@ import * as z from 'zod/v4';
 import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
+import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
@@ -30,7 +31,7 @@ function result(value: unknown) {
 
 function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
   return async (...args: T) => {
-    try { return result(fn(...args)); }
+    try { return result(await fn(...args)); }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof RenderLossError) {
@@ -41,8 +42,31 @@ function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
   };
 }
 
-export function createServer(): McpServer {
+export async function createServer(workspaceOptions?: WorkspaceOptions): Promise<McpServer> {
   const server = new McpServer({ name: 'carve-mcp', version: '0.1.0' });
+  if (workspaceOptions?.roots.length) {
+    const workspace = await prepareWorkspace(workspaceOptions);
+    server.registerTool('carve_read_file', {
+      title: 'Read Carve workspace file',
+      description: 'Read a UTF-8 text file inside an explicitly configured workspace root.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe(({ rootIndex, path }) => workspace.read(rootIndex, path)));
+    server.registerTool('carve_workspace_info', {
+      title: 'List configured Carve workspace roots',
+      description: 'List root indexes and whether writes are enabled. Paths are intentionally not exposed.',
+      inputSchema: z.object({}).strict(),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe(() => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
+    if (workspaceOptions.allowWrite) {
+      server.registerTool('carve_write_file', {
+        title: 'Write Carve workspace file',
+        description: 'Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.',
+        inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1), content: sourceSchema, expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), dryRun: z.boolean().default(true) }).strict(),
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      }, safe(({ rootIndex, path, content, expectedSha256, dryRun }) => workspace.write(rootIndex, path, content, expectedSha256, dryRun)));
+    }
+  }
 
   server.registerResource('carve-authoring-guide', 'carve://guide', {
     title: 'Carve authoring quick start',
