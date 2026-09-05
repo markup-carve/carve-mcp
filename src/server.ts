@@ -1,7 +1,9 @@
-import { McpServer } from '@modelcontextprotocol/server';
+import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
 import { KNOWN_LINT_PLATFORMS } from '@markup-carve/carve';
 import * as z from 'zod/v4';
 import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
+import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
+import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
@@ -22,6 +24,46 @@ function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
 
 export function createServer(): McpServer {
   const server = new McpServer({ name: 'carve-mcp', version: '0.1.0' });
+
+  server.registerResource('carve-authoring-guide', 'carve://guide', {
+    title: 'Carve authoring quick start',
+    description: 'Concise, human-facing guidance for common Carve writing tasks.',
+    mimeType: 'text/markdown',
+  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: authoringGuide }] }));
+
+  server.registerResource('carve-rule-index', 'carve://rules', {
+    title: 'Normative Carve rule index',
+    description: 'Versioned map of the normative rule categories and lookup resource.',
+    mimeType: 'text/markdown',
+  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: ruleIndexMarkdown() }] }));
+
+  server.registerResource('carve-rule', new ResourceTemplate('carve://rules/{ruleId}', {
+    list: undefined,
+    complete: { ruleId: (value) => ruleIds.filter((id) => id.startsWith(value.toUpperCase())) },
+  }), {
+    title: 'Carve rule',
+    description: 'A normative rule summary selected by stable rule ID.',
+    mimeType: 'text/markdown',
+  }, async (uri, variables) => {
+    const ruleId = String(variables.ruleId);
+    const text = ruleMarkdown(ruleId);
+    if (!text) throw new ResourceNotFoundError(uri.href, `Unknown Carve rule ID: ${ruleId.slice(0, 100)}`);
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
+  });
+
+  server.registerResource('carve-lint-rule', new ResourceTemplate('carve://lint-rules/{ruleName}', {
+    list: undefined,
+    complete: { ruleName: (value) => lintRuleNames.filter((name) => name.startsWith(value.toLowerCase())) },
+  }), {
+    title: 'Carve lint diagnostic',
+    description: 'An author-facing explanation selected by the stable diagnostic name returned by carve_lint.',
+    mimeType: 'text/markdown',
+  }, async (uri, variables) => {
+    const ruleName = String(variables.ruleName);
+    const text = lintRuleMarkdown(ruleName);
+    if (!text) throw new ResourceNotFoundError(uri.href, `Unknown Carve lint rule: ${ruleName.slice(0, 100)}`);
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
+  });
 
   server.registerTool('carve_lint', {
     title: 'Lint Carve',

@@ -15,6 +15,19 @@ filesystem or network access.
 All tools accept source text directly. Inputs are limited to 1 MB, and no tool
 reads or writes files.
 
+## Resources
+
+- `carve://guide` is a concise authoring quick start.
+- `carve://rules` explains the normative rule categories.
+- `carve://rules/{ruleId}` looks up a stable normative `CARVE-*` rule ID, such as
+  `carve://rules/CARVE-P0-001`.
+- `carve://lint-rules/{ruleName}` explains a stable diagnostic name returned by
+  `carve_lint`.
+
+The resources identify the Carve version and link to the complete documentation
+when a reader needs normative detail. Lint diagnostic names are a separate
+namespace and are returned with their explanations directly by `carve_lint`.
+
 ## Run locally
 
 Node.js 20 or newer is required.
