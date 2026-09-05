@@ -12,6 +12,17 @@ filesystem or network access.
 - `carve_parse` returns the resolved, position-aware interchange AST.
 - `carve_migrate` converts HTML, Markdown, or Djot and reports migration fidelity.
 
+`carve_render` supports `default`, `portable`, and HTML-only `static-html`
+presets. The portable preset lowercases heading IDs and transliterates where it
+can. Advanced callers can choose heading-ID behavior, loss policy, smart
+typography, and the `autolink`, `semantic-spans`, or `wikilinks` extensions.
+`carve_migrate` exposes Markdown dialect switches explicitly, so migration does
+not invent constructs the source format did not enable.
+
+Raw HTML passthrough is disabled by default because MCP inputs are untrusted.
+Callers handling trusted documents can opt in with `allowRawHtml`; dangerous URL
+sanitization remains enabled unless explicitly disabled.
+
 All tools accept source text directly. Inputs are limited to 1 MB, and no tool
 reads or writes files.
 

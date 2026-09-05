@@ -1,5 +1,5 @@
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
-import { KNOWN_LINT_PLATFORMS } from '@markup-carve/carve';
+import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
 import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
@@ -7,6 +7,22 @@ import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
+const renderSettings = {
+  preset: z.enum(['default', 'portable', 'static-html']).default('default').describe('portable lowercases IDs and transliterates where possible; static-html is HTML-only.'),
+  asciiHeadingIds: z.enum(['off', 'fold', 'strict']).optional().describe('Heading ID policy; explicit values override the preset.'),
+  lowercaseHeadingIds: z.boolean().optional().describe('Lowercase generated heading IDs; explicit values override the preset.'),
+  strictLosses: z.boolean().default(false).describe('Fail instead of returning output when a raw-format node would be dropped.'),
+  maxRenderLosses: z.number().int().min(0).max(10_000).optional().describe('Maximum detailed losses to return.'),
+  smartTypography: z.enum(['glyph', 'source']).optional().describe('Render typographic glyphs or the punctuation the author typed.'),
+  extensions: z.array(z.enum(['autolink', 'semantic-spans', 'wikilinks'])).max(3).default([]).describe('Opt-in extensions; semantic-spans is HTML-only.'),
+  allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output. Disabled by default.'),
+  sanitizeUrls: z.boolean().default(true).describe('Block dangerous authored URL schemes. Keep enabled for untrusted input.'),
+};
+const markdownDialect = z.object({
+  highlight: z.boolean().optional(), superscript: z.boolean().optional(), math: z.boolean().optional(),
+  inlineFootnotes: z.boolean().optional(), abbreviations: z.boolean().optional(),
+  fencedDivs: z.boolean().optional(), attributes: z.boolean().optional(),
+}).strict().optional().describe('Opt-in Markdown flavor constructs; valid only for Markdown input.');
 
 function result(value: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
@@ -17,6 +33,9 @@ function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
     try { return result(fn(...args)); }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof RenderLossError) {
+        return { ...result({ error: message, losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated }), isError: true };
+      }
       return { ...result({ error: message }), isError: true };
     }
   };
@@ -82,9 +101,11 @@ export function createServer(): McpServer {
   server.registerTool('carve_render', {
     title: 'Render Carve',
     description: 'Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.',
-    inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']) }),
+    inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings }),
     annotations: readOnly,
-  }, safe(({ source: document, target }) => render(document, target)));
+  }, safe(({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
+    ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
+  })));
 
   server.registerTool('carve_parse', {
     title: 'Parse Carve',
@@ -96,9 +117,9 @@ export function createServer(): McpServer {
   server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
     description: 'Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.',
-    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']) }),
+    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']), markdownDialect }),
     annotations: readOnly,
-  }, safe(({ source: document, format: sourceFormat }) => migrate(document, sourceFormat)));
+  }, safe(({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
 
   return server;
 }
