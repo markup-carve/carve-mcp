@@ -2,7 +2,7 @@
   "name": "@markup-carve/carve-mcp",
   "version": "0.1.0",
   "description": "Model Context Protocol server for authoring and converting Carve documents",
-  "mcpName": "io.github.markup-carve/carve",
+  "mcpName": "io.github.markup-carve/carve-mcp",
   "type": "module",
   "bin": {
     "carve-mcp": "dist/index.js"

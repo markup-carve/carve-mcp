@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.markup-carve/carve",
+  "name": "io.github.markup-carve/carve-mcp",
   "title": "Carve",
   "description": "Parse, lint, format, render, and migrate Carve documents through MCP.",
   "websiteUrl": "https://markup-carve.github.io/carve/",
