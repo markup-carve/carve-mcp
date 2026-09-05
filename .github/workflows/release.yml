@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  release:
+    types: [released]
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm install --global npm@latest
+      - name: Verify release candidate
+        run: npm run release:check
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUIRE_RELEASE_TAG: "1"
+      - name: Publish npm package with provenance
+        run: npm publish --access public --provenance
+      - name: Verify clean npm installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          for attempt in 1 2 3 4 5; do
+            if npx --yes --package "@markup-carve/carve-mcp@$version" carve-mcp </dev/null; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          exit 1
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - name: Install MCP Registry publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=1.8.1
+          base="https://github.com/modelcontextprotocol/registry/releases/download/v$version"
+          curl --fail --location --silent --show-error --output publisher.tar.gz \
+            "$base/mcp-publisher_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error --output checksums.txt \
+            "$base/registry_${version}_checksums.txt"
+          grep ' mcp-publisher_linux_amd64.tar.gz$' checksums.txt \
+            | sed 's#mcp-publisher_linux_amd64.tar.gz#publisher.tar.gz#' \
+            | sha256sum --check --strict
+          tar xzf publisher.tar.gz mcp-publisher
+      - name: Publish official MCP Registry entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./mcp-publisher login github-oidc
+          for attempt in 1 2 3 4 5; do
+            if ./mcp-publisher publish server.json; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1

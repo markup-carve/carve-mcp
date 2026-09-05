@@ -1,10 +1,13 @@
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
+import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
 import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
+
+const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
@@ -43,7 +46,7 @@ function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
 }
 
 export async function createServer(workspaceOptions?: WorkspaceOptions): Promise<McpServer> {
-  const server = new McpServer({ name: 'carve-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'carve-mcp', version: packageVersion });
   if (workspaceOptions?.roots.length) {
     const workspace = await prepareWorkspace(workspaceOptions);
     server.registerTool('carve_read_file', {
