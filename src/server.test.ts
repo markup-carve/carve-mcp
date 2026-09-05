@@ -17,6 +17,14 @@ describe('MCP server', () => {
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       'carve_lint', 'carve_format', 'carve_render', 'carve_parse', 'carve_migrate',
     ]);
+    expect(listed.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'carve_lint',
+        title: 'Lint Carve',
+        annotations: expect.objectContaining({ readOnlyHint: true, openWorldHint: false }),
+        inputSchema: expect.objectContaining({ type: 'object' }),
+      }),
+    ]));
 
     const called = await client.callTool({
       name: 'carve_render',

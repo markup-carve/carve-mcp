@@ -15,7 +15,7 @@ import {
 } from '@markup-carve/carve';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
-export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi' | 'carve';
+export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
 export type SourceFormat = 'html' | 'markdown' | 'djot';
 
 export function validateSource(source: string): void {
@@ -43,7 +43,6 @@ export function render(source: string, target: RenderTarget): RenderResult {
     case 'markdown': return carveToMarkdownWithReport(source);
     case 'plain': return carveToPlainTextWithReport(source);
     case 'ansi': return carveToAnsiWithReport(source);
-    case 'carve': return carveToCarveWithReport(source);
   }
 }
 
