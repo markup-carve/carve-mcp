@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.0 - 2026-09-05
 
 First release of the Carve MCP server: it gives MCP-compatible assistants the
 same parser, linter, formatter, and renderers as the JavaScript implementation.
