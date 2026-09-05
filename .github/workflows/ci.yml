@@ -24,3 +24,14 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo fmt --manifest-path rust/Cargo.toml --check
+      - run: cargo test --manifest-path rust/Cargo.toml --locked
