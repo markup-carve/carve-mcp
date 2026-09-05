@@ -33,8 +33,20 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           REQUIRE_RELEASE_TAG: "1"
+      # npm cannot issue a package's FIRST publish over OIDC (npm/cli#8544), so
+      # 0.1.0 is published by hand and this job would otherwise die on a 403 for
+      # an already-published version, taking the Registry step below with it.
+      # The skip also makes a re-run after a failed later step harmless.
       - name: Publish npm package with provenance
-        run: npm publish --access public --provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@markup-carve/carve-mcp@$version" version >/dev/null 2>&1; then
+            echo "npm already serves $version; skipping publish."
+            exit 0
+          fi
+          npm publish --access public --provenance
       - name: Verify clean npm installation
         shell: bash
         run: |
