@@ -82,6 +82,37 @@ Configure an MCP client to launch the server over stdio:
 The intended published command is `npx -y @markup-carve/carve-mcp`; use the
 local command until the package has been released.
 
+### HTTP deployment
+
+Stdio remains the default. For local HTTP development:
+
+```sh
+node dist/index.js --http --port=3000
+```
+
+The default bind is `127.0.0.1:3000`; `--host value` and `--port value` forms
+are also accepted.
+
+The MCP endpoint is `/mcp` and the health endpoint is `/health`. Non-loopback
+binds require a bearer token supplied through the environment, never a command
+line argument:
+
+```sh
+CARVE_MCP_TOKEN='replace-with-a-long-random-secret' \
+CARVE_MCP_ALLOWED_HOSTS='mcp.example.com' \
+  node dist/index.js --http --host=0.0.0.0 --port=3000
+```
+
+`CARVE_MCP_ALLOWED_HOSTS` is a comma-separated hostname allowlist (without
+ports). HTTP mode validates host and origin headers, limits request bodies to 7
+MB, allows 60 MCP requests per minute per socket peer, caps concurrent MCP
+requests at 32, and applies request, header, and keep-alive timeouts. The health
+endpoint is intentionally unauthenticated for deployment probes. Workspace
+writes over HTTP require a token even on loopback. Put public deployments
+behind TLS; the built-in listener is plain HTTP.
+When a reverse proxy terminates TLS, configure equivalent client-aware rate
+limits there because the built-in listener sees the proxy as the socket peer.
+
 ## Development
 
 ```sh
