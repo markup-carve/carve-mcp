@@ -36,6 +36,23 @@ describe('MCP server', () => {
     ]));
   });
 
+  it('lists and reads versioned authoring resources', async () => {
+    const server = createServer();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    closeables.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const listed = await client.listResources();
+    expect(listed.resources.map((resource) => resource.uri)).toEqual(['carve://guide', 'carve://rules']);
+    const guide = await client.readResource({ uri: 'carve://guide' });
+    expect(guide.contents[0]).toMatchObject({ mimeType: 'text/markdown', text: expect.stringContaining('quick start') });
+    const rule = await client.readResource({ uri: 'carve://rules/CARVE-P0-001' });
+    expect(rule.contents[0]).toMatchObject({ text: expect.stringContaining('A LEADING BYTE ORDER MARK') });
+    const lintRule = await client.readResource({ uri: 'carve://lint-rules/unclosed-container-fence' });
+    expect(lintRule.contents[0]).toMatchObject({ text: expect.stringContaining('without a closer') });
+  });
+
   it('returns an MCP tool error for oversized input', async () => {
     const server = createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
