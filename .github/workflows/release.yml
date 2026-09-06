@@ -158,6 +158,10 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
+          # Must run outside this package's own checkout. npm 12's npx resolves
+          # the bin against the local project, which IS this package but does
+          # not depend on itself, so the bin is not found and the step exits 127.
+          cd "$(mktemp -d)"
           for attempt in 1 2 3 4 5; do
             if npx --yes --package "@markup-carve/carve-mcp@$version" carve-mcp </dev/null; then
               exit 0
