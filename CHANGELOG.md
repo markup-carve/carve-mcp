@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.1 - 2026-09-06
+
+The server's behavior is unchanged from 0.1.0: no tool, resource, option, or
+rendered output differs, and the npm package ships the same compiled server.
+
+### Added
+
+- A container image published for each release, as an alternative to npm and
+  the prebuilt binaries.
+- A client setup guide and runnable Carve examples in the repository.
+
 ## 0.1.0 - 2026-09-05
 
 First release of the Carve MCP server: it gives MCP-compatible assistants the
