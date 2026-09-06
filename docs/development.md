@@ -57,6 +57,29 @@ stay inside canonicalized roots, preserve existing file modes, and require the
 SHA-256 returned by the preceding read when overwriting a file. This detects
 concurrent changes.
 
+### Project configuration
+
+Pass `--config path/to/carve-mcp.json` to keep read-only project defaults beside
+the documentation. Relative roots are resolved beside the configuration file:
+
+```json
+{
+  "roots": ["docs"],
+  "review": {
+    "platforms": ["github"],
+    "exclude": ["archive", "generated"],
+    "maxDepth": 12,
+    "limit": 1000,
+    "checkLinks": true,
+    "checkAnchors": true
+  }
+}
+```
+
+Unknown fields and unsafe paths are rejected. Configuration cannot enable
+writes; `--allow-write` remains a separate operator decision. CLI review-tool
+arguments override configured depth, limit, and platforms for one call.
+
 ## Render and migration controls
 
 `carve_render` supports `default`, `portable`, and HTML-only `static-html`
@@ -128,6 +151,12 @@ Put public deployments behind TLS. When a reverse proxy terminates TLS, apply
 client-aware rate limits there because the built-in listener sees the proxy as
 the socket peer.
 
+Set `CARVE_MCP_LOG_LEVEL=info` for JSON tool events containing only the tool
+name, success or error status, and duration. Set `CARVE_MCP_METRICS=1` to expose
+aggregate counters at `/metrics`. Neither feature records tool arguments,
+document text, rendered output, file paths, or hashes. Protect the metrics
+endpoint at the reverse proxy on non-local deployments.
+
 ## Container
 
 The non-root container supports AMD64 and ARM64:
@@ -148,6 +177,7 @@ localhost.
 npm run check
 npm test
 npm run build
+npm run test:workflow
 cargo test --manifest-path rust/Cargo.toml --locked
 npm run test:rust-conformance
 ```

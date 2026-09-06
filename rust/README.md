@@ -23,6 +23,9 @@ server. Tools return human-readable summaries and schema-declared structured
 results.
 
 Run `carve-mcp-rs --help` or `carve-mcp-rs --version` for command information.
+Use `--config carve-mcp.json` for the same relative roots, exclusions, review
+limits, platform defaults, and link-check switches supported by the npm server.
+The configuration cannot enable writes.
 
 Shared conformance tests drive both implementations through MCP and compare
 tool schemas, success and error results, prompts, resource discovery, templates,

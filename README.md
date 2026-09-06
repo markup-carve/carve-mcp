@@ -44,6 +44,8 @@ npx -y @markup-carve/carve-mcp
 See [Connect Carve to your writing tool](docs/client-setup.md) for copy-ready
 setup in Claude, VS Code, Cursor, Zed, and Codex, plus prompts to confirm it
 works.
+The [compatibility page](docs/client-compatibility.md) explains what CI verifies
+and provides the short host smoke test used for releases.
 
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Carve-007ACC?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522carve%2522%252C%2522command%2522%253A%2522npx%2522%252C%2522args%2522%253A%255B%2522-y%2522%252C%2522%2540markup-carve%252Fcarve-mcp%2522%255D%257D)
 [![Add to Cursor](https://img.shields.io/badge/Cursor-Add_Carve-111111)](https://cursor.com/install-mcp?name=carve&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBtYXJrdXAtY2FydmUvY2FydmUtbWNwIl19)

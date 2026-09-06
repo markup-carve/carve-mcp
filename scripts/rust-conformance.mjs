@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, ok } from 'node:assert';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -214,10 +214,15 @@ async function workspaceResults(command, args) {
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-conformance-'));
 try {
   mkdirSync(join(workspaceRoot, 'docs'));
+  mkdirSync(join(workspaceRoot, 'archive'));
   writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Missing](docs/missing.crv)\n');
   writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n');
-  const typescriptWorkspace = await workspaceResults(process.execPath, ['dist/index.js', '--root', workspaceRoot, '--allow-write']);
-  const rustWorkspace = await workspaceResults(`${target}/debug/carve-mcp-rs`, ['--root', workspaceRoot, '--allow-write']);
+  writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
+  const configuration = join(workspaceRoot, 'carve-mcp.json');
+  writeFileSync(configuration, JSON.stringify({ roots: ['.'], review: { exclude: ['archive'], maxDepth: 8, limit: 100 } }));
+  const typescriptWorkspace = await workspaceResults(process.execPath, ['dist/index.js', '--config', configuration, '--allow-write']);
+  const rustWorkspace = await workspaceResults(`${target}/debug/carve-mcp-rs`, ['--config', configuration, '--allow-write']);
+  ok(!typescriptWorkspace.output.find(({ name }) => name === 'carve_list_files').value.files.includes('archive/old.crv'));
   deepStrictEqual(rustWorkspace, typescriptWorkspace);
 } finally {
   rmSync(workspaceRoot, { recursive: true, force: true });

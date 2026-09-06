@@ -8,6 +8,7 @@ import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
 import { reviewWorkspace } from './project.js';
 import { writerPrompts } from './prompts.js';
+import type { ToolObserver } from './telemetry.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -43,7 +44,7 @@ const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.stri
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
 const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dryRun: z.boolean(), created: z.boolean(), currentSha256: z.string().nullable(), sha256: z.string(), bytes: z.number().int() }).loose();
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
-const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 
 function summary(value: unknown): string {
   if (value && typeof value === 'object') {
@@ -64,10 +65,20 @@ function result(value: unknown) {
   return { content: [{ type: 'text' as const, text: summary(structuredContent) }], structuredContent };
 }
 
-function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
+function observeSafely(observe: ToolObserver | undefined, event: Parameters<ToolObserver>[0]): void {
+  try { observe?.(event); } catch { /* Observability must never change tool behavior. */ }
+}
+
+function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefined, fn: (...args: T) => unknown) {
   return async (...args: T) => {
-    try { return result(await fn(...args)); }
+    const started = performance.now();
+    try {
+      const value = result(await fn(...args));
+      observeSafely(observe, { tool, status: 'ok', durationMs: Math.round(performance.now() - started) });
+      return value;
+    }
     catch (error) {
+      observeSafely(observe, { tool, status: 'error', durationMs: Math.round(performance.now() - started) });
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof RenderLossError) {
         return { ...result({ error: message, losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated }), isError: true };
@@ -77,7 +88,7 @@ function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
   };
 }
 
-export async function createServer(workspaceOptions?: WorkspaceOptions): Promise<McpServer> {
+export async function createServer(workspaceOptions?: WorkspaceOptions, observe?: ToolObserver): Promise<McpServer> {
   const server = new McpServer({ name: 'carve-mcp', version: packageVersion });
   if (workspaceOptions?.roots.length) {
     const workspace = await prepareWorkspace(workspaceOptions);
@@ -86,27 +97,32 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
       description: 'Read a UTF-8 text file inside an explicitly configured workspace root.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: readOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe(({ rootIndex, path }) => workspace.read(rootIndex, path)));
+    }, safe('carve_read_file', observe, ({ rootIndex, path }) => workspace.read(rootIndex, path)));
     server.registerTool('carve_list_files', {
       title: 'List Carve workspace files',
       description: 'List supported document files inside an explicitly configured root, with bounded recursion and no host paths.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(2_000).default(500) }).strict(),
       outputSchema: listOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe(({ rootIndex, maxDepth, limit }) => workspace.list(rootIndex, { maxDepth, limit })));
+    }, safe('carve_list_files', observe, ({ rootIndex, maxDepth, limit }) => workspace.list(rootIndex, { maxDepth, limit })));
     server.registerTool('carve_review_workspace', {
       title: 'Review Carve workspace',
       description: 'Lint Carve files and validate explicit local document links and anchors across a bounded workspace scan.',
-      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(2_000).default(500), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }).strict(),
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional(), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).optional() }).strict(),
       outputSchema: reviewOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe(({ rootIndex, maxDepth, limit, platforms }) => reviewWorkspace(workspace, rootIndex, { maxDepth, limit, platforms })));
+    }, safe('carve_review_workspace', observe, ({ rootIndex, maxDepth, limit, platforms }) => reviewWorkspace(workspace, rootIndex, {
+      maxDepth: maxDepth ?? workspace.review.maxDepth ?? 10,
+      limit: limit ?? workspace.review.limit ?? 500,
+      platforms: platforms ?? workspace.review.platforms ?? [],
+      checkLinks: workspace.review.checkLinks, checkAnchors: workspace.review.checkAnchors,
+    })));
     server.registerTool('carve_prepare_edit', {
       title: 'Preview canonical Carve formatting',
       description: 'Read and canonically format a Carve workspace file, returning a hash-guarded proposal without writing.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: editOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe(async ({ rootIndex, path }) => {
+    }, safe('carve_prepare_edit', observe, async ({ rootIndex, path }) => {
       if (!['.crv', '.carve'].some((extension) => path.toLowerCase().endsWith(extension))) throw new Error('Edit previews require a .crv or .carve file.');
       const current = await workspace.read(rootIndex, path);
       const proposal = formatCarve(current.content);
@@ -118,7 +134,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
       inputSchema: z.object({}).strict(),
       outputSchema: workspaceInfoOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe(() => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
+    }, safe('carve_workspace_info', observe, () => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
     if (workspaceOptions.allowWrite) {
       server.registerTool('carve_write_file', {
         title: 'Write Carve workspace file',
@@ -126,7 +142,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
         inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1), content: sourceSchema, expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), dryRun: z.boolean().default(true) }).strict(),
         outputSchema: writeOutput,
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-      }, safe(({ rootIndex, path, content, expectedSha256, dryRun }) => workspace.write(rootIndex, path, content, expectedSha256, dryRun)));
+      }, safe('carve_write_file', observe, ({ rootIndex, path, content, expectedSha256, dryRun }) => workspace.write(rootIndex, path, content, expectedSha256, dryRun)));
     }
   }
 
@@ -182,7 +198,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }),
     outputSchema: lintOutput,
     annotations: readOnly,
-  }, safe(({ source: document, platforms }) => {
+  }, safe('carve_lint', observe, ({ source: document, platforms }) => {
     const output = lint(document, platforms);
     return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
   }));
@@ -193,7 +209,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     inputSchema: z.object({ source: sourceSchema }),
     outputSchema: renderOutput,
     annotations: readOnly,
-  }, safe(({ source: document }) => formatCarve(document)));
+  }, safe('carve_format', observe, ({ source: document }) => formatCarve(document)));
 
   server.registerTool('carve_render', {
     title: 'Render Carve',
@@ -201,7 +217,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings }),
     outputSchema: renderOutput,
     annotations: readOnly,
-  }, safe(({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
+  }, safe('carve_render', observe, ({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
     ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
   })));
 
@@ -211,7 +227,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     inputSchema: z.object({ source: sourceSchema }),
     outputSchema: parseOutput,
     annotations: readOnly,
-  }, safe(({ source: document }) => parse(document)));
+  }, safe('carve_parse', observe, ({ source: document }) => parse(document)));
 
   server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
@@ -219,7 +235,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']), markdownDialect }),
     outputSchema: migrateOutput,
     annotations: readOnly,
-  }, safe(({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
+  }, safe('carve_migrate', observe, ({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
 
   return server;
 }

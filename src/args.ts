@@ -1,4 +1,4 @@
-export interface CliOptions { roots: string[]; allowWrite: boolean; http: boolean; host: string; port: number }
+export interface CliOptions { roots: string[]; allowWrite: boolean; http: boolean; host: string; port: number; config?: string }
 
 export function parseArgs(args: string[]): CliOptions {
   const roots: string[] = [];
@@ -6,9 +6,19 @@ export function parseArgs(args: string[]): CliOptions {
   let http = false;
   let host = '127.0.0.1';
   let port = 3000;
+  let config: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--allow-write') allowWrite = true;
+    else if (argument.startsWith('--config=')) {
+      config = argument.slice(9);
+      if (!config) throw new Error('--config requires a JSON file path.');
+    }
+    else if (argument === '--config') {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) throw new Error('--config requires a JSON file path.');
+      config = value;
+    }
     else if (argument === '--http') http = true;
     else if (argument.startsWith('--host=')) host = argument.slice(7);
     else if (argument === '--host') {
@@ -30,10 +40,9 @@ export function parseArgs(args: string[]): CliOptions {
     } else throw new Error(`Unknown argument: ${argument}`);
   }
   if (roots.some((root) => !isAbsolute(root))) throw new Error('Workspace roots must be absolute paths.');
-  if (allowWrite && roots.length === 0) throw new Error('--allow-write requires at least one --root.');
   if (host.length === 0) throw new Error('--host requires a hostname or IP address.');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be an integer from 0 to 65535.');
-  return { roots: [...new Set(roots)], allowWrite, http, host, port };
+  return { roots: [...new Set(roots)], allowWrite, http, host, port, config };
 }
 
 import { isAbsolute } from 'node:path';
