@@ -1,6 +1,6 @@
 # Carve MCP for Rust
 
-This crate is the native preview of Carve MCP. It consumes `carve-lang` and
+This crate is the native Carve MCP server. It consumes `carve-lang` and
 serves MCP over stdio as the `carve-mcp-rs` binary.
 
 Implemented tool names:
@@ -11,8 +11,7 @@ Implemented tool names:
 - `carve_parse`
 - `carve_migrate`
 
-The TypeScript package remains the production implementation. Before this
-crate is released, shared fixtures must prove identical input schemas, errors,
-result shapes, render options, migration diagnostics, and loss reports. HTTP,
-resources, and workspace operations are intentionally not duplicated until
-their cross-language contract is fixed.
+Shared conformance tests drive both implementations through MCP and compare the
+source-tool contract. HTTP, resources, and workspace operations remain in the
+TypeScript server; the Rust binary focuses on dependency-free source
+processing over stdio.
