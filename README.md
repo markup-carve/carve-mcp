@@ -82,22 +82,22 @@ Configure an MCP client to launch the server over stdio:
 The intended published command is `npx -y @markup-carve/carve-mcp`; use the
 local command until the package has been released.
 
-### Native Rust preview
+### Native Rust server
 
-The Rust server is intended for native distribution and embedding. It uses
-`carve-lang` directly and currently exposes the five source-based tool names
-over stdio:
+The single-binary Rust server is intended for native distribution and
+embedding. It uses `carve-lang` directly and exposes the five source-based tool
+names over stdio:
 
 ```sh
 cargo run --manifest-path rust/Cargo.toml
 ```
 
-Choose the TypeScript server for the complete, stable contract, HTTP transport,
-resources, and guarded workspace operations. The Rust binary is a preview until
-the shared conformance fixtures cover every option and result shape. It disables
-raw HTML by default, but advanced render options, loss reports, migration
-reports, platform-specific linting, and offset normalization are not yet at
-parity.
+Release pages provide Linux x86-64, macOS x86-64 and Apple Silicon, and Windows
+x86-64 binaries. Shared tests exercise both servers through MCP and require the
+same source-tool results, including safe render options, loss and migration
+reports, Markdown dialects, platform linting, and UTF-16 diagnostic offsets.
+Choose TypeScript when you need HTTP, resources, or guarded workspace access;
+choose Rust for a dependency-free native executable and the source-based tools.
 
 ### HTTP deployment
 

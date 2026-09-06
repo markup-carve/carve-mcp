@@ -67,6 +67,7 @@ name = "carve-mcp"
 version = "0.1.0"
 dependencies = [
  "carve-lang",
+ "regex",
  "rmcp",
  "schemars",
  "serde",

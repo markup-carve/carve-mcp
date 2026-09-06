@@ -13,7 +13,53 @@ permissions:
   id-token: write
 
 jobs:
+  rust-binaries:
+    name: Rust ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive: carve-mcp-rs-aarch64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
+            binary: carve-mcp-rs.exe
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+      - name: Archive Unix binary
+        if: runner.os != 'Windows'
+        run: tar czf "${{ matrix.archive }}" -C "rust/target/${{ matrix.target }}/release" "${{ matrix.binary }}"
+      - name: Archive Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
+      - name: Upload release binary
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.archive }}" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   publish:
+    needs: rust-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
