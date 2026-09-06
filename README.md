@@ -79,8 +79,15 @@ Configure an MCP client to launch the server over stdio:
 }
 ```
 
-The intended published command is `npx -y @markup-carve/carve-mcp`; use the
-local command until the package has been released.
+For normal use, let your MCP client run the published package:
+
+```sh
+npx -y @markup-carve/carve-mcp
+```
+
+See [Connect Carve to your writing tool](docs/client-setup.md) for copy-ready
+setup in Claude, VS Code, Cursor, Zed, and Codex, plus prompts to confirm it
+works.
 
 ### Native Rust server
 
