@@ -123,7 +123,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
       - run: npm ci
-      - run: npm install --global npm@latest
+      # Pinned, not floating: npm 12 changed `npm pack --json` from an array to
+      # an object, which broke the 0.1.0 release run. Trusted publishing needs
+      # npm 11.5.1 or newer, so this cannot simply use the bundled npm.
+      - run: npm install --global npm@12.0.2
       - name: Verify release candidate
         run: npm run release:check
         env:
@@ -143,6 +146,13 @@ jobs:
             exit 0
           fi
           npm publish --access public --provenance
+        # setup-node wrote an .npmrc that reads NODE_AUTH_TOKEN. Secrets are not
+        # injected automatically, so without this mapping the token expands to
+        # empty and the publish fails to authenticate. NPM_TOKEN is inherited
+        # from the organization. Provenance still applies: it comes from the
+        # job's id-token permission, not from how npm authenticates.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify clean npm installation
         shell: bash
         run: |
