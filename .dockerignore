@@ -1,0 +1,9 @@
+.git
+.github
+dist
+docs
+examples
+node_modules
+rust
+scripts
+*.md

@@ -1,0 +1,85 @@
+name: Container
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Existing package version to publish
+        required: true
+        default: 0.1.0
+
+concurrency:
+  group: container-${{ github.event.release.tag_name || inputs.image_tag }}
+  cancel-in-progress: false
+
+permissions:
+  attestations: write
+  contents: read
+  id-token: write
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+      - name: Resolve and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-${INPUT_TAG}}"
+          [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${tag#v}"
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+          # A dispatch uses main to pick up packaging fixes for an existing
+          # release. Refuse it if the shipped application differs from its tag.
+          git diff --exit-code "$tag" -- src package.json package-lock.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.image_tag }}
+      - name: Build and smoke-test locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag carve-mcp:smoke .
+          container="$(docker run --detach --rm --publish 3000:3000 \
+            --env CARVE_MCP_TOKEN=release-smoke-token carve-mcp:smoke)"
+          trap 'docker stop "$container" >/dev/null' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep "$attempt"
+          done
+          docker logs "$container"
+          exit 1
+      - uses: docker/setup-buildx-action@5ac4a31b15f1c45ec652b8af78c2096c3a08368c # v3
+      - uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@703896b4f30f62d53f5530a80bcdc589a3f702bc # v5
+        id: meta
+        with:
+          images: ghcr.io/markup-carve/carve-mcp
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
