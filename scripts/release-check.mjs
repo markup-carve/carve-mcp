@@ -50,7 +50,8 @@ try {
     if (!names.includes(required)) throw new Error(`Packed server contract is missing ${required}.`);
   }
   const result = await client.callTool({ name: 'carve_render', arguments: { source: '# Release check', target: 'html' } });
-  if (result.isError || !result.content?.some((item) => item.type === 'text' && item.text.includes('Release check'))) {
+  if (result.isError || !result.content?.some((item) => item.type === 'text')
+      || !result.structuredContent?.value?.includes('Release check')) {
     throw new Error('Release candidate failed the MCP render smoke test.');
   }
 } finally {
