@@ -3,6 +3,12 @@ name: Release
 on:
   release:
     types: [released]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release to verify and finish
+        required: true
+        default: 0.1.0
 
 concurrency:
   group: production-release
@@ -14,6 +20,7 @@ permissions:
 
 jobs:
   rust-binaries:
+    if: github.event_name == 'release'
     name: Rust ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -57,9 +64,52 @@ jobs:
         run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.archive }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify downloaded Unix release binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-smoke
+          gh release download "${{ github.event.release.tag_name }}" \
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Verify downloaded Windows release binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-smoke
+          gh release download "${{ github.event.release.tag_name }}" `
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  release-checksums:
+    if: github.event_name == 'release'
+    needs: rust-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - run: scripts/release-checksums.sh "${{ github.event.release.tag_name }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   publish:
-    needs: rust-binaries
+    if: github.event_name == 'release'
+    needs: release-checksums
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -107,29 +157,101 @@ jobs:
           exit 1
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-      - name: Install MCP Registry publisher
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=1.8.1
-          base="https://github.com/modelcontextprotocol/registry/releases/download/v$version"
-          curl --fail --location --silent --show-error --output publisher.tar.gz \
-            "$base/mcp-publisher_linux_amd64.tar.gz"
-          curl --fail --location --silent --show-error --output checksums.txt \
-            "$base/registry_${version}_checksums.txt"
-          grep ' mcp-publisher_linux_amd64.tar.gz$' checksums.txt \
-            | sed 's#mcp-publisher_linux_amd64.tar.gz#publisher.tar.gz#' \
-            | sha256sum --check --strict
-          tar xzf publisher.tar.gz mcp-publisher
       - name: Publish official MCP Registry entry
+        run: scripts/publish-registry.sh
+
+  verify-released-binaries:
+    if: github.event_name == 'workflow_dispatch'
+    name: Verify ${{ matrix.target }} release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive: carve-mcp-rs-aarch64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
+            binary: carve-mcp-rs.exe
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Download and verify Unix binary
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          ./mcp-publisher login github-oidc
-          for attempt in 1 2 3 4 5; do
-            if ./mcp-publisher publish server.json; then
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
+          mkdir release-smoke
+          gh release download "${{ inputs.release_tag }}" \
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Download and verify Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-smoke
+          gh release download "${{ inputs.release_tag }}" `
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  recover-release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify-released-binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify repository and published package
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          test "$(npm view "@markup-carve/carve-mcp@$version" version)" = "$version"
+          git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          # Recovery runs from main so it can use repaired release tooling.
+          # Only metadata-equivalent application releases may be recovered.
+          git diff --exit-code "$RELEASE_TAG" -- \
+            src package.json package-lock.json server.json rust/Cargo.toml rust/Cargo.lock
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+      - run: scripts/release-checksums.sh "${{ inputs.release_tag }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Publish official MCP Registry entry
+        run: scripts/publish-registry.sh
