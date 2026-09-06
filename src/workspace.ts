@@ -1,10 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { chmod, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { MAX_SOURCE_BYTES } from './tools.js';
 
 export interface WorkspaceOptions { roots: string[]; allowWrite?: boolean }
 export interface WorkspaceRoot { configured: string; real: string }
+export interface ListOptions { maxDepth?: number; limit?: number }
+
+const DOCUMENT_EXTENSIONS = new Set(['.crv', '.carve', '.md', '.markdown', '.txt', '.html', '.htm', '.djot']);
+const SKIPPED_DIRECTORIES = new Set(['node_modules', 'vendor', 'target']);
 
 export async function prepareWorkspace(options: WorkspaceOptions): Promise<Workspace> {
   const roots = await Promise.all(options.roots.map(async (configured) => ({
@@ -36,13 +40,43 @@ export class Workspace {
     const target = resolve(root.real, path);
     if (!inside(root.real, target)) throw new Error('Path escapes the configured workspace root.');
     const segments = path.split(/[\\/]/);
-    if (segments.some((segment) => segment.startsWith('.') || segment === 'node_modules')) {
+    if (segments.some((segment) => segment.startsWith('.') || SKIPPED_DIRECTORIES.has(segment))) {
       throw new Error('Hidden paths and dependency directories are not readable workspace documents.');
     }
-    if (!['.crv', '.carve', '.md', '.markdown', '.txt', '.html', '.htm', '.djot'].includes(extname(path).toLowerCase())) {
+    if (!DOCUMENT_EXTENSIONS.has(extname(path).toLowerCase())) {
       throw new Error('Unsupported document extension.');
     }
     return { root, target };
+  }
+
+  async list(rootIndex: number, options: ListOptions = {}) {
+    const root = this.roots[rootIndex];
+    if (!root) throw new Error(`Unknown root index ${rootIndex}. Configure a root when starting carve-mcp.`);
+    const maxDepth = Math.min(Math.max(options.maxDepth ?? 10, 0), 25);
+    const limit = Math.min(Math.max(options.limit ?? 500, 1), 2_000);
+    const files: string[] = [];
+    let truncated = false;
+
+    const visit = async (directory: string, prefix: string, depth: number): Promise<void> => {
+      const entries = (await readdir(directory, { withFileTypes: true }))
+        .sort((left, right) => left.name.localeCompare(right.name, 'en'));
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) {
+          if (depth < maxDepth && !SKIPPED_DIRECTORIES.has(entry.name)) {
+            await visit(resolve(directory, entry.name), path, depth + 1);
+          }
+        } else if (entry.isFile() && DOCUMENT_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+          if (files.length === limit) { truncated = true; return; }
+          files.push(path);
+        }
+        if (truncated) return;
+      }
+    };
+    await visit(root.real, '', 0);
+    return { rootIndex, files, truncated, maxDepth, limit };
   }
 
   async read(rootIndex: number, path: string) {

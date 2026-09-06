@@ -6,6 +6,8 @@ import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render }
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
+import { reviewWorkspace } from './project.js';
+import { writerPrompts } from './prompts.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -28,8 +30,38 @@ const markdownDialect = z.object({
   fencedDivs: z.boolean().optional(), attributes: z.boolean().optional(),
 }).strict().optional().describe('Opt-in Markdown flavor constructs; valid only for Markdown input.');
 
+const warningOutput = z.object({
+  rule: z.string(), message: z.string(), line: z.number().int(), column: z.number().int(),
+  start: z.number().int(), end: z.number().int(), resourceUri: z.string(), data: z.record(z.string(), z.unknown()).optional(),
+}).loose();
+const lintOutput = z.object({ valid: z.boolean(), warningCount: z.number().int(), warnings: z.array(warningOutput) }).loose();
+const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
+const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
+const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
+const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
+const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
+const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
+const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dryRun: z.boolean(), created: z.boolean(), currentSha256: z.string().nullable(), sha256: z.string(), bytes: z.number().int() }).loose();
+const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
+const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+
+function summary(value: unknown): string {
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (typeof record.warningCount === 'number') return record.warningCount === 0 ? 'No issues found.' : `Found ${record.warningCount} issue${record.warningCount === 1 ? '' : 's'}.`;
+    if (Array.isArray(record.files)) return `Found ${record.files.length} document file${record.files.length === 1 ? '' : 's'}.`;
+    if (typeof record.proposedContent === 'string') return record.changed ? `Formatting would change ${String(record.path)}.` : `${String(record.path)} is already canonical.`;
+    if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
+    if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
+    if (record.type === 'document') return 'Parsed the document successfully.';
+    if (typeof record.value === 'string') return 'Produced the requested output.';
+  }
+  return 'Completed successfully.';
+}
+
 function result(value: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
+  const structuredContent = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : { result: value };
+  return { content: [{ type: 'text' as const, text: summary(structuredContent) }], structuredContent };
 }
 
 function safe<T extends unknown[]>(fn: (...args: T) => unknown) {
@@ -52,13 +84,39 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     server.registerTool('carve_read_file', {
       title: 'Read Carve workspace file',
       description: 'Read a UTF-8 text file inside an explicitly configured workspace root.',
-      inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(),
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: readOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe(({ rootIndex, path }) => workspace.read(rootIndex, path)));
+    server.registerTool('carve_list_files', {
+      title: 'List Carve workspace files',
+      description: 'List supported document files inside an explicitly configured root, with bounded recursion and no host paths.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(2_000).default(500) }).strict(),
+      outputSchema: listOutput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe(({ rootIndex, maxDepth, limit }) => workspace.list(rootIndex, { maxDepth, limit })));
+    server.registerTool('carve_review_workspace', {
+      title: 'Review Carve workspace',
+      description: 'Lint Carve files and validate explicit local document links and anchors across a bounded workspace scan.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(2_000).default(500), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }).strict(),
+      outputSchema: reviewOutput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe(({ rootIndex, maxDepth, limit, platforms }) => reviewWorkspace(workspace, rootIndex, { maxDepth, limit, platforms })));
+    server.registerTool('carve_prepare_edit', {
+      title: 'Preview canonical Carve formatting',
+      description: 'Read and canonically format a Carve workspace file, returning a hash-guarded proposal without writing.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: editOutput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe(async ({ rootIndex, path }) => {
+      if (!['.crv', '.carve'].some((extension) => path.toLowerCase().endsWith(extension))) throw new Error('Edit previews require a .crv or .carve file.');
+      const current = await workspace.read(rootIndex, path);
+      const proposal = formatCarve(current.content);
+      return { rootIndex, path, expectedSha256: current.sha256, changed: proposal.value !== current.content, proposedContent: proposal.value, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
+    }));
     server.registerTool('carve_workspace_info', {
       title: 'List configured Carve workspace roots',
       description: 'List root indexes and whether writes are enabled. Paths are intentionally not exposed.',
       inputSchema: z.object({}).strict(),
+      outputSchema: workspaceInfoOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe(() => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
     if (workspaceOptions.allowWrite) {
@@ -66,9 +124,16 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
         title: 'Write Carve workspace file',
         description: 'Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.',
         inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1), content: sourceSchema, expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), dryRun: z.boolean().default(true) }).strict(),
+        outputSchema: writeOutput,
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       }, safe(({ rootIndex, path, content, expectedSha256, dryRun }) => workspace.write(rootIndex, path, content, expectedSha256, dryRun)));
     }
+  }
+
+  for (const prompt of writerPrompts) {
+    server.registerPrompt(prompt.name, { title: prompt.title, description: prompt.description }, () => ({
+      messages: [{ role: 'user' as const, content: { type: 'text' as const, text: prompt.text } }],
+    }));
   }
 
   server.registerResource('carve-authoring-guide', 'carve://guide', {
@@ -115,13 +180,18 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     title: 'Lint Carve',
     description: 'Check Carve source for author-facing problems and silent degradation.',
     inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }),
+    outputSchema: lintOutput,
     annotations: readOnly,
-  }, safe(({ source: document, platforms }) => lint(document, platforms)));
+  }, safe(({ source: document, platforms }) => {
+    const output = lint(document, platforms);
+    return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
+  }));
 
   server.registerTool('carve_format', {
     title: 'Format Carve',
     description: 'Format Carve source canonically and report any lossy raw-format nodes.',
     inputSchema: z.object({ source: sourceSchema }),
+    outputSchema: renderOutput,
     annotations: readOnly,
   }, safe(({ source: document }) => formatCarve(document)));
 
@@ -129,6 +199,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     title: 'Render Carve',
     description: 'Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.',
     inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings }),
+    outputSchema: renderOutput,
     annotations: readOnly,
   }, safe(({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
     ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
@@ -138,6 +209,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     title: 'Parse Carve',
     description: 'Parse and resolve Carve into its position-aware interchange AST.',
     inputSchema: z.object({ source: sourceSchema }),
+    outputSchema: parseOutput,
     annotations: readOnly,
   }, safe(({ source: document }) => parse(document)));
 
@@ -145,6 +217,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions): Promise
     title: 'Migrate to Carve',
     description: 'Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.',
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']), markdownDialect }),
+    outputSchema: migrateOutput,
     annotations: readOnly,
   }, safe(({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
 

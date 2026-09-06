@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { prepareWorkspace } from './workspace.js';
+import { reviewWorkspace } from './project.js';
 
 describe('workspace operations', () => {
   it('reads and atomically writes with dry runs and stale-write protection', async () => {
@@ -23,10 +24,28 @@ describe('workspace operations', () => {
     await writeFile(join(outside, 'secret.crv'), 'secret');
     await symlink(join(outside, 'secret.crv'), join(root, 'link.crv'));
     await writeFile(join(root, 'binary.crv'), Buffer.from([0, 1]));
+    await mkdir(join(root, 'vendor'));
+    await writeFile(join(root, 'vendor', 'dependency.crv'), '# Dependency');
     const workspace = await prepareWorkspace({ roots: [root] });
     await expect(workspace.read(0, '../secret.crv')).rejects.toThrow(/escapes/);
     await expect(workspace.read(0, 'link.crv')).rejects.toThrow(/escapes/);
     await expect(workspace.read(0, 'binary.crv')).rejects.toThrow(/Binary/);
+    await expect(workspace.read(0, 'vendor/dependency.crv')).rejects.toThrow(/dependency/);
     await expect(workspace.write(0, 'new.crv', '# New')).rejects.toThrow(/disabled/);
+  });
+
+  it('discovers bounded documents and reviews Carve and local links', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await mkdir(join(root, 'docs'));
+    await mkdir(join(root, '.hidden'));
+    await writeFile(join(root, 'index.crv'), '# Home\n\n[good](docs/guide.crv#Guide)\n[bad](docs/missing.crv)\n[anchor](docs/guide.crv#Missing)\n[binary](notes.txt)\n\n```md\n[example](not-real.crv)\n```');
+    await writeFile(join(root, 'docs', 'guide.crv'), '# Guide');
+    await writeFile(join(root, 'notes.txt'), Buffer.from([0, 1]));
+    await writeFile(join(root, '.hidden', 'secret.crv'), '# Secret');
+    const workspace = await prepareWorkspace({ roots: [root] });
+    expect(await workspace.list(0)).toMatchObject({ files: ['docs/guide.crv', 'index.crv', 'notes.txt'], truncated: false });
+    const review = await reviewWorkspace(workspace, 0);
+    expect(review.filesChecked).toBe(2);
+    expect(review.projectWarnings.map((warning) => warning.rule)).toEqual(['missing-local-file', 'broken-local-anchor', 'unreadable-document']);
   });
 });

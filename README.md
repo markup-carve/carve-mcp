@@ -12,6 +12,10 @@ default and can be enabled for explicitly configured document roots.
 - `carve_parse` returns the resolved, position-aware interchange AST.
 - `carve_migrate` converts HTML, Markdown, or Djot and reports migration fidelity.
 
+Tools return concise text for readers alongside schema-validated structured
+results for clients. Six optional prompts guide common review, conversion, and
+publishing workflows without replacing the writer's judgment.
+
 Raw HTML passthrough is disabled by default because MCP inputs are untrusted.
 The server has no filesystem access unless you explicitly give it a workspace
 root.
