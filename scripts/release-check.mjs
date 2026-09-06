@@ -27,7 +27,11 @@ if (!cargo.includes(`version = "${pkg.version}"`)) throw new Error('Rust and npm
 
 const packDirectory = await mkdtemp(join(tmpdir(), 'carve-mcp-pack-'));
 const packOutput = execFileSync('npm', ['pack', '--json', '--pack-destination', packDirectory], { encoding: 'utf8' });
-const [{ filename }] = JSON.parse(packOutput);
+// npm 10 reports an array here; npm 11 and 12 report an object keyed by
+// package name. The release job installs npm@latest, so it sees the object
+// shape while a developer on the repo's engines floor sees the array.
+const packed = JSON.parse(packOutput);
+const [{ filename }] = Array.isArray(packed) ? packed : Object.values(packed);
 const installDirectory = await mkdtemp(join(tmpdir(), 'carve-mcp-install-'));
 execFileSync('npm', ['init', '--yes'], { cwd: installDirectory, stdio: 'ignore' });
 execFileSync('npm', ['install', '--ignore-scripts', '--omit=dev', join(packDirectory, filename)], {
