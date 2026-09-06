@@ -31,9 +31,24 @@ describe('MCP server', () => {
       arguments: { source: '# Hello', target: 'html' },
     });
     expect(called.isError).not.toBe(true);
-    expect(called.content).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'text', text: expect.stringContaining('<h1') }),
-    ]));
+    expect(called.content).toEqual([{ type: 'text', text: 'Produced the requested output.' }]);
+    expect(called.structuredContent).toEqual(expect.objectContaining({ value: expect.stringContaining('<h1') }));
+    expect(listed.tools.every((tool) => tool.outputSchema?.type === 'object')).toBe(true);
+  });
+
+  it('offers a small set of writer-controlled workflows', async () => {
+    const server = await createServer();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    closeables.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const prompts = await client.listPrompts();
+    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+      'review-document', 'convert-markdown', 'prepare-for-github',
+      'explain-warnings', 'preview-document', 'review-workspace',
+    ]);
+    const prompt = await client.getPrompt({ name: 'review-document' });
+    expect(prompt.messages[0].content).toMatchObject({ type: 'text', text: expect.stringContaining("preserve the author's voice") });
   });
 
   it('lists and reads versioned authoring resources', async () => {

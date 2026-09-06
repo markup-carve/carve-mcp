@@ -12,12 +12,14 @@ keywords = ["carve", "markup", "mcp", "parser"]
 categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
+atomic-write-file = "0.3.1"
 carve-lang = "=0.1.4"
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
 
 [[bin]]

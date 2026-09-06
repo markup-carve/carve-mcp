@@ -12,13 +12,19 @@ Implemented tool names:
 - `carve_parse`
 - `carve_migrate`
 
-It also serves the authoring guide, normative rule index and rule lookup, and
-lint-diagnostic explanations available from the package-based server.
+With one or more `--root` arguments it also provides guarded file discovery,
+workspace review, reads, and edit previews. `--allow-write` enables atomic,
+hash-guarded writes; writes remain dry runs unless the caller opts in on the
+individual call.
+
+It also serves the writer prompts, authoring guide, normative rule index and
+rule lookup, and lint-diagnostic explanations available from the package-based
+server. Tools return human-readable summaries and schema-declared structured
+results.
 
 Run `carve-mcp-rs --help` or `carve-mcp-rs --version` for command information.
 
 Shared conformance tests drive both implementations through MCP and compare
-tool schemas, success and error results, resource discovery, templates, and
-resource contents. HTTP and workspace operations remain in the TypeScript
-server; the Rust binary focuses on dependency-free authoring and source
-processing over stdio.
+tool schemas, success and error results, prompts, resource discovery, templates,
+and resource contents. HTTP remains TypeScript-only; the Rust binary provides
+the same local authoring and guarded project workflow over stdio.

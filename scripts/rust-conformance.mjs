@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { deepStrictEqual } from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { lintRuleNames } from '../dist/lint-rules.js';
@@ -69,9 +71,9 @@ function schemaNode(root, raw) {
     minimum: node.minimum,
     maximum: node.maximum,
     maxItems: node.maxItems,
-    additionalProperties: node.additionalProperties,
+    additionalProperties: node.additionalProperties === undefined ? undefined : Boolean(node.additionalProperties),
     required: node.required ? [...node.required].sort() : undefined,
-    properties: node.properties ? Object.fromEntries(
+    properties: node.properties && Object.keys(node.properties).length ? Object.fromEntries(
       Object.entries(node.properties).map(([name, property]) => [name, schemaNode(root, property)]),
     ) : undefined,
     items: node.items ? schemaNode(root, node.items) : undefined,
@@ -80,6 +82,15 @@ function schemaNode(root, raw) {
 
 function schemaContract(schema) {
   return schemaNode(schema, schema);
+}
+
+function outputSchemaContract(schema) {
+  const root = schemaNode(schema, schema);
+  return {
+    type: root.type,
+    required: root.required,
+    properties: Object.fromEntries(Object.entries(root.properties ?? {}).map(([name, value]) => [name, { type: value.type }])),
+  };
 }
 
 function normalizedResource(text) {
@@ -98,7 +109,7 @@ async function results(command, args, engineVersion) {
     const output = [];
     for (const [name, callArgs] of calls) {
       const result = await client.callTool({ name, arguments: callArgs });
-      output.push({ name, isError: result.isError ?? false, value: JSON.parse(result.content[0].text) });
+      output.push({ name, isError: result.isError ?? false, value: result.structuredContent ?? JSON.parse(result.content[0].text) });
     }
     const resources = await client.listResources();
     const templates = await client.listResourceTemplates();
@@ -133,9 +144,10 @@ async function results(command, args, engineVersion) {
     }
     return {
       capabilities: Object.keys(client.getServerCapabilities() ?? {}).sort(),
-      tools: tools.tools.map(({ name, title, description, annotations, inputSchema }) => ({
-        name, title, description, annotations, inputSchema: schemaContract(inputSchema),
+      tools: tools.tools.map(({ name, title, description, annotations, inputSchema, outputSchema }) => ({
+        name, title, description, annotations, inputSchema: schemaContract(inputSchema), outputSchema: outputSchemaContract(outputSchema),
       })).sort((a, b) => a.name.localeCompare(b.name)),
+      prompts: (await client.listPrompts()).prompts.map(({ name, title, description }) => ({ name, title, description })),
       resources: resources.resources.map(({ uri, name, title, description, mimeType }) => (
         { uri, name, title, description, mimeType }
       )),
@@ -173,4 +185,40 @@ try {
     }
   }
   throw new Error('TypeScript and Rust MCP conformance results differ.', { cause: error });
+}
+
+async function workspaceResults(command, args) {
+  const client = new Client({ name: 'rust-workspace-conformance', version: '0.1.0' });
+  await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
+  try {
+    const names = (await client.listTools()).tools.map((tool) => tool.name).filter((name) => name.includes('workspace') || name.includes('file') || name === 'carve_prepare_edit').sort();
+    const output = [];
+    const calls = [
+      ['carve_workspace_info', {}],
+      ['carve_list_files', { rootIndex: 0 }],
+      ['carve_review_workspace', { rootIndex: 0 }],
+      ['carve_read_file', { rootIndex: 0, path: 'index.crv' }],
+      ['carve_prepare_edit', { rootIndex: 0, path: 'index.crv' }],
+    ];
+    if (names.includes('carve_write_file')) calls.push(['carve_write_file', { rootIndex: 0, path: 'new.crv', content: '# New', dryRun: true }]);
+    for (const [name, arguments_] of calls) {
+      const result = await client.callTool({ name, arguments: arguments_ });
+      output.push({ name, isError: result.isError ?? false, value: result.structuredContent });
+    }
+    return { names, output };
+  } finally {
+    await client.close();
+  }
+}
+
+const workspaceRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-conformance-'));
+try {
+  mkdirSync(join(workspaceRoot, 'docs'));
+  writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Missing](docs/missing.crv)\n');
+  writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n');
+  const typescriptWorkspace = await workspaceResults(process.execPath, ['dist/index.js', '--root', workspaceRoot, '--allow-write']);
+  const rustWorkspace = await workspaceResults(`${target}/debug/carve-mcp-rs`, ['--root', workspaceRoot, '--allow-write']);
+  deepStrictEqual(rustWorkspace, typescriptWorkspace);
+} finally {
+  rmSync(workspaceRoot, { recursive: true, force: true });
 }

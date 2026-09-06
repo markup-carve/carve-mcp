@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Schema-declared structured results alongside concise human-readable tool
+  summaries, with direct diagnostic explanation resource URIs.
+- Six writer-controlled prompts for review, conversion, GitHub publishing,
+  warning explanation, previews, and documentation-folder review.
+- Bounded workspace file discovery and project review, including conservative
+  checks for missing relative files and heading anchors outside code examples.
+- Read-only formatting previews that return hash-guarded proposals before an
+  explicitly enabled write.
+- Guarded workspace discovery, review, previews, and atomic writes in the
+  native Rust server.
+
 ## 0.1.2 - 2026-09-06
 
 The npm server is unchanged. No tool, resource, option, or rendered output

@@ -11,21 +11,176 @@ use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolResult, CompleteRequestParams, CompleteResult, CompletionInfo, ContentBlock,
-        ErrorData, Implementation, ListResourceTemplatesResult, ListResourcesResult,
-        PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse,
-        ReadResourceResult, Resource, ResourceContents, ResourceTemplate, ServerCapabilities,
-        ServerInfo,
+        ErrorData, GetPromptRequestParams, GetPromptResponse, GetPromptResult, Implementation,
+        ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult,
+        PaginatedRequestParams, Prompt, PromptMessage, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ResourceTemplate,
+        Role, ServerCapabilities, ServerInfo,
     },
     schemars,
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::resources;
+use crate::{resources, workspace::Workspace};
 
-const MAX_SOURCE_BYTES: usize = 1_000_000;
+pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
+
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct LintOutputSchema {
+    valid: bool,
+    warning_count: i64,
+    warnings: Vec<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct RenderOutputSchema {
+    value: String,
+    losses: Vec<Value>,
+    total_losses: i64,
+    truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ParseOutputSchema {
+    r#type: String,
+    children: Vec<Value>,
+    src_byte_length: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MigrateOutputSchema {
+    value: String,
+    report: MigrationReportOutputSchema,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct MigrationReportOutputSchema {
+    schema_version: i64,
+    source_format: String,
+    diagnostics: Vec<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReadOutputSchema {
+    root_index: i64,
+    path: String,
+    content: String,
+    sha256: String,
+    bytes: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ListOutputSchema {
+    root_index: i64,
+    files: Vec<String>,
+    truncated: bool,
+    max_depth: i64,
+    limit: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceInfoOutputSchema {
+    roots: Vec<Value>,
+    allow_write: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WriteOutputSchema {
+    root_index: i64,
+    path: String,
+    dry_run: bool,
+    created: bool,
+    current_sha256: Option<String>,
+    sha256: String,
+    bytes: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct EditOutputSchema {
+    root_index: i64,
+    path: String,
+    expected_sha256: String,
+    changed: bool,
+    proposed_content: String,
+    losses: Vec<Value>,
+    total_losses: i64,
+    truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReviewOutputSchema {
+    root_index: i64,
+    valid: bool,
+    files_discovered: i64,
+    files_checked: i64,
+    warning_count: i64,
+    rule_counts: std::collections::BTreeMap<String, i64>,
+    files: Vec<Value>,
+    project_warnings: Vec<Value>,
+    truncated: bool,
+    total_bytes: i64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspacePathInput {
+    root_index: usize,
+    path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceListInput {
+    root_index: usize,
+    #[serde(default = "default_max_depth")]
+    max_depth: usize,
+    #[serde(default = "default_file_limit")]
+    limit: usize,
+}
+fn default_max_depth() -> usize {
+    10
+}
+fn default_file_limit() -> usize {
+    500
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceReviewInput {
+    root_index: usize,
+    #[serde(default = "default_max_depth")]
+    max_depth: usize,
+    #[serde(default = "default_file_limit")]
+    limit: usize,
+    #[serde(default)]
+    platforms: Vec<LintPlatform>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceWriteInput {
+    root_index: usize,
+    path: String,
+    content: String,
+    #[serde(default)]
+    expected_sha256: Option<String>,
+    #[serde(default = "default_true")]
+    dry_run: bool,
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SourceInput {
@@ -48,7 +203,7 @@ fn empty_platforms() -> Vec<LintPlatform> {
 
 #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
-enum LintPlatform {
+pub(crate) enum LintPlatform {
     Github,
 }
 
@@ -199,6 +354,47 @@ fn empty_extensions() -> Vec<ExtensionName> {
     Vec::new()
 }
 
+fn writer_prompts() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    vec![
+        (
+            "review-document",
+            "Review a Carve document",
+            "Review a Carve document for clear, correct, human-focused writing.",
+            "Review the supplied Carve document. Run carve_lint first. Explain issues in plain language, distinguish safe formatting from changes that require author judgment, preserve the author's voice, and do not write without showing the proposed result first.",
+        ),
+        (
+            "convert-markdown",
+            "Convert Markdown safely",
+            "Convert Markdown to Carve while explaining fidelity warnings.",
+            "Convert the supplied Markdown with carve_migrate. Explain fidelity diagnostics in plain language, preserve meaning and structure, then lint the converted Carve. Do not hide dropped or degraded content.",
+        ),
+        (
+            "prepare-for-github",
+            "Prepare writing for GitHub",
+            "Check a Carve document for GitHub-specific publishing surprises.",
+            "Prepare the supplied Carve document for GitHub. Lint with the github platform enabled, explain anything GitHub may relink or render unexpectedly, and show proposed changes before applying them.",
+        ),
+        (
+            "explain-warnings",
+            "Explain Carve warnings",
+            "Turn Carve diagnostics into concise, actionable writing guidance.",
+            "Explain the supplied Carve warnings for a human writer. Use each carve://lint-rules/{ruleName} resource when useful. Say what readers would experience, identify safe fixes, and present ambiguous choices without silently choosing one.",
+        ),
+        (
+            "preview-document",
+            "Preview a Carve document",
+            "Render and assess a document without changing its source.",
+            "Preview the supplied Carve document in the requested target. Report rendering losses and important accessibility or readability concerns. Do not modify the source.",
+        ),
+        (
+            "review-workspace",
+            "Review a documentation folder",
+            "Review an authorized documentation workspace as a bounded project.",
+            "Review the authorized documentation workspace with carve_review_workspace. Prioritize problems that affect readers, group repeated diagnostics, call out broken local links and anchors, and propose a small ordered change set. Do not write files without previewing and receiving approval.",
+        ),
+    ]
+}
+
 fn migration_json(result: carve::MigrationResult, format: SourceFormat) -> Value {
     let format = match format {
         SourceFormat::Html => "html",
@@ -308,14 +504,14 @@ fn utf16_offset(source: &str, byte: usize) -> usize {
     source[..boundary].encode_utf16().count()
 }
 
-fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
+pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
     let mut warnings: Vec<Value> = lint_carve(source)
         .into_iter()
         .map(|warning| {
             json!({
                 "line": warning.line, "column": warning.column, "rule": warning.rule,
                 "message": warning.message, "start": utf16_offset(source, warning.start),
-                "end": utf16_offset(source, warning.end),
+                "end": utf16_offset(source, warning.end), "resourceUri": format!("carve://lint-rules/{}", warning.rule),
             })
         })
         .collect();
@@ -367,7 +563,7 @@ fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
                         "line": line_index + 1, "column": line[..found.start()].encode_utf16().count() + 1,
                         "rule": rule,
                         "message": format!("GitHub re-linkifies {what} in published output, so \"{}\" becomes a link that notifies or references something unrelated; {fix}.", found.as_str()),
-                        "start": start, "end": start + found.as_str().encode_utf16().count(),
+                        "start": start, "end": start + found.as_str().encode_utf16().count(), "resourceUri": format!("carve://lint-rules/{rule}"),
                     }));
                 }
             }
@@ -381,7 +577,7 @@ fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
                     "line": source[..index].matches('\n').count() + 1, "column": 1,
                     "rule": "unclosed-container-fence",
                     "message": "This 3-colon div has no closer; it runs to the end of the document. Add a bare fence of 3 colons to close it.",
-                    "start": utf16_offset(source, index), "end": utf16_offset(source, index + 3),
+                    "start": utf16_offset(source, index), "end": utf16_offset(source, index + 3), "resourceUri": "carve://lint-rules/unclosed-container-fence",
                 }));
     }
     warnings.sort_by_key(|warning| warning["start"].as_u64().unwrap_or(0));
@@ -391,13 +587,31 @@ fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
 #[derive(Debug, Clone)]
 pub struct CarveServer {
     tools: ToolRouter<Self>,
+    workspace: Option<Workspace>,
 }
 
 impl CarveServer {
     pub fn new() -> Self {
-        Self {
-            tools: Self::tool_router(),
+        Self::with_workspace(None)
+    }
+
+    pub fn with_workspace(workspace: Option<Workspace>) -> Self {
+        let mut tools = Self::tool_router();
+        if workspace.is_none() {
+            for name in [
+                "carve_workspace_info",
+                "carve_read_file",
+                "carve_list_files",
+                "carve_review_workspace",
+                "carve_prepare_edit",
+                "carve_write_file",
+            ] {
+                tools.remove_route(name);
+            }
+        } else if !workspace.as_ref().is_some_and(Workspace::allow_write) {
+            tools.remove_route("carve_write_file");
         }
+        Self { tools, workspace }
     }
 
     fn checked(source: &str) -> Result<(), String> {
@@ -412,9 +626,75 @@ impl CarveServer {
     }
 
     fn output(value: Value) -> CallToolResult {
-        CallToolResult::success(vec![ContentBlock::text(
-            serde_json::to_string_pretty(&value).expect("JSON values always serialize"),
-        )])
+        let summary = value
+            .get("warningCount")
+            .and_then(Value::as_u64)
+            .map(|count| {
+                if count == 0 {
+                    "No issues found.".into()
+                } else {
+                    format!("Found {count} issue{}.", if count == 1 { "" } else { "s" })
+                }
+            })
+            .or_else(|| {
+                value.get("files").and_then(Value::as_array).map(|files| {
+                    format!(
+                        "Found {} document file{}.",
+                        files.len(),
+                        if files.len() == 1 { "" } else { "s" }
+                    )
+                })
+            })
+            .or_else(|| {
+                value
+                    .get("proposedContent")
+                    .and_then(Value::as_str)
+                    .map(|_| {
+                        if value["changed"].as_bool().unwrap_or(false) {
+                            format!(
+                                "Formatting would change {}.",
+                                value["path"].as_str().unwrap_or("the file")
+                            )
+                        } else {
+                            format!(
+                                "{} is already canonical.",
+                                value["path"].as_str().unwrap_or("The file")
+                            )
+                        }
+                    })
+            })
+            .or_else(|| {
+                value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(|_| format!("Read {}.", value["path"].as_str().unwrap_or("the file")))
+            })
+            .or_else(|| {
+                value.get("dryRun").and_then(Value::as_bool).map(|dry_run| {
+                    if dry_run {
+                        format!(
+                            "Previewed the write to {}; no file changed.",
+                            value["path"].as_str().unwrap_or("the file")
+                        )
+                    } else {
+                        format!("Wrote {}.", value["path"].as_str().unwrap_or("the file"))
+                    }
+                })
+            })
+            .or_else(|| {
+                (value.get("type").and_then(Value::as_str) == Some("document"))
+                    .then(|| "Parsed the document successfully.".into())
+            })
+            .or_else(|| {
+                value
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .map(|_| "Produced the requested output.".into())
+            })
+            .unwrap_or_else(|| "Completed successfully.".into());
+        let mut result = CallToolResult::structured(value);
+        result.content = vec![ContentBlock::text(summary)];
+        result
     }
 
     fn error(message: impl Into<String>) -> CallToolResult {
@@ -454,10 +734,112 @@ impl Default for CarveServer {
 
 #[tool_router]
 impl CarveServer {
+    #[tool(name = "carve_workspace_info", title = "List configured Carve workspace roots", description = "List root indexes and whether writes are enabled. Paths are intentionally not exposed.", output_schema = rmcp::handler::server::tool::schema_for_type::<WorkspaceInfoOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn workspace_info(&self) -> CallToolResult {
+        let Some(workspace) = &self.workspace else {
+            return Self::error("No workspace roots are configured.");
+        };
+        Self::output(
+            json!({"roots": (0..workspace.root_count()).map(|root_index| json!({"rootIndex":root_index})).collect::<Vec<_>>(), "allowWrite":workspace.allow_write()}),
+        )
+    }
+
+    #[tool(name = "carve_read_file", title = "Read Carve workspace file", description = "Read a UTF-8 text file inside an explicitly configured workspace root.", output_schema = rmcp::handler::server::tool::schema_for_type::<ReadOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn read_file(&self, Parameters(input): Parameters<WorkspacePathInput>) -> CallToolResult {
+        match self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| "No workspace roots are configured.".to_owned())
+            .and_then(|workspace| workspace.read(input.root_index, &input.path))
+        {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(name = "carve_list_files", title = "List Carve workspace files", description = "List supported document files inside an explicitly configured root, with bounded recursion and no host paths.", output_schema = rmcp::handler::server::tool::schema_for_type::<ListOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn list_files(&self, Parameters(input): Parameters<WorkspaceListInput>) -> CallToolResult {
+        match self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| "No workspace roots are configured.".to_owned())
+            .and_then(|workspace| workspace.list(input.root_index, input.max_depth, input.limit))
+        {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(name = "carve_review_workspace", title = "Review Carve workspace", description = "Lint Carve files and validate explicit local document links and anchors across a bounded workspace scan.", output_schema = rmcp::handler::server::tool::schema_for_type::<ReviewOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn review_workspace(
+        &self,
+        Parameters(input): Parameters<WorkspaceReviewInput>,
+    ) -> CallToolResult {
+        let github = input
+            .platforms
+            .iter()
+            .any(|platform| matches!(platform, LintPlatform::Github));
+        match self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| "No workspace roots are configured.".to_owned())
+            .and_then(|workspace| {
+                workspace.review(input.root_index, input.max_depth, input.limit, github)
+            }) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(name = "carve_prepare_edit", title = "Preview canonical Carve formatting", description = "Read and canonically format a Carve workspace file, returning a hash-guarded proposal without writing.", output_schema = rmcp::handler::server::tool::schema_for_type::<EditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn prepare_edit(&self, Parameters(input): Parameters<WorkspacePathInput>) -> CallToolResult {
+        if !input.path.to_ascii_lowercase().ends_with(".crv")
+            && !input.path.to_ascii_lowercase().ends_with(".carve")
+        {
+            return Self::error("Edit previews require a .crv or .carve file.");
+        }
+        let read = match self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| "No workspace roots are configured.".to_owned())
+            .and_then(|workspace| workspace.read(input.root_index, &input.path))
+        {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let source = read["content"].as_str().unwrap();
+        match carve::to_carve_with_report(source, CheckedRenderOptions::default()) {
+            Ok(result) => Self::output(
+                json!({"rootIndex":input.root_index,"path":input.path,"expectedSha256":read["sha256"],"changed":result.value != source,"proposedContent":result.value,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"truncated":result.truncated}),
+            ),
+            Err(error) => Self::error(error.to_string()),
+        }
+    }
+
+    #[tool(name = "carve_write_file", title = "Write Carve workspace file", description = "Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.", output_schema = rmcp::handler::server::tool::schema_for_type::<WriteOutputSchema>(), annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
+    fn write_file(&self, Parameters(input): Parameters<WorkspaceWriteInput>) -> CallToolResult {
+        match self
+            .workspace
+            .as_ref()
+            .ok_or_else(|| "No workspace roots are configured.".to_owned())
+            .and_then(|workspace| {
+                workspace.write(
+                    input.root_index,
+                    &input.path,
+                    &input.content,
+                    input.expected_sha256.as_deref(),
+                    input.dry_run,
+                )
+            }) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
     #[tool(
         name = "carve_lint",
         title = "Lint Carve",
-        description = "Check Carve source for author-facing problems and silent degradation.",
+        description = "Check Carve source for author-facing problems and silent degradation.", output_schema = rmcp::handler::server::tool::schema_for_type::<LintOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -477,7 +859,7 @@ impl CarveServer {
     #[tool(
         name = "carve_format",
         title = "Format Carve",
-        description = "Format Carve source canonically and report any lossy raw-format nodes.",
+        description = "Format Carve source canonically and report any lossy raw-format nodes.", output_schema = rmcp::handler::server::tool::schema_for_type::<RenderOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -497,7 +879,7 @@ impl CarveServer {
     #[tool(
         name = "carve_render",
         title = "Render Carve",
-        description = "Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.",
+        description = "Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.", output_schema = rmcp::handler::server::tool::schema_for_type::<RenderOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -601,7 +983,7 @@ impl CarveServer {
     #[tool(
         name = "carve_parse",
         title = "Parse Carve",
-        description = "Parse and resolve Carve into its position-aware interchange AST.",
+        description = "Parse and resolve Carve into its position-aware interchange AST.", output_schema = rmcp::handler::server::tool::schema_for_type::<ParseOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -625,7 +1007,7 @@ impl CarveServer {
     #[tool(
         name = "carve_migrate",
         title = "Migrate to Carve",
-        description = "Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.",
+        description = "Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.", output_schema = rmcp::handler::server::tool::schema_for_type::<MigrateOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -669,12 +1051,46 @@ impl ServerHandler for CarveServer {
                 .enable_tools()
                 .enable_resources()
                 .enable_completions()
+                .enable_prompts()
                 .build(),
         )
             .with_server_info(Implementation::new("carve-mcp", env!("CARGO_PKG_VERSION")))
             .with_instructions(
                 "Parse, lint, format, render, and migrate Carve documents, with authoring and rule guidance.",
             )
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(
+            writer_prompts()
+                .into_iter()
+                .map(|(name, title, description, _)| {
+                    Prompt::new(name, Some(description), None).with_title(title)
+                })
+                .collect(),
+        ))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        let (_, _, description, text) = writer_prompts()
+            .into_iter()
+            .find(|(name, _, _, _)| *name == request.name)
+            .ok_or_else(|| {
+                ErrorData::invalid_params(format!("Unknown Carve prompt: {}", request.name), None)
+            })?;
+        Ok(
+            GetPromptResult::new(vec![PromptMessage::new_text(Role::User, text)])
+                .with_description(description)
+                .into(),
+        )
     }
 
     async fn list_resources(

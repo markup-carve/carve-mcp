@@ -40,6 +40,18 @@ node dist/index.js --root /absolute/project/path
 `carve_read_file` accepts common text-document extensions and excludes hidden
 paths and dependency directories.
 
+`carve_list_files` discovers eligible documents with bounded depth and result
+limits. `carve_review_workspace` lints Carve documents in one call, groups
+diagnostics, and checks explicit relative links for missing files or heading
+anchors. It reports truncation rather than implying that a partial scan covered
+the entire project. Unreadable document candidates are reported without
+aborting the remaining review. A review reads at most 25 MB in total, in
+addition to the 1 MB per-file limit.
+
+`carve_prepare_edit` reads and canonically formats a `.crv` or `.carve` file,
+then returns the proposed content and the source hash without writing. A caller
+can inspect that proposal and pass its content and hash to `carve_write_file`.
+
 Add `--allow-write` to register `carve_write_file`. Writes default to dry runs,
 stay inside canonicalized roots, preserve existing file modes, and require the
 SHA-256 returned by the preceding read when overwriting a file. This detects
@@ -61,21 +73,32 @@ Inputs are limited to 1 MB.
 
 ## Native Rust server
 
-The native server uses `carve-lang` directly and exposes lint, format, render,
-parse, migrate, and the authoring resources over stdio:
+The native server uses `carve-lang` directly and exposes the same document
+tools, prompts, structured results, authoring resources, and guarded workspace
+workflow over stdio:
 
 ```sh
 cargo run --manifest-path rust/Cargo.toml
 ```
+
+Authorize a workspace explicitly when it is needed:
+
+```sh
+cargo run --manifest-path rust/Cargo.toml -- --root /absolute/project/path
+```
+
+Add `--allow-write` only when the client should be able to apply a separately
+previewed, hash-guarded edit.
 
 GitHub releases provide Linux x86-64 (GNU and static musl), Linux ARM64,
 macOS x86-64 and Apple Silicon, and Windows x86-64 binaries. Shared conformance
 tests require the Rust and TypeScript servers to return the same tool and
 resource contracts.
 
-Choose TypeScript when you need HTTP or guarded workspace access. Choose Rust
-for a standalone native executable with source processing and embedded
-authoring guidance.
+Choose TypeScript when you need HTTP. Choose Rust for a standalone native
+executable over stdio. Their shared conformance checks cover document tools,
+prompts, structured output contracts, and authoring resources; workspace
+security and project-review behavior have implementation-specific tests.
 
 ## HTTP deployment
 
