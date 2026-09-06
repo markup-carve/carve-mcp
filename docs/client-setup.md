@@ -1,0 +1,118 @@
+# Connect Carve to your writing tool
+
+Carve MCP lets an AI assistant check, format, preview, and convert documents.
+The assistant can also look up Carve's authoring guidance and rules.
+
+The recommended setup runs the published package locally with `npx`. It needs
+Node.js 20 or newer, but does not need a checkout of this repository.
+
+## Claude
+
+For Claude Code, run:
+
+```sh
+claude mcp add --scope user carve -- npx -y @markup-carve/carve-mcp
+```
+
+For Claude Desktop, open **Settings → Developer → Edit Config**, then add this
+server to the configuration:
+
+```json
+{
+  "mcpServers": {
+    "carve": {
+      "command": "npx",
+      "args": ["-y", "@markup-carve/carve-mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving the configuration.
+
+## VS Code
+
+Run **MCP: Open User Configuration** from the Command Palette and add:
+
+```json
+{
+  "servers": {
+    "carve": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@markup-carve/carve-mcp"]
+    }
+  }
+}
+```
+
+To share the server with everyone working on one project, create
+`.vscode/mcp.json` in that project with the same content.
+
+## Cursor
+
+Open **Cursor Settings → Tools & MCP → New MCP Server**, then add this to
+`.cursor/mcp.json` for one project or `~/.cursor/mcp.json` for every project:
+
+```json
+{
+  "mcpServers": {
+    "carve": {
+      "command": "npx",
+      "args": ["-y", "@markup-carve/carve-mcp"]
+    }
+  }
+}
+```
+
+## Zed
+
+Open **Settings → AI → MCP Servers → Add Server → Add Local Server** and use:
+
+```json
+{
+  "context_servers": {
+    "carve": {
+      "command": "npx",
+      "args": ["-y", "@markup-carve/carve-mcp"],
+      "env": {}
+    }
+  }
+}
+```
+
+The status indicator beside Carve turns green when the server is ready.
+
+## Codex
+
+Run:
+
+```sh
+codex mcp add carve -- npx -y @markup-carve/carve-mcp
+```
+
+The command saves the server in Codex's user configuration, so it is available
+in later sessions.
+
+## Try it
+
+Open a document or paste a short sample, then ask:
+
+- “Use Carve to check this document and explain the warnings plainly.”
+- “Convert this Markdown to Carve and tell me about any fidelity loss.”
+- “Render this Carve as HTML so I can preview it.”
+- “Look up the Carve rule behind this diagnostic.”
+
+If the assistant does not select Carve automatically, say “Use the Carve MCP
+tools” in the request.
+
+## Native binary
+
+The release also provides a `carve-mcp-rs` executable for Linux, macOS, and
+Windows. Replace `npx` and its arguments above with the absolute path to that
+binary when you want lint, format, render, parse, and migrate without Node.js.
+Use the package-based server when you also want authoring resources, HTTP
+transport, or guarded workspace access.
+
+On Windows, if a client reports that it cannot find `npx`, set the command to
+`npx.cmd`. The native Windows binary avoids this shell-specific difference.
