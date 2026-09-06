@@ -146,6 +146,13 @@ jobs:
             exit 0
           fi
           npm publish --access public --provenance
+        # setup-node wrote an .npmrc that reads NODE_AUTH_TOKEN. Secrets are not
+        # injected automatically, so without this mapping the token expands to
+        # empty and the publish fails to authenticate. NPM_TOKEN is inherited
+        # from the organization. Provenance still applies: it comes from the
+        # job's id-token permission, not from how npm authenticates.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify clean npm installation
         shell: bash
         run: |
