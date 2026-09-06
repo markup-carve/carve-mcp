@@ -8,13 +8,13 @@
     "url": "https://github.com/markup-carve/carve-mcp",
     "source": "github"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@markup-carve/carve-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "transport": {
         "type": "stdio"
       }

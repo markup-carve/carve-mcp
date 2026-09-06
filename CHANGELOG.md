@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.2 - 2026-09-06
+
+The npm server is unchanged. No tool, resource, option, or rendered output
+differs from 0.1.1.
+
+### Added
+
+- The native `carve-mcp-rs` binary serves the authoring guide, the normative
+  rule index and rule lookup, lint-diagnostic explanations, and completions,
+  matching the npm server. It previously exposed only the five source-based
+  tools, and is no longer a preview: shared conformance tests drive both
+  implementations through MCP and compare tool schemas, results, and resources.
+- `carve-mcp-rs --help` and `--version`, reporting the resolved engine version.
+- Prebuilt binaries for statically linked Linux x86_64 (musl) and Linux arm64.
+
+HTTP transport and guarded workspace access remain npm-only.
+
 ## 0.1.1 - 2026-09-06
 
 The server's behavior is unchanged from 0.1.0: no tool, resource, option, or
