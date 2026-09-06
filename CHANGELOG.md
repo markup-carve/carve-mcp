@@ -16,6 +16,10 @@ All notable changes to this project are documented in this file.
   explicitly enabled write.
 - Guarded workspace discovery, review, previews, and atomic writes in the
   native Rust server.
+- End-to-end writer workflow coverage, stable project diagnostic codes with
+  prioritized next actions, and an honest client compatibility checklist.
+- Optional project configuration shared by the package and Rust servers.
+- Privacy-safe tool event logging and opt-in HTTP aggregate metrics.
 
 ## 0.1.2 - 2026-09-06
 

@@ -48,4 +48,25 @@ describe('workspace operations', () => {
     expect(review.filesChecked).toBe(2);
     expect(review.projectWarnings.map((warning) => warning.rule)).toEqual(['missing-local-file', 'broken-local-anchor', 'unreadable-document']);
   });
+
+  it('can disable project link checks without disabling Carve linting', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.crv'), '[missing](gone.crv)\n:::');
+    const workspace = await prepareWorkspace({ roots: [root] });
+    const review = await reviewWorkspace(workspace, 0, { checkLinks: false });
+    expect(review.files[0].warningCount).toBeGreaterThan(0);
+    expect(review.projectWarnings).toEqual([]);
+  });
+
+  it('applies review exclusions and can disable only anchor checks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await mkdir(join(root, 'archive'));
+    await writeFile(join(root, 'index.crv'), '[missing](gone.crv)\n[anchor](guide.crv#Gone)');
+    await writeFile(join(root, 'guide.crv'), '# Guide');
+    await writeFile(join(root, 'archive', 'old.crv'), '# Old');
+    const workspace = await prepareWorkspace({ roots: [root], review: { exclude: ['archive'] } });
+    expect((await workspace.list(0)).files).toEqual(['guide.crv', 'index.crv']);
+    const review = await reviewWorkspace(workspace, 0, { checkAnchors: false });
+    expect(review.projectWarnings.map(({ rule }) => rule)).toEqual(['missing-local-file']);
+  });
 });

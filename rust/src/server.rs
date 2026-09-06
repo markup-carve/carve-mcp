@@ -129,6 +129,7 @@ struct ReviewOutputSchema {
     files_checked: i64,
     warning_count: i64,
     rule_counts: std::collections::BTreeMap<String, i64>,
+    summary: Value,
     files: Vec<Value>,
     project_warnings: Vec<Value>,
     truncated: bool,
@@ -162,12 +163,12 @@ fn default_file_limit() -> usize {
 #[serde(rename_all = "camelCase")]
 struct WorkspaceReviewInput {
     root_index: usize,
-    #[serde(default = "default_max_depth")]
-    max_depth: usize,
-    #[serde(default = "default_file_limit")]
-    limit: usize,
     #[serde(default)]
-    platforms: Vec<LintPlatform>,
+    max_depth: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+    #[serde(default)]
+    platforms: Option<Vec<LintPlatform>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -775,16 +776,28 @@ impl CarveServer {
         &self,
         Parameters(input): Parameters<WorkspaceReviewInput>,
     ) -> CallToolResult {
-        let github = input
-            .platforms
-            .iter()
-            .any(|platform| matches!(platform, LintPlatform::Github));
         match self
             .workspace
             .as_ref()
             .ok_or_else(|| "No workspace roots are configured.".to_owned())
             .and_then(|workspace| {
-                workspace.review(input.root_index, input.max_depth, input.limit, github)
+                workspace.review(
+                    input.root_index,
+                    input
+                        .max_depth
+                        .unwrap_or_else(|| workspace.review_max_depth()),
+                    input.limit.unwrap_or_else(|| workspace.review_limit()),
+                    input.platforms.as_ref().map_or_else(
+                        || workspace.review_github(),
+                        |platforms| {
+                            platforms
+                                .iter()
+                                .any(|platform| matches!(platform, LintPlatform::Github))
+                        },
+                    ),
+                    workspace.check_links(),
+                    workspace.check_anchors(),
+                )
             }) {
             Ok(value) => Self::output(value),
             Err(error) => Self::error(error),

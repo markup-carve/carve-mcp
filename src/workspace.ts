@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { MAX_SOURCE_BYTES } from './tools.js';
+import type { ReviewConfiguration } from './config.js';
 
-export interface WorkspaceOptions { roots: string[]; allowWrite?: boolean }
+export interface WorkspaceOptions { roots: string[]; allowWrite?: boolean; review?: ReviewConfiguration }
 export interface WorkspaceRoot { configured: string; real: string }
 export interface ListOptions { maxDepth?: number; limit?: number }
 
@@ -18,7 +19,7 @@ export async function prepareWorkspace(options: WorkspaceOptions): Promise<Works
     if (!(await stat(root.real)).isDirectory()) throw new Error('A configured workspace root is not a directory.');
   }
   const unique = roots.filter((root, index) => roots.findIndex((candidate) => candidate.real === root.real) === index);
-  return new Workspace(unique, options.allowWrite ?? false);
+  return new Workspace(unique, options.allowWrite ?? false, options.review ?? {});
 }
 
 function sha256(content: string | Uint8Array): string {
@@ -31,7 +32,7 @@ function inside(root: string, candidate: string): boolean {
 }
 
 export class Workspace {
-  constructor(readonly roots: WorkspaceRoot[], readonly allowWrite: boolean) {}
+  constructor(readonly roots: WorkspaceRoot[], readonly allowWrite: boolean, readonly review: ReviewConfiguration = {}) {}
 
   private requested(rootIndex: number, path: string): { root: WorkspaceRoot; target: string } {
     const root = this.roots[rootIndex];
@@ -63,6 +64,7 @@ export class Workspace {
       for (const entry of entries) {
         if (entry.name.startsWith('.')) continue;
         const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (this.review.exclude?.some((excluded) => path === excluded || path.startsWith(`${excluded}/`))) continue;
         if (entry.isSymbolicLink()) continue;
         if (entry.isDirectory()) {
           if (depth < maxDepth && !SKIPPED_DIRECTORIES.has(entry.name)) {

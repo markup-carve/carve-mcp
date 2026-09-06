@@ -5,7 +5,10 @@ import type { Workspace } from './workspace.js';
 
 export interface ProjectWarning {
   rule: 'missing-local-file' | 'broken-local-anchor' | 'unreadable-document';
+  code: 'CARVE_PROJECT_MISSING_FILE' | 'CARVE_PROJECT_BROKEN_ANCHOR' | 'CARVE_PROJECT_UNREADABLE_DOCUMENT';
+  severity: 'error' | 'warning';
   message: string;
+  suggestion: string;
   path: string;
   target?: string;
   line: number;
@@ -17,6 +20,16 @@ const DOCUMENT_EXTENSIONS = new Set(['.crv', '.carve', '.md', '.markdown', '.txt
 const ANCHOR_EXTENSIONS = new Set(['.crv', '.carve', '.md', '.markdown', '.djot']);
 const LINK = /!?(?:\[[^\]\n]*\])\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
 const MAX_PROJECT_BYTES = 25_000_000;
+
+const PROJECT_DIAGNOSTICS = {
+  'missing-local-file': { code: 'CARVE_PROJECT_MISSING_FILE', severity: 'error', suggestion: 'Fix the destination or add the missing document.' },
+  'broken-local-anchor': { code: 'CARVE_PROJECT_BROKEN_ANCHOR', severity: 'error', suggestion: 'Update the fragment to match a heading ID in the destination document.' },
+  'unreadable-document': { code: 'CARVE_PROJECT_UNREADABLE_DOCUMENT', severity: 'warning', suggestion: 'Make the file readable UTF-8 text or exclude it from the review.' },
+} as const;
+
+function projectWarning(rule: ProjectWarning['rule'], warning: Omit<ProjectWarning, 'rule' | 'code' | 'severity' | 'suggestion'>): ProjectWarning {
+  return { rule, ...PROJECT_DIAGNOSTICS[rule], ...warning };
+}
 
 function opaqueRanges(source: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
@@ -67,7 +80,7 @@ function localTarget(from: string, raw: string): { path: string; fragment?: stri
 export async function reviewWorkspace(
   workspace: Workspace,
   rootIndex: number,
-  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[] } = {},
+  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[]; checkLinks?: boolean; checkAnchors?: boolean } = {},
 ) {
   const listed = await workspace.list(rootIndex, options);
   const discovered = new Set(listed.files);
@@ -79,8 +92,8 @@ export async function reviewWorkspace(
     let read;
     try { read = await workspace.read(rootIndex, path); }
     catch (error) {
-      readWarnings.push({ rule: 'unreadable-document', path, line: 1, column: 1,
-        message: `Document could not be reviewed: ${error instanceof Error ? error.message : String(error)}` });
+      readWarnings.push(projectWarning('unreadable-document', { path, line: 1, column: 1,
+        message: `Document could not be reviewed: ${error instanceof Error ? error.message : String(error)}` }));
       continue;
     }
     if (totalBytes + read.bytes > MAX_PROJECT_BYTES) { sizeTruncated = true; break; }
@@ -104,10 +117,13 @@ export async function reviewWorkspace(
 
   const projectWarnings: ProjectWarning[] = [...readWarnings];
   const anchors = new Map<string, Set<string>>();
-  for (const [path, source] of sources) {
-    if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, headingIds(source));
+  if (options.checkLinks !== false && options.checkAnchors !== false) {
+    for (const [path, source] of sources) {
+      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, headingIds(source));
+    }
   }
   for (const [path, source] of sources) {
+    if (options.checkLinks === false) break;
     const opaque = opaqueRanges(source);
     for (const match of source.matchAll(LINK)) {
       if (opaque.some(([start, end]) => (match.index ?? 0) >= start && (match.index ?? 0) < end)) continue;
@@ -117,16 +133,26 @@ export async function reviewWorkspace(
       if (!DOCUMENT_EXTENSIONS.has(extname(target.path).toLowerCase())) continue;
       const location = lineColumn(source, (match.index ?? 0) + match[0].indexOf(match[1]));
       if (!discovered.has(target.path)) {
-        projectWarnings.push({ rule: 'missing-local-file', path, target: match[1], ...location,
-          message: `Local link target does not exist in this workspace review: ${target.path}` });
-      } else if (target.fragment && anchors.has(target.path) && !anchors.get(target.path)?.has(target.fragment.toLowerCase())) {
-        projectWarnings.push({ rule: 'broken-local-anchor', path, target: match[1], ...location,
-          message: `Local link anchor does not exist in ${target.path}: #${target.fragment}` });
+        projectWarnings.push(projectWarning('missing-local-file', { path, target: match[1], ...location,
+          message: `Local link target does not exist in this workspace review: ${target.path}` }));
+      } else if (options.checkAnchors !== false && target.fragment && anchors.has(target.path) && !anchors.get(target.path)?.has(target.fragment.toLowerCase())) {
+        projectWarnings.push(projectWarning('broken-local-anchor', { path, target: match[1], ...location,
+          message: `Local link anchor does not exist in ${target.path}: #${target.fragment}` }));
       }
     }
   }
   projectWarnings.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
   for (const warning of projectWarnings) ruleCounts.set(warning.rule, (ruleCounts.get(warning.rule) ?? 0) + 1);
+  const bySeverity = {
+    error: projectWarnings.filter((warning) => warning.severity === 'error').length,
+    warning: warningCount + projectWarnings.filter((warning) => warning.severity === 'warning').length,
+  };
+  const nextActions = warningCount > 0
+    ? ['Review the reported Carve lint diagnostics, starting with reader-visible problems.']
+    : [];
+  for (const warning of projectWarnings) {
+    if (!nextActions.includes(warning.suggestion) && nextActions.length < 5) nextActions.push(warning.suggestion);
+  }
 
   return {
     rootIndex,
@@ -134,6 +160,7 @@ export async function reviewWorkspace(
     filesDiscovered: listed.files.length,
     filesChecked: files.length,
     warningCount: warningCount + projectWarnings.length,
+    summary: { bySeverity, nextActions },
     ruleCounts: Object.fromEntries([...ruleCounts].sort(([a], [b]) => a.localeCompare(b))),
     files,
     projectWarnings,

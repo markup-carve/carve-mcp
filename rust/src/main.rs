@@ -3,11 +3,12 @@ use std::process::ExitCode;
 
 use rmcp::ServiceExt;
 
+mod config;
 mod resources;
 mod server;
 mod workspace;
 
-const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--root PATH ...] [--allow-write]\n       carve-mcp-rs [--help | --version]\n\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied.";
+const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write]\n       carve-mcp-rs [--help | --version]\n\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -24,10 +25,26 @@ async fn main() -> ExitCode {
         _ => {
             let mut roots = Vec::new();
             let mut allow_write = false;
+            let mut config_path = None;
             let mut index = 0;
             while index < arguments.len() {
                 match arguments[index].as_str() {
                     "--allow-write" => allow_write = true,
+                    "--config" => {
+                        index += 1;
+                        let Some(value) = arguments.get(index) else {
+                            eprintln!("--config requires a JSON file path.\n\n{HELP}");
+                            return ExitCode::from(2);
+                        };
+                        config_path = Some(PathBuf::from(value));
+                    }
+                    value if value.starts_with("--config=") => {
+                        if value.len() == 9 {
+                            eprintln!("--config requires a JSON file path.\n\n{HELP}");
+                            return ExitCode::from(2);
+                        }
+                        config_path = Some(PathBuf::from(&value[9..]))
+                    }
                     "--root" => {
                         index += 1;
                         let Some(value) = arguments.get(index) else {
@@ -51,6 +68,19 @@ async fn main() -> ExitCode {
                 eprintln!("Workspace roots must be absolute paths.");
                 return ExitCode::from(2);
             }
+            let mut review = workspace::ReviewConfiguration::default();
+            if let Some(path) = config_path {
+                match config::load(&path) {
+                    Ok((configured_roots, configured_review)) => {
+                        roots.splice(0..0, configured_roots);
+                        review = configured_review;
+                    }
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
             if allow_write && roots.is_empty() {
                 eprintln!("--allow-write requires at least one --root.");
                 return ExitCode::from(2);
@@ -58,7 +88,7 @@ async fn main() -> ExitCode {
             let workspace = if roots.is_empty() {
                 None
             } else {
-                match workspace::Workspace::new(&roots, allow_write) {
+                match workspace::Workspace::new(&roots, allow_write, review) {
                     Ok(value) => Some(value),
                     Err(error) => {
                         eprintln!("{error}");

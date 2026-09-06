@@ -23,6 +23,17 @@ struct Root(PathBuf);
 pub struct Workspace {
     roots: Vec<Root>,
     allow_write: bool,
+    review: ReviewConfiguration,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReviewConfiguration {
+    pub max_depth: Option<usize>,
+    pub limit: Option<usize>,
+    pub github: bool,
+    pub exclude: Vec<String>,
+    pub check_links: Option<bool>,
+    pub check_anchors: Option<bool>,
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -43,7 +54,11 @@ fn supported(path: &Path) -> bool {
 }
 
 impl Workspace {
-    pub fn new(roots: &[PathBuf], allow_write: bool) -> Result<Self, String> {
+    pub fn new(
+        roots: &[PathBuf],
+        allow_write: bool,
+        review: ReviewConfiguration,
+    ) -> Result<Self, String> {
         let mut canonical = Vec::new();
         for root in roots {
             let root = fs::canonicalize(root).map_err(|error| {
@@ -59,6 +74,7 @@ impl Workspace {
         Ok(Self {
             roots: canonical,
             allow_write,
+            review,
         })
     }
 
@@ -67,6 +83,21 @@ impl Workspace {
     }
     pub fn allow_write(&self) -> bool {
         self.allow_write
+    }
+    pub fn review_max_depth(&self) -> usize {
+        self.review.max_depth.unwrap_or(10)
+    }
+    pub fn review_limit(&self) -> usize {
+        self.review.limit.unwrap_or(500)
+    }
+    pub fn review_github(&self) -> bool {
+        self.review.github
+    }
+    pub fn check_links(&self) -> bool {
+        self.review.check_links.unwrap_or(true)
+    }
+    pub fn check_anchors(&self) -> bool {
+        self.review.check_anchors.unwrap_or(true)
     }
 
     fn requested(&self, root_index: usize, path: &str) -> Result<(&Root, PathBuf), String> {
@@ -136,10 +167,10 @@ impl Workspace {
             base: &Path,
             directory: &Path,
             depth: usize,
-            max_depth: usize,
-            limit: usize,
+            bounds: (usize, usize),
             files: &mut Vec<String>,
             truncated: &mut bool,
+            excluded: &[String],
         ) -> Result<(), String> {
             let mut entries = fs::read_dir(directory)
                 .map_err(|error| error.to_string())?
@@ -151,25 +182,37 @@ impl Workspace {
                 if name.starts_with('.') {
                     continue;
                 }
+                let relative = relative_string(
+                    entry
+                        .path()
+                        .strip_prefix(base)
+                        .expect("entry remains below root"),
+                );
+                if excluded
+                    .iter()
+                    .any(|value| relative == *value || relative.starts_with(&format!("{value}/")))
+                {
+                    continue;
+                }
                 let kind = entry.file_type().map_err(|error| error.to_string())?;
                 if kind.is_symlink() {
                     continue;
                 }
                 if kind.is_dir()
-                    && depth < max_depth
+                    && depth < bounds.0
                     && !matches!(name.as_str(), "node_modules" | "vendor" | "target")
                 {
                     visit(
                         base,
                         &entry.path(),
                         depth + 1,
-                        max_depth,
-                        limit,
+                        bounds,
                         files,
                         truncated,
+                        excluded,
                     )?;
                 } else if kind.is_file() && supported(&entry.path()) {
-                    if files.len() == limit {
+                    if files.len() == bounds.1 {
                         *truncated = true;
                         return Ok(());
                     }
@@ -190,10 +233,10 @@ impl Workspace {
             &root.0,
             &root.0,
             0,
-            max_depth,
-            limit,
+            (max_depth, limit),
             &mut files,
             &mut truncated,
+            &self.review.exclude,
         )?;
         Ok(
             json!({"rootIndex": root_index, "files": files, "truncated": truncated, "maxDepth": max_depth, "limit": limit}),
@@ -263,6 +306,8 @@ impl Workspace {
         max_depth: usize,
         limit: usize,
         github: bool,
+        check_links: bool,
+        check_anchors: bool,
     ) -> Result<Value, String> {
         let listing = self.list(root_index, max_depth, limit)?;
         let paths = listing["files"].as_array().expect("files array");
@@ -280,7 +325,7 @@ impl Workspace {
             let read = match self.read(root_index, path) {
                 Ok(read) => read,
                 Err(error) => {
-                    project_warnings.push(json!({"rule":"unreadable-document","message":format!("Document could not be reviewed: {error}"),"path":path,"line":1,"column":1}));
+                    project_warnings.push(json!({"rule":"unreadable-document","code":"CARVE_PROJECT_UNREADABLE_DOCUMENT","severity":"warning","suggestion":"Make the file readable UTF-8 text or exclude it from the review.","message":format!("Document could not be reviewed: {error}"),"path":path,"line":1,"column":1}));
                     continue;
                 }
             };
@@ -320,25 +365,30 @@ impl Workspace {
             files.push(json!({"path": path, "valid": warnings.is_empty(), "warningCount": warnings.len(), "warnings": warnings}));
         }
         let mut anchors = BTreeMap::<String, BTreeSet<String>>::new();
-        for (path, source) in &sources {
-            if !matches!(
-                Path::new(path).extension().and_then(|value| value.to_str()),
-                Some("crv" | "carve" | "md" | "markdown" | "djot")
-            ) {
-                continue;
+        if check_links && check_anchors {
+            for (path, source) in &sources {
+                if !matches!(
+                    Path::new(path).extension().and_then(|value| value.to_str()),
+                    Some("crv" | "carve" | "md" | "markdown" | "djot")
+                ) {
+                    continue;
+                }
+                let ast = carve::to_json_with_options(
+                    source,
+                    &carve::Options::default().with_positions(true),
+                );
+                let value: Value = serde_json::from_str(&ast).map_err(|error| error.to_string())?;
+                let mut ids = BTreeSet::new();
+                collect_heading_ids(&value, &mut ids);
+                anchors.insert(path.clone(), ids);
             }
-            let ast = carve::to_json_with_options(
-                source,
-                &carve::Options::default().with_positions(true),
-            );
-            let value: Value = serde_json::from_str(&ast).map_err(|error| error.to_string())?;
-            let mut ids = BTreeSet::new();
-            collect_heading_ids(&value, &mut ids);
-            anchors.insert(path.clone(), ids);
         }
         let link = Regex::new(r#"!?\[[^\]\n]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)"#).unwrap();
         let scheme = Regex::new(r"^[A-Za-z][A-Za-z0-9+.-]*:").unwrap();
         for (path, source) in &sources {
+            if !check_links {
+                break;
+            }
             let opaque = opaque_ranges(source);
             for capture in link.captures_iter(source) {
                 let capture_start = capture.get(0).unwrap().start();
@@ -389,8 +439,9 @@ impl Workspace {
                         .encode_utf16()
                         .count()
                         + 1;
-                    project_warnings.push(json!({"rule":"missing-local-file","message":format!("Local link target does not exist in this workspace review: {normalized}"),"path":path,"target":raw,"line":line_no,"column":column}));
-                } else if let Some(fragment) = fragment
+                    project_warnings.push(json!({"rule":"missing-local-file","code":"CARVE_PROJECT_MISSING_FILE","severity":"error","suggestion":"Fix the destination or add the missing document.","message":format!("Local link target does not exist in this workspace review: {normalized}"),"path":path,"target":raw,"line":line_no,"column":column}));
+                } else if check_anchors
+                    && let Some(fragment) = fragment
                     && anchors.contains_key(&normalized)
                     && !anchors
                         .get(&normalized)
@@ -406,7 +457,7 @@ impl Workspace {
                         .encode_utf16()
                         .count()
                         + 1;
-                    project_warnings.push(json!({"rule":"broken-local-anchor","message":format!("Local link anchor does not exist in {normalized}: #{fragment}"),"path":path,"target":raw,"line":line_no,"column":column}));
+                    project_warnings.push(json!({"rule":"broken-local-anchor","code":"CARVE_PROJECT_BROKEN_ANCHOR","severity":"error","suggestion":"Update the fragment to match a heading ID in the destination document.","message":format!("Local link anchor does not exist in {normalized}: #{fragment}"),"path":path,"target":raw,"line":line_no,"column":column}));
                 }
             }
         }
@@ -422,9 +473,30 @@ impl Workspace {
                 *counts.entry(rule.into()).or_default() += 1;
             }
         }
+        let errors = project_warnings
+            .iter()
+            .filter(|warning| warning["severity"] == "error")
+            .count();
+        let warnings = warning_count
+            + project_warnings
+                .iter()
+                .filter(|warning| warning["severity"] == "warning")
+                .count();
+        let mut next_actions = Vec::new();
+        if warning_count > 0 {
+            next_actions.push("Review the reported Carve lint diagnostics, starting with reader-visible problems.".to_owned());
+        }
+        for warning in &project_warnings {
+            if let Some(suggestion) = warning["suggestion"].as_str()
+                && !next_actions.iter().any(|value| value == suggestion)
+                && next_actions.len() < 5
+            {
+                next_actions.push(suggestion.to_owned());
+            }
+        }
         warning_count += project_warnings.len();
         Ok(
-            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes}),
+            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes}),
         )
     }
 }
@@ -512,20 +584,40 @@ mod tests {
         fs::create_dir(root.join("docs")).unwrap();
         fs::write(
             root.join("index.crv"),
-            "# Home\n\n[bad](docs/missing.crv)\n[binary](notes.txt)",
+            "# Home\n\n[bad](docs/missing.crv)\n[binary](notes.txt)\n:::",
         )
         .unwrap();
         fs::write(root.join("docs/guide.crv"), "# Guide").unwrap();
         fs::write(root.join("notes.txt"), [0, 1]).unwrap();
-        let workspace = Workspace::new(std::slice::from_ref(&root), true).unwrap();
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            true,
+            ReviewConfiguration::default(),
+        )
+        .unwrap();
         assert_eq!(
             workspace.list(0, 10, 500).unwrap()["files"],
             json!(["docs/guide.crv", "index.crv", "notes.txt"])
         );
-        let review = workspace.review(0, 10, 500, false).unwrap();
+        let review = workspace.review(0, 10, 500, false, true, true).unwrap();
         assert_eq!(review["filesChecked"], 2);
         assert_eq!(review["projectWarnings"][0]["rule"], "missing-local-file");
         assert_eq!(review["projectWarnings"][1]["rule"], "unreadable-document");
+        let lint_only = workspace.review(0, 10, 500, false, false, false).unwrap();
+        assert!(
+            lint_only["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|file| file["warningCount"].as_u64().unwrap() > 0)
+        );
+        assert!(
+            !lint_only["projectWarnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| warning["rule"] == "missing-local-file")
+        );
         let read = workspace.read(0, "index.crv").unwrap();
         let hash = read["sha256"].as_str().unwrap();
         assert_eq!(

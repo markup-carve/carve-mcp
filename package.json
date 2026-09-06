@@ -19,6 +19,7 @@
     "sync:rust-resources": "node scripts/sync-rust-resources.mjs",
     "check:rust-resources": "node scripts/sync-rust-resources.mjs --check",
     "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance.mjs",
+    "test:workflow": "npm run build && node scripts/writer-workflow.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

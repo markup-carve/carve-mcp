@@ -4,6 +4,7 @@ import { hostHeaderValidation, originValidation, toNodeHandler } from '@modelcon
 import { createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
 import { createServer } from './server.js';
 import type { WorkspaceOptions } from './workspace.js';
+import { SafeMetrics, type ToolObserver } from './telemetry.js';
 
 export const MAX_HTTP_BODY_BYTES = 7 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 32;
@@ -12,6 +13,7 @@ const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
 export interface HttpOptions {
   host: string; port: number; token?: string; allowedHosts?: string[]; workspace?: WorkspaceOptions;
+  metrics?: boolean; observe?: ToolObserver;
 }
 
 export interface HttpServer {
@@ -66,11 +68,13 @@ export function createHttpServer(options: HttpOptions): HttpServer {
   const allowedHosts = options.allowedHosts?.length ? options.allowedHosts : LOCAL_HOSTS;
   const validateHost = hostHeaderValidation(allowedHosts);
   const validateOrigin = originValidation(allowedHosts);
-  const handler = createMcpHandler(() => createServer(options.workspace), {
-    onerror: (error) => console.error(JSON.stringify({ level: 'error', message: error.message })),
+  const metrics = new SafeMetrics();
+  const observe: ToolObserver = (event) => { metrics.observe(event); options.observe?.(event); };
+  const handler = createMcpHandler(() => createServer(options.workspace, observe), {
+    onerror: (error) => console.error(JSON.stringify({ level: 'error', event: 'mcp_error', errorType: error.name })),
   });
   const nodeHandler = toNodeHandler(handler, {
-    onerror: (error) => console.error(JSON.stringify({ level: 'error', message: error.message })),
+    onerror: (error) => console.error(JSON.stringify({ level: 'error', event: 'transport_error', errorType: error.name })),
   });
   const rate = new Map<string, { minute: number; count: number }>();
   let rateMinute = Math.floor(Date.now() / 60_000);
@@ -80,7 +84,7 @@ export function createHttpServer(options: HttpOptions): HttpServer {
     const started = Date.now();
     const remoteAddress = requestIp(req);
     res.once('finish', () => console.error(JSON.stringify({
-      level: 'info', method: req.method, path: req.url, status: res.statusCode,
+      level: 'info', method: req.method, path: new URL(req.url ?? '/', 'http://localhost').pathname, status: res.statusCode,
       durationMs: Date.now() - started, remoteAddress,
     })));
     let counted = false;
@@ -88,6 +92,12 @@ export function createHttpServer(options: HttpOptions): HttpServer {
       if (!validateHost(req, res) || !validateOrigin(req, res)) return;
       if (req.url === '/health' && (req.method === 'GET' || req.method === 'HEAD')) {
         return send(res, 200, req.method === 'HEAD' ? '' : 'ok');
+      }
+      if (options.metrics && req.url === '/metrics' && req.method === 'GET') {
+        if (!authorized(req.headers.authorization, options.token)) {
+          return send(res, 401, 'Unauthorized', { 'www-authenticate': 'Bearer' });
+        }
+        return send(res, 200, metrics.prometheus(), { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
       }
       if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/mcp') return send(res, 404, 'Not found');
       const minute = Math.floor(Date.now() / 60_000);
@@ -120,7 +130,7 @@ export function createHttpServer(options: HttpOptions): HttpServer {
         send(res, 413, 'Request too large', { connection: 'close' });
       } else if (error instanceof Error && error.message === 'invalid-body') send(res, 400, 'Invalid JSON request body');
       else {
-        console.error(JSON.stringify({ level: 'error', message: error instanceof Error ? error.message : String(error) }));
+        console.error(JSON.stringify({ level: 'error', event: 'request_error', errorType: error instanceof Error ? error.name : 'UnknownError' }));
         send(res, 500, 'Internal server error');
       }
     } finally {

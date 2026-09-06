@@ -8,8 +8,8 @@ describe('HTTP transport', () => {
   const servers: ReturnType<typeof createHttpServer>[] = [];
   afterEach(async () => Promise.all(servers.splice(0).map((server) => server.shutdown())));
 
-  async function running(token?: string) {
-    const server = createHttpServer({ host: '127.0.0.1', port: 0, token });
+  async function running(token?: string, metrics = false) {
+    const server = createHttpServer({ host: '127.0.0.1', port: 0, token, metrics });
     servers.push(server);
     server.server.listen(0, '127.0.0.1');
     await once(server.server, 'listening');
@@ -77,5 +77,21 @@ describe('HTTP transport', () => {
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toContain('carve_lint');
     await client.close();
+  });
+
+  it('exposes opt-in aggregate metrics without source content', async () => {
+    const base = await running('secret', true);
+    expect((await fetch(`${base}/metrics`)).status).toBe(401);
+    const client = new Client({ name: 'metrics-test', version: '1.0.0' });
+    const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { authorization: 'Bearer secret' } },
+    });
+    await client.connect(transport);
+    await client.callTool({ name: 'carve_lint', arguments: { source: 'private words' } });
+    await client.close();
+    const response = await fetch(`${base}/metrics`, { headers: { authorization: 'Bearer secret' } });
+    const body = await response.text();
+    expect(body).toContain('carve_mcp_tool_calls_total{tool="carve_lint"} 1');
+    expect(body).not.toContain('private words');
   });
 });
