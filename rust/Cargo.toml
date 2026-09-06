@@ -6,9 +6,13 @@ rust-version = "1.88"
 description = "Native MCP server for the Carve markup language"
 license = "MIT"
 repository = "https://github.com/markup-carve/carve-mcp"
+homepage = "https://markup-carve.github.io/carve/"
+readme = "README.md"
+keywords = ["carve", "markup", "mcp", "parser"]
+categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
-carve-lang = "0.1.4"
+carve-lang = "=0.1.4"
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

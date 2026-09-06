@@ -33,6 +33,15 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
             binary: carve-mcp-rs
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz
+            binary: carve-mcp-rs
+            install_musl: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
@@ -52,6 +61,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
+      - name: Install musl toolchain
+        if: matrix.install_musl
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
       - run: cargo build --release --locked --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
       - name: Archive Unix binary
         if: runner.os != 'Windows'
@@ -78,9 +90,10 @@ jobs:
           gh release download "${{ github.event.release.tag_name }}" \
             --pattern "${{ matrix.archive }}" --dir release-smoke
           tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
       - name: Verify downloaded Windows release binary
         if: runner.os == 'Windows'
         shell: pwsh
@@ -89,9 +102,10 @@ jobs:
           gh release download "${{ github.event.release.tag_name }}" `
             --pattern "${{ matrix.archive }}" --dir release-smoke
           Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
 
   release-checksums:
     if: github.event_name == 'release'
@@ -174,8 +188,38 @@ jobs:
       - name: Publish official MCP Registry entry
         run: scripts/publish-registry.sh
 
+  release-contract:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.contract.outputs.full }}
+    steps:
+      - name: Detect the released native contract
+        id: contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')"
+          musl=false
+          arm64=false
+          grep -qx 'carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz' <<<"$assets" && musl=true
+          grep -qx 'carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz' <<<"$assets" && arm64=true
+          if [[ "$musl" == true && "$arm64" == true ]]; then
+            echo 'full=true' >> "$GITHUB_OUTPUT"
+          elif [[ "$musl" == false && "$arm64" == false ]]; then
+            echo 'full=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Release has an incomplete current native artifact set.' >&2
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
   verify-released-binaries:
     if: github.event_name == 'workflow_dispatch'
+    needs: release-contract
     name: Verify ${{ matrix.target }} release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -186,6 +230,16 @@ jobs:
             target: x86_64-unknown-linux-gnu
             archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
             binary: carve-mcp-rs
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz
+            binary: carve-mcp-rs
+            current_only: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
+            current_only: true
           - os: macos-15-intel
             target: x86_64-apple-darwin
             archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
@@ -199,16 +253,22 @@ jobs:
             archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
             binary: carve-mcp-rs.exe
     steps:
+      - name: Skip current-only artifact for a legacy release
+        if: matrix.current_only && needs.release-contract.outputs.full != 'true'
+        run: echo 'This legacy release predates the expanded Linux artifact set.'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
         with:
           ref: main
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
       - name: Download and verify Unix binary
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -216,20 +276,27 @@ jobs:
           gh release download "${{ inputs.release_tag }}" \
             --pattern "${{ matrix.archive }}" --dir release-smoke
           tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+          args=()
+          [[ "$FULL_CONTRACT" == true ]] && args+=(--full)
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" "${args[@]}"
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          FULL_CONTRACT: ${{ needs.release-contract.outputs.full }}
       - name: Download and verify Windows binary
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-smoke
           gh release download "${{ inputs.release_tag }}" `
             --pattern "${{ matrix.archive }}" --dir release-smoke
           Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}"
+          $args = @()
+          if ("${{ needs.release-contract.outputs.full }}" -eq "true") { $args += "--full" }
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" @args
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
 
   recover-release:
     if: github.event_name == 'workflow_dispatch'

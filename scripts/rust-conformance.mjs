@@ -1,11 +1,21 @@
 import { execFileSync } from 'node:child_process';
 import { deepStrictEqual } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { lintRuleNames } from '../dist/lint-rules.js';
+import { ruleIds } from '../dist/resources.js';
 
-const target = JSON.parse(execFileSync('cargo', [
+const metadata = JSON.parse(execFileSync('cargo', [
   'metadata', '--manifest-path', 'rust/Cargo.toml', '--format-version=1', '--no-deps',
-], { encoding: 'utf8' })).target_directory;
+], { encoding: 'utf8' }));
+const target = metadata.target_directory;
+const javascriptEngineVersion = JSON.parse(readFileSync(
+  new URL('../node_modules/@markup-carve/carve/package.json', import.meta.url), 'utf8',
+)).version;
+const cargoLock = readFileSync(new URL('../rust/Cargo.lock', import.meta.url), 'utf8');
+const rustEngineVersion = cargoLock.match(/\[\[package\]\]\nname = "carve-lang"\nversion = "([^"]+)"/)?.[1];
+if (!rustEngineVersion) throw new Error('Could not resolve carve-lang from Cargo.lock.');
 
 const calls = [
   ['carve_format', { source: '# Hello' }],
@@ -32,9 +42,55 @@ const calls = [
   ['carve_lint', { source: '😀 @person and #12', platforms: ['github'] }],
   ['carve_lint', { source: '`@person #12`', platforms: ['github'] }],
   ['carve_lint', { source: '@person\n:::', platforms: ['github'] }],
+  ['carve_render', { source: '# Hello', target: 'markdown' }],
+  ['carve_render', { source: '# Hello', target: 'ansi' }],
+  ['carve_render', { source: '# HéLLo', target: 'html', preset: 'portable', lowercaseHeadingIds: false }],
+  ['carve_render', { source: '`raw`{=latex}', target: 'plain', maxRenderLosses: 0 }],
+  ['carve_render', { source: '`raw`{=latex}', target: 'plain', strictLosses: true }],
+  ['carve_render', { source: '`<b>x</b>`{=html}', target: 'html', allowRawHtml: true }],
+  ['carve_render', { source: '# Hello', target: 'plain', preset: 'static-html' }],
+  ['carve_render', { source: '[x]{samp}', target: 'plain', extensions: ['semantic-spans'] }],
+  ['carve_migrate', { source: '<b>x</b>', format: 'html', markdownDialect: {} }],
+  ['carve_lint', { source: 'x'.repeat(1_000_001) }],
 ];
 
-async function results(command, args = []) {
+function localRef(schema, ref) {
+  return ref?.startsWith('#/$defs/') ? schema.$defs?.[ref.slice('#/$defs/'.length)] : undefined;
+}
+
+function schemaNode(root, raw) {
+  const selected = raw.anyOf?.find((item) => item.type !== 'null') ?? raw;
+  const node = selected.$ref ? { ...localRef(root, selected.$ref), ...selected, $ref: undefined } : selected;
+  const type = Array.isArray(node.type) ? node.type.filter((item) => item !== 'null')[0] : node.type;
+  return {
+    type,
+    enum: node.enum,
+    description: raw.description ?? node.description,
+    minimum: node.minimum,
+    maximum: node.maximum,
+    maxItems: node.maxItems,
+    additionalProperties: node.additionalProperties,
+    required: node.required ? [...node.required].sort() : undefined,
+    properties: node.properties ? Object.fromEntries(
+      Object.entries(node.properties).map(([name, property]) => [name, schemaNode(root, property)]),
+    ) : undefined,
+    items: node.items ? schemaNode(root, node.items) : undefined,
+  };
+}
+
+function schemaContract(schema) {
+  return schemaNode(schema, schema);
+}
+
+function normalizedResource(text) {
+  return text.replace(/The server engine is [\s\S]+?independent\./,
+    'The server engine version is reported independently.').replace(
+    /specification ([^\s]+) and the (?:JavaScript|Rust) engine [^\n]+\./,
+    'specification $1 and the active engine.',
+  );
+}
+
+async function results(command, args, engineVersion) {
   const client = new Client({ name: 'rust-conformance', version: '0.1.0' });
   await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
   try {
@@ -44,17 +100,77 @@ async function results(command, args = []) {
       const result = await client.callTool({ name, arguments: callArgs });
       output.push({ name, isError: result.isError ?? false, value: JSON.parse(result.content[0].text) });
     }
-    return { tools: tools.tools.map(({ name }) => name).sort(), output };
+    const resources = await client.listResources();
+    const templates = await client.listResourceTemplates();
+    const completions = [];
+    for (const [uri, name, value] of [
+      ['carve://rules/{ruleId}', 'ruleId', 'CARVE-P12-04'],
+      ['carve://lint-rules/{ruleName}', 'ruleName', 'unclosed'],
+    ]) {
+      completions.push(await client.complete({
+        ref: { type: 'ref/resource', uri }, argument: { name, value },
+      }));
+    }
+    const read = {};
+    const resourceUris = [
+      'carve://guide',
+      'carve://rules',
+      ...ruleIds.map((id) => `carve://rules/${id}`),
+      ...lintRuleNames.map((name) => `carve://lint-rules/${name}`),
+    ];
+    for (const uri of resourceUris) {
+      const response = await client.readResource({ uri });
+      const text = response.contents[0].text;
+      if ((uri === 'carve://guide' || uri === 'carve://rules') && !text.includes(engineVersion)) {
+        throw new Error(`${uri} does not report engine version ${engineVersion}.`);
+      }
+      read[uri] = normalizedResource(text);
+    }
+    const resourceErrors = [];
+    for (const uri of ['carve://rules/carve-nope-999', 'carve://lint-rules/nope', 'carve://nope']) {
+      try { await client.readResource({ uri }); }
+      catch (error) { resourceErrors.push({ code: error.code, message: error.message }); }
+    }
+    return {
+      capabilities: Object.keys(client.getServerCapabilities() ?? {}).sort(),
+      tools: tools.tools.map(({ name, title, description, annotations, inputSchema }) => ({
+        name, title, description, annotations, inputSchema: schemaContract(inputSchema),
+      })).sort((a, b) => a.name.localeCompare(b.name)),
+      resources: resources.resources.map(({ uri, name, title, description, mimeType }) => (
+        { uri, name, title, description, mimeType }
+      )),
+      templates: templates.resourceTemplates.map(({ uriTemplate, name, title, description, mimeType }) => (
+        { uriTemplate, name, title, description, mimeType }
+      )),
+      completions,
+      resourceErrors,
+      read,
+      output,
+    };
   } finally {
     await client.close();
   }
 }
 
-const typescript = await results(process.execPath, ['dist/index.js']);
-const rust = await results(`${target}/debug/carve-mcp-rs`);
+const typescript = await results(process.execPath, ['dist/index.js'], javascriptEngineVersion);
+const rust = await results(`${target}/debug/carve-mcp-rs`, [], rustEngineVersion);
 try {
   deepStrictEqual(rust, typescript);
 } catch (error) {
-  console.error(JSON.stringify({ typescript, rust }, null, 2));
+  for (const key of Object.keys(typescript)) {
+    try { deepStrictEqual(rust[key], typescript[key]); }
+    catch {
+      if (Array.isArray(typescript[key])) {
+        const index = typescript[key].findIndex((value, index) => {
+          try { deepStrictEqual(rust[key][index], value); return false; } catch { return true; }
+        });
+        console.error(`Parity mismatch in ${key}[${index}]:`, JSON.stringify({
+          typescript: typescript[key][index], rust: rust[key][index],
+        }, null, 2));
+      } else {
+        console.error(`Parity mismatch in ${key}.`);
+      }
+    }
+  }
   throw new Error('TypeScript and Rust MCP conformance results differ.', { cause: error });
 }

@@ -115,11 +115,12 @@ tools” in the request.
 
 ## Native binary
 
-The release also provides a `carve-mcp-rs` executable for Linux, macOS, and
-Windows. Replace `npx` and its arguments above with the absolute path to that
-binary when you want lint, format, render, parse, and migrate without Node.js.
-Use the package-based server when you also want authoring resources, HTTP
-transport, or guarded workspace access.
+The release also provides a `carve-mcp-rs` executable for Linux x86-64 (GNU or
+static musl), Linux ARM64, Intel or Apple Silicon macOS, and Windows x86-64.
+Replace `npx` and its arguments above with the absolute path to that binary
+when you want lint, format, render, parse, and migrate without Node.js.
+The native binary includes the same authoring and rule resources. Use the
+package-based server when you need HTTP transport or guarded workspace access.
 
 On Windows, if a client reports that it cannot find `npx`, set the command to
 `npx.cmd`. The native Windows binary avoids this shell-specific difference.
