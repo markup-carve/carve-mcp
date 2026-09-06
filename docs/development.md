@@ -62,19 +62,20 @@ Inputs are limited to 1 MB.
 ## Native Rust server
 
 The native server uses `carve-lang` directly and exposes lint, format, render,
-parse, and migrate over stdio:
+parse, migrate, and the authoring resources over stdio:
 
 ```sh
 cargo run --manifest-path rust/Cargo.toml
 ```
 
-GitHub releases provide Linux x86-64, macOS x86-64 and Apple Silicon, and
-Windows x86-64 binaries. Shared conformance tests require the Rust and
-TypeScript servers to return the same source-tool results.
+GitHub releases provide Linux x86-64 (GNU and static musl), Linux ARM64,
+macOS x86-64 and Apple Silicon, and Windows x86-64 binaries. Shared conformance
+tests require the Rust and TypeScript servers to return the same tool and
+resource contracts.
 
-Choose TypeScript when you need HTTP, resources, or guarded workspace access.
-Choose Rust for a standalone native executable and the five source-processing
-tools.
+Choose TypeScript when you need HTTP or guarded workspace access. Choose Rust
+for a standalone native executable with source processing and embedded
+authoring guidance.
 
 ## HTTP deployment
 

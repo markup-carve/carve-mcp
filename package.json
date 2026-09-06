@@ -16,6 +16,8 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "prepack": "npm run build",
     "release:check": "npm run check && npm test && npm run build && node scripts/release-check.mjs",
+    "sync:rust-resources": "node scripts/sync-rust-resources.mjs",
+    "check:rust-resources": "node scripts/sync-rust-resources.mjs --check",
     "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
