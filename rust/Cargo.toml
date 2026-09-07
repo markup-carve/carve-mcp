@@ -21,6 +21,7 @@ serde_json = "1"
 regex = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
+similar = "2.7.0"
 
 [[bin]]
 name = "carve-mcp-rs"

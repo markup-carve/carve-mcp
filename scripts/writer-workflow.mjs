@@ -17,6 +17,10 @@ try {
   assert.equal(review.isError, undefined);
   assert.equal(review.structuredContent.valid, false);
   assert.ok(review.structuredContent.projectWarnings.some(({ code }) => code === 'CARVE_PROJECT_BROKEN_ANCHOR'));
+  assert.ok(review.structuredContent.fixPlan.writerReview.length > 0);
+  const batch = await client.callTool({ name: 'carve_prepare_workspace_edits', arguments: { rootIndex: 0 } });
+  assert.equal(batch.isError, undefined);
+  assert.ok(batch.structuredContent.items.some(({ unifiedDiff }) => unifiedDiff?.includes('--- a/')));
   const preview = await client.callTool({ name: 'carve_prepare_edit', arguments: { rootIndex: 0, path: 'docs/guide.crv' } });
   assert.equal(readFileSync(join(root, 'docs', 'guide.crv'), 'utf8'), '# Guide   ');
   const { proposedContent, expectedSha256 } = preview.structuredContent;

@@ -27,7 +27,15 @@ describe('writer project workflow', () => {
       ruleCounts: expect.objectContaining({ 'platform-mention-token': 1 }),
       summary: { bySeverity: { error: 2 }, nextActions: expect.arrayContaining([expect.stringContaining('destination')]) },
       projectWarnings: expect.arrayContaining([expect.objectContaining({ code: 'CARVE_PROJECT_BROKEN_ANCHOR', severity: 'error', suggestion: expect.any(String) })]),
+      fixPlan: {
+        automatic: expect.arrayContaining([expect.objectContaining({ mode: 'automatic-format', paths: expect.any(Array) })]),
+        writerReview: expect.arrayContaining([expect.objectContaining({ priority: 1, severity: 'error', mode: 'writer-review' })]),
+      },
     });
+
+    const batch = await client.callTool({ name: 'carve_prepare_workspace_edits', arguments: { rootIndex: 0 } });
+    expect(batch.structuredContent).toMatchObject({ filesPrepared: 2, filesChanged: 2, errorCount: 0,
+      items: expect.arrayContaining([expect.objectContaining({ path: 'docs/guide.crv', unifiedDiff: expect.stringContaining('--- a/docs/guide.crv') })]) });
 
     const preview = await client.callTool({ name: 'carve_prepare_edit', arguments: { rootIndex: 0, path: 'docs/guide.crv' } });
     const proposal = preview.structuredContent as { proposedContent: string; expectedSha256: string };
@@ -39,6 +47,7 @@ describe('writer project workflow', () => {
     expect(await readFile(join(root, 'docs', 'guide.crv'), 'utf8')).toBe(proposal.proposedContent);
     expect(events.map(({ tool, status }) => ({ tool, status }))).toEqual([
       { tool: 'carve_review_workspace', status: 'ok' },
+      { tool: 'carve_prepare_workspace_edits', status: 'ok' },
       { tool: 'carve_prepare_edit', status: 'ok' },
       { tool: 'carve_write_file', status: 'ok' },
     ]);

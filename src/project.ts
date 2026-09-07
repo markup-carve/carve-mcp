@@ -1,6 +1,6 @@
 import { dirname, extname, posix } from 'node:path';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
-import { lint, parse } from './tools.js';
+import { format as formatCarve, lint, parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
 export interface ProjectWarning {
@@ -153,6 +153,27 @@ export async function reviewWorkspace(
   for (const warning of projectWarnings) {
     if (!nextActions.includes(warning.suggestion) && nextActions.length < 5) nextActions.push(warning.suggestion);
   }
+  const automaticPaths: string[] = [];
+  const lossPaths: string[] = [];
+  for (const [path, source] of sources) {
+    if (!CARVE_EXTENSIONS.has(extname(path).toLowerCase())) continue;
+    const formatted = formatCarve(source);
+    if (formatted.value === source) continue;
+    (formatted.totalLosses === 0 ? automaticPaths : lossPaths).push(path);
+  }
+  const writerReview = [...ruleCounts].map(([rule, count]) => {
+    const project = projectWarnings.find((warning) => warning.rule === rule);
+    return {
+      rule, code: project?.code ?? rule, severity: project?.severity ?? 'warning', count, mode: 'writer-review' as const,
+      paths: undefined as string[] | undefined,
+      action: project?.suggestion ?? `Review the ${rule} diagnostics and choose the smallest reader-focused correction.`,
+    };
+  });
+  if (lossPaths.length) writerReview.push({
+    rule: 'format-loss', code: 'CARVE_PROJECT_FORMAT_LOSS', severity: 'warning', count: lossPaths.length, mode: 'writer-review' as const,
+    paths: lossPaths, action: 'Inspect formatting losses before accepting canonical output.',
+  });
+  writerReview.sort((left, right) => (left.severity === right.severity ? left.rule.localeCompare(right.rule) : left.severity === 'error' ? -1 : 1));
 
   return {
     rootIndex,
@@ -161,6 +182,11 @@ export async function reviewWorkspace(
     filesChecked: files.length,
     warningCount: warningCount + projectWarnings.length,
     summary: { bySeverity, nextActions },
+    fixPlan: {
+      automatic: automaticPaths.length ? [{ kind: 'canonical-format', mode: 'automatic-format', paths: automaticPaths,
+        action: 'Preview canonical formatting; it requires no writer judgment and reports no losses.' }] : [],
+      writerReview: writerReview.map((group, index) => ({ priority: index + 1, ...group })),
+    },
     ruleCounts: Object.fromEntries([...ruleCounts].sort(([a], [b]) => a.localeCompare(b))),
     files,
     projectWarnings,

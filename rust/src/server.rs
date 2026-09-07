@@ -115,9 +115,24 @@ struct EditOutputSchema {
     expected_sha256: String,
     changed: bool,
     proposed_content: String,
+    unified_diff: String,
+    diff_truncated: bool,
     losses: Vec<Value>,
     total_losses: i64,
     truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct BatchEditOutputSchema {
+    root_index: i64,
+    files_discovered: i64,
+    files_prepared: i64,
+    files_changed: i64,
+    error_count: i64,
+    items: Vec<Value>,
+    truncated: bool,
+    total_bytes: i64,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -130,6 +145,7 @@ struct ReviewOutputSchema {
     warning_count: i64,
     rule_counts: std::collections::BTreeMap<String, i64>,
     summary: Value,
+    fix_plan: Value,
     files: Vec<Value>,
     project_warnings: Vec<Value>,
     truncated: bool,
@@ -169,6 +185,62 @@ struct WorkspaceReviewInput {
     limit: Option<usize>,
     #[serde(default)]
     platforms: Option<Vec<LintPlatform>>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceBatchEditInput {
+    root_index: usize,
+    #[serde(default)]
+    #[schemars(length(max = 100))]
+    paths: Option<Vec<String>>,
+    #[serde(default = "default_max_depth")]
+    #[schemars(range(max = 25))]
+    max_depth: usize,
+    #[serde(default = "default_batch_limit")]
+    #[schemars(range(min = 1, max = 100))]
+    limit: usize,
+    #[serde(default = "default_diff_bytes")]
+    #[schemars(range(min = 1000, max = 200000))]
+    max_diff_bytes: usize,
+    #[serde(default)]
+    include_content: bool,
+}
+
+fn default_batch_limit() -> usize {
+    100
+}
+fn default_diff_bytes() -> usize {
+    100_000
+}
+
+fn diff_path(path: &str) -> String {
+    path.chars()
+        .map(|value| if !value.is_control() { value } else { '?' })
+        .collect()
+}
+
+fn unified_diff(path: &str, before: &str, after: &str, maximum_bytes: usize) -> (String, bool) {
+    if before == after {
+        return (String::new(), false);
+    }
+    let diff = similar::TextDiff::from_lines(before, after);
+    let value = diff
+        .unified_diff()
+        .context_radius(3)
+        .header(
+            &format!("a/{}", diff_path(path)),
+            &format!("b/{}", diff_path(path)),
+        )
+        .to_string();
+    if value.len() <= maximum_bytes {
+        return (value, false);
+    }
+    let mut end = maximum_bytes.min(value.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (format!("{}\n... diff truncated ...\n", &value[..end]), true)
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -605,6 +677,7 @@ impl CarveServer {
                 "carve_list_files",
                 "carve_review_workspace",
                 "carve_prepare_edit",
+                "carve_prepare_workspace_edits",
                 "carve_write_file",
             ] {
                 tools.remove_route(name);
@@ -636,6 +709,21 @@ impl CarveServer {
                 } else {
                     format!("Found {count} issue{}.", if count == 1 { "" } else { "s" })
                 }
+            })
+            .or_else(|| {
+                value
+                    .get("filesPrepared")
+                    .and_then(Value::as_u64)
+                    .map(|count| {
+                        let changed = value
+                            .get("filesChanged")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0);
+                        format!(
+                            "Prepared {count} file preview{}; {changed} would change.",
+                            if count == 1 { "" } else { "s" }
+                        )
+                    })
             })
             .or_else(|| {
                 value.get("files").and_then(Value::as_array).map(|files| {
@@ -822,11 +910,137 @@ impl CarveServer {
         };
         let source = read["content"].as_str().unwrap();
         match carve::to_carve_with_report(source, CheckedRenderOptions::default()) {
-            Ok(result) => Self::output(
-                json!({"rootIndex":input.root_index,"path":input.path,"expectedSha256":read["sha256"],"changed":result.value != source,"proposedContent":result.value,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"truncated":result.truncated}),
-            ),
+            Ok(result) => {
+                let (diff, diff_truncated) =
+                    unified_diff(&input.path, source, &result.value, 100_000);
+                Self::output(
+                    json!({"rootIndex":input.root_index,"path":input.path,"expectedSha256":read["sha256"],"changed":result.value != source,"proposedContent":result.value,"unifiedDiff":diff,"diffTruncated":diff_truncated,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"truncated":result.truncated}),
+                )
+            }
             Err(error) => Self::error(error.to_string()),
         }
+    }
+
+    #[tool(name = "carve_prepare_workspace_edits", title = "Preview canonical formatting across a workspace", description = "Prepare bounded, hash-guarded formatting proposals and unified diffs for selected or discovered Carve files without writing.", output_schema = rmcp::handler::server::tool::schema_for_type::<BatchEditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn prepare_workspace_edits(
+        &self,
+        Parameters(input): Parameters<WorkspaceBatchEditInput>,
+    ) -> CallToolResult {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Self::error("No workspace roots are configured.");
+        };
+        if input.max_depth > 25 || !(1..=100).contains(&input.limit) {
+            return Self::error("maxDepth must be at most 25 and limit must be between 1 and 100.");
+        }
+        if !(1_000..=200_000).contains(&input.max_diff_bytes) {
+            return Self::error("maxDiffBytes must be between 1000 and 200000.");
+        }
+        if input.paths.as_ref().is_some_and(|paths| paths.len() > 100) {
+            return Self::error("Batch previews support at most 100 files.");
+        }
+        let (paths, files_discovered, list_truncated) = if let Some(paths) = input.paths {
+            let paths = paths
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            if paths.len() > 100 {
+                return Self::error("Batch previews support at most 100 files.");
+            }
+            if paths.iter().any(|path| {
+                !matches!(
+                    std::path::Path::new(path)
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("crv" | "carve")
+                )
+            }) {
+                return Self::error(
+                    "Explicit batch preview paths must use .crv or .carve extensions.",
+                );
+            }
+            let count = paths.len();
+            (paths, count, false)
+        } else {
+            let listing = match workspace.list(input.root_index, input.max_depth, input.limit) {
+                Ok(value) => value,
+                Err(error) => return Self::error(error),
+            };
+            let paths = listing["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let count = paths.len();
+            (
+                paths,
+                count,
+                listing["truncated"].as_bool().unwrap_or(false),
+            )
+        };
+        let maximum_diff_bytes = input.max_diff_bytes;
+        let mut items = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut size_truncated = false;
+        for path in paths.into_iter().filter(|path| {
+            matches!(
+                std::path::Path::new(path)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("crv" | "carve")
+            )
+        }) {
+            let read = match workspace.read(input.root_index, &path) {
+                Ok(value) => value,
+                Err(error) => {
+                    items.push(json!({"path":path,"status":"error","message":error}));
+                    continue;
+                }
+            };
+            let bytes = read["bytes"].as_u64().unwrap() as usize;
+            if total_bytes + bytes > 25_000_000 {
+                size_truncated = true;
+                break;
+            }
+            total_bytes += bytes;
+            let source = read["content"].as_str().unwrap();
+            match carve::to_carve_with_report(source, CheckedRenderOptions::default()) {
+                Ok(result) => {
+                    let changed = result.value != source;
+                    let (diff, diff_truncated) =
+                        unified_diff(&path, source, &result.value, maximum_diff_bytes);
+                    let mut item = json!({"path":path,"status":"ready","expectedSha256":read["sha256"],"changed":changed,"mode":if result.total_losses == 0 { "automatic-format" } else { "writer-review" },"unifiedDiff":diff,"diffTruncated":diff_truncated,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"lossesTruncated":result.truncated});
+                    if changed && input.include_content {
+                        item["proposedContent"] = Value::String(result.value);
+                    }
+                    items.push(item);
+                }
+                Err(error) => {
+                    items.push(json!({"path":path,"status":"error","message":error.to_string()}))
+                }
+            }
+        }
+        let files_prepared = items
+            .iter()
+            .filter(|item| item["status"] == "ready")
+            .count();
+        let files_changed = items
+            .iter()
+            .filter(|item| item["status"] == "ready" && item["changed"] == true)
+            .count();
+        let error_count = items
+            .iter()
+            .filter(|item| item["status"] == "error")
+            .count();
+        Self::output(
+            json!({"rootIndex":input.root_index,"filesDiscovered":files_discovered,"filesPrepared":files_prepared,"filesChanged":files_changed,"errorCount":error_count,"items":items,"truncated":list_truncated || size_truncated,"totalBytes":total_bytes}),
+        )
     }
 
     #[tool(name = "carve_write_file", title = "Write Carve workspace file", description = "Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.", output_schema = rmcp::handler::server::tool::schema_for_type::<WriteOutputSchema>(), annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
@@ -1285,5 +1499,14 @@ mod tests {
             .value,
             "CARVEMCPDIALECTTOKEN0X =marked="
         );
+    }
+
+    #[test]
+    fn unified_diffs_have_context_and_preserve_missing_newlines() {
+        let (value, truncated) =
+            unified_diff("docs/übersicht.crv", "a   \nkeep", "a\nkeep", 10_000);
+        assert!(!truncated);
+        assert!(value.starts_with("--- a/docs/übersicht.crv\n+++ b/docs/übersicht.crv\n"));
+        assert!(value.contains("-a   \n+a\n keep\n\\ No newline at end of file\n"));
     }
 }

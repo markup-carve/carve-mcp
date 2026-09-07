@@ -9,6 +9,7 @@ import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
 import { reviewWorkspace } from './project.js';
 import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
+import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -43,13 +44,15 @@ const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), con
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
 const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dryRun: z.boolean(), created: z.boolean(), currentSha256: z.string().nullable(), sha256: z.string(), bytes: z.number().int() }).loose();
-const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
-const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
+const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 
 function summary(value: unknown): string {
   if (value && typeof value === 'object') {
     const record = value as Record<string, unknown>;
     if (typeof record.warningCount === 'number') return record.warningCount === 0 ? 'No issues found.' : `Found ${record.warningCount} issue${record.warningCount === 1 ? '' : 's'}.`;
+    if (typeof record.filesPrepared === 'number') return `Prepared ${record.filesPrepared} file preview${record.filesPrepared === 1 ? '' : 's'}; ${record.filesChanged} would change.`;
     if (Array.isArray(record.files)) return `Found ${record.files.length} document file${record.files.length === 1 ? '' : 's'}.`;
     if (typeof record.proposedContent === 'string') return record.changed ? `Formatting would change ${String(record.path)}.` : `${String(record.path)} is already canonical.`;
     if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
@@ -126,8 +129,24 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       if (!['.crv', '.carve'].some((extension) => path.toLowerCase().endsWith(extension))) throw new Error('Edit previews require a .crv or .carve file.');
       const current = await workspace.read(rootIndex, path);
       const proposal = formatCarve(current.content);
-      return { rootIndex, path, expectedSha256: current.sha256, changed: proposal.value !== current.content, proposedContent: proposal.value, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
+      const diff = unifiedDiff(path, current.content, proposal.value);
+      return { rootIndex, path, expectedSha256: current.sha256, changed: proposal.value !== current.content, proposedContent: proposal.value,
+        unifiedDiff: diff.value, diffTruncated: diff.truncated, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
     }));
+    server.registerTool('carve_prepare_workspace_edits', {
+      title: 'Preview canonical formatting across a workspace',
+      description: 'Prepare bounded, hash-guarded formatting proposals and unified diffs for selected or discovered Carve files without writing.',
+      inputSchema: z.object({
+        rootIndex: z.number().int().min(0), paths: z.array(z.string().min(1)).max(100).optional(),
+        maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(100).default(100),
+        maxDiffBytes: z.number().int().min(1_000).max(200_000).default(100_000),
+        includeContent: z.boolean().default(false),
+      }).strict(),
+      outputSchema: batchEditOutput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe('carve_prepare_workspace_edits', observe, ({ rootIndex, paths, maxDepth, limit, maxDiffBytes, includeContent }) => (
+      prepareWorkspaceEdits(workspace, rootIndex, { paths, maxDepth, limit, maxDiffBytes, includeContent })
+    )));
     server.registerTool('carve_workspace_info', {
       title: 'List configured Carve workspace roots',
       description: 'List root indexes and whether writes are enabled. Paths are intentionally not exposed.',

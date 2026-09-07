@@ -13,7 +13,8 @@ Implemented tool names:
 - `carve_migrate`
 
 With one or more `--root` arguments it also provides guarded file discovery,
-workspace review, reads, and edit previews. `--allow-write` enables atomic,
+workspace review, reads, single-file and batch edit previews, and unified
+diffs. `--allow-write` enables atomic,
 hash-guarded writes; writes remain dry runs unless the caller opts in on the
 individual call.
 

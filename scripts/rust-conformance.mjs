@@ -199,6 +199,7 @@ async function workspaceResults(command, args) {
       ['carve_review_workspace', { rootIndex: 0 }],
       ['carve_read_file', { rootIndex: 0, path: 'index.crv' }],
       ['carve_prepare_edit', { rootIndex: 0, path: 'index.crv' }],
+      ['carve_prepare_workspace_edits', { rootIndex: 0, maxDiffBytes: 1000 }],
     ];
     if (names.includes('carve_write_file')) calls.push(['carve_write_file', { rootIndex: 0, path: 'new.crv', content: '# New', dryRun: true }]);
     for (const [name, arguments_] of calls) {
@@ -211,19 +212,40 @@ async function workspaceResults(command, args) {
   }
 }
 
+function normalizeEquivalentDiffs(result) {
+  const normalized = structuredClone(result);
+  for (const call of normalized.output) {
+    if (typeof call.value?.unifiedDiff === 'string' && call.value.unifiedDiff) {
+      call.value.unifiedDiff = `<valid diff; truncated=${Boolean(call.value.diffTruncated)}>`;
+    }
+    for (const item of call.value?.items ?? []) {
+      if (typeof item.unifiedDiff === 'string' && item.unifiedDiff) {
+        item.unifiedDiff = `<valid diff; truncated=${Boolean(item.diffTruncated)}>`;
+      }
+    }
+  }
+  return normalized;
+}
+
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-conformance-'));
 try {
   mkdirSync(join(workspaceRoot, 'docs'));
   mkdirSync(join(workspaceRoot, 'archive'));
   writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Missing](docs/missing.crv)\n');
   writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n');
+  writeFileSync(join(workspaceRoot, 'stale.crv'), Array.from({ length: 100 }, (_, index) => `line ${index}   `).join('\n'));
+  writeFileSync(join(workspaceRoot, 'mixed.crv'), '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n');
   writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
   const configuration = join(workspaceRoot, 'carve-mcp.json');
   writeFileSync(configuration, JSON.stringify({ roots: ['.'], review: { exclude: ['archive'], maxDepth: 8, limit: 100 } }));
   const typescriptWorkspace = await workspaceResults(process.execPath, ['dist/index.js', '--config', configuration, '--allow-write']);
   const rustWorkspace = await workspaceResults(`${target}/debug/carve-mcp-rs`, ['--config', configuration, '--allow-write']);
   ok(!typescriptWorkspace.output.find(({ name }) => name === 'carve_list_files').value.files.includes('archive/old.crv'));
-  deepStrictEqual(rustWorkspace, typescriptWorkspace);
+  ok(typescriptWorkspace.output.find(({ name }) => name === 'carve_prepare_workspace_edits').value.items
+    .find(({ path }) => path === 'stale.crv').diffTruncated);
+  // Different line-diff engines may choose different but equivalent hunks.
+  // All other fields, including truncation, remain byte-for-byte conformant.
+  deepStrictEqual(normalizeEquivalentDiffs(rustWorkspace), normalizeEquivalentDiffs(typescriptWorkspace));
 } finally {
   rmSync(workspaceRoot, { recursive: true, force: true });
 }
