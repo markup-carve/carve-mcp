@@ -19,6 +19,13 @@ const cargoLock = readFileSync(new URL('../rust/Cargo.lock', import.meta.url), '
 const rustEngineVersion = cargoLock.match(/\[\[package\]\]\nname = "carve-lang"\nversion = "([^"]+)"/)?.[1];
 if (!rustEngineVersion) throw new Error('Could not resolve carve-lang from Cargo.lock.');
 
+const beforeAst = { type: 'document', children: [{ type: 'heading', level: 1, children: [{ type: 'text', value: 'Before' }], attrs: { id: 'Before' } }], srcByteLength: 8 };
+const afterAst = { type: 'document', children: [{ type: 'heading', level: 1, children: [{ type: 'text', value: 'After' }], attrs: { id: 'After' } }], srcByteLength: 7 };
+const headingPatch = [
+  { op: 'replace', path: '/children/0/children/0/value', value: 'After' },
+  { op: 'replace', path: '/children/0/attrs/id', value: 'After' },
+];
+
 const calls = [
   ['carve_format', { source: '# Hello' }],
   ['carve_render', { source: '# Héllo', target: 'html', preset: 'portable' }],
@@ -30,6 +37,9 @@ const calls = [
   ['carve_render', { source: '`<b>x</b>`{=html}', target: 'html', allowRawHtml: false, sanitizeUrls: true }],
   ['carve_render', { source: '```=latex\nx\n```', target: 'plain' }],
   ['carve_parse', { source: '# Hello' }],
+  ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
+  ['carve_apply_ast_patch', { ast: beforeAst, operations: headingPatch }],
+  ['carve_apply_ast_patch', { ast: beforeAst, operations: [{ op: 'move', path: '/children/0', value: true }] }],
   ['carve_migrate', { source: '<strong>Hello</strong>', format: 'html' }],
   ['carve_migrate', { source: '==marked==', format: 'markdown', markdownDialect: { highlight: true } }],
   ['carve_migrate', { source: '^[note]', format: 'markdown' }],

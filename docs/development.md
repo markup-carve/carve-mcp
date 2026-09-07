@@ -117,6 +117,21 @@ caller explicitly disables it.
 
 Inputs are limited to 1 MB.
 
+## Structured AST patches
+
+Call `carve_parse` for each document, then pass the two PART 12 trees to
+`carve_create_ast_patch`. The returned JSON-Patch subset ignores source
+positions, so formatting-only movement does not become a semantic edit.
+`carve_apply_ast_patch` validates the base tree, every operation, and the
+patched result before returning a new AST and canonical Carve preview. It never
+writes a workspace file; use the existing hash-guarded write flow separately.
+
+ASTs and operation payloads share the 1 MB limit, and a patch may contain at
+most 1,000 operations. Changes to an array's length replace that array rather
+than producing element-by-element operations. Returned ASTs omit source
+positions and use `srcByteLength: 0`; render the included canonical source when
+presenting the result to a writer.
+
 ## Native Rust server
 
 The native server uses `carve-lang` directly and exposes the same document
