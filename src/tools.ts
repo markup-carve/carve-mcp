@@ -5,7 +5,12 @@ import {
   carveToHtmlWithReport,
   carveToMarkdownWithReport,
   carveToPlainTextWithReport,
+  applyAstPatch,
   autolink,
+  createAstPatch,
+  fromAstJson,
+  renderCarve,
+  toAstJson,
   semanticSpan,
   wikilinks,
   lintCarve,
@@ -17,9 +22,12 @@ import {
   type RenderResult,
   type CarveExtension,
   type MarkdownDialect,
+  type AstJsonDocument,
+  type AstPatchOperation,
 } from '@markup-carve/carve';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
+export const MAX_AST_PATCH_OPERATIONS = 1_000;
 export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
 export type SourceFormat = 'html' | 'markdown' | 'djot';
 export type RenderPreset = 'default' | 'portable' | 'static-html';
@@ -99,6 +107,70 @@ export function render(source: string, target: RenderTarget, settings: RenderSet
 export function parse(source: string) {
   validateSource(source);
   return carveToAstJson(source);
+}
+
+function validateStructuredPayload(value: unknown, label: string): number {
+  let serialized: string | undefined;
+  try { serialized = JSON.stringify(value); }
+  catch { throw new Error(`${label} must be JSON-serializable.`); }
+  if (serialized === undefined) throw new Error(`${label} must be JSON-serializable.`);
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes > MAX_SOURCE_BYTES) {
+    throw new Error(`${label} is ${bytes} bytes; the limit is ${MAX_SOURCE_BYTES} bytes.`);
+  }
+  return bytes;
+}
+
+function validateAst(value: unknown, label: string): AstJsonDocument {
+  const bytes = validateStructuredPayload(value, label);
+  fromAstJson(value as AstJsonDocument, bytes);
+  return value as AstJsonDocument;
+}
+
+export function createStructuredAstPatch(before: unknown, after: unknown) {
+  const beforeAst = validateAst(before, 'Before AST');
+  const afterAst = validateAst(after, 'After AST');
+  const operations = createAstPatch(beforeAst, afterAst).sort((left, right) => {
+    const leftPoints = Array.from(left.path, (character) => character.codePointAt(0)!);
+    const rightPoints = Array.from(right.path, (character) => character.codePointAt(0)!);
+    for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
+      if (leftPoints[index] !== rightPoints[index]) return leftPoints[index]! - rightPoints[index]!;
+    }
+    return leftPoints.length - rightPoints.length;
+  });
+  if (operations.length > MAX_AST_PATCH_OPERATIONS) {
+    throw new Error(`Patch has ${operations.length} operations; the limit is ${MAX_AST_PATCH_OPERATIONS}.`);
+  }
+  validateStructuredPayload(operations, 'Patch operations');
+  return { operations, operationCount: operations.length };
+}
+
+function validatePatchOperations(operations: unknown[]): asserts operations is AstPatchOperation[] {
+  for (const operation of operations) {
+    if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
+      throw new Error('patch operation must be an object');
+    }
+    const record = operation as Record<string, unknown>;
+    if (typeof record.op !== 'string') throw new Error('patch operation requires a string op');
+    if (typeof record.path !== 'string') throw new Error('patch operation requires a string path');
+    if (Object.keys(record).some((key) => key !== 'op' && key !== 'path' && key !== 'value')) throw new Error('patch operation has an unknown property');
+    const hasValue = Object.hasOwn(record, 'value');
+    if ((record.op === 'add' || record.op === 'replace') && !hasValue) throw new Error('patch add and replace require a value');
+    if (record.op === 'remove' && hasValue) throw new Error('patch remove must not carry a value');
+    if (record.op !== 'add' && record.op !== 'replace' && record.op !== 'remove') throw new Error('unknown patch operation');
+  }
+}
+
+export function applyStructuredAstPatch(ast: unknown, operations: unknown[]) {
+  if (operations.length > MAX_AST_PATCH_OPERATIONS) {
+    throw new Error(`Patch has ${operations.length} operations; the limit is ${MAX_AST_PATCH_OPERATIONS}.`);
+  }
+  validateStructuredPayload(operations, 'Patch operations');
+  validatePatchOperations(operations);
+  const base = validateAst(ast, 'AST');
+  const patched = applyAstPatch(base, operations);
+  const normalized = fromAstJson(patched, Buffer.byteLength(JSON.stringify(patched), 'utf8'));
+  return { ast: toAstJson(normalized), source: renderCarve(normalized) };
 }
 
 export function migrate(source: string, format: SourceFormat, dialect?: MarkdownDialect): MigrationResult {

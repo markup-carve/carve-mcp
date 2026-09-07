@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { format, lint, MAX_SOURCE_BYTES, migrate, parse, render, validateSource } from './tools.js';
+import { applyStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, validateSource } from './tools.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -29,6 +29,40 @@ describe('Carve operations', () => {
     expect(render(source, 'html', { allowRawHtml: true }).value).toContain('<script>');
   });
   it('returns a position-aware AST', () => expect(parse('# Hello')).toMatchObject({ type: 'document' }));
+  it('creates and applies position-independent AST patches', () => {
+    const before = parse('# Before');
+    const after = parse('# After');
+    const patch = createStructuredAstPatch(before, after);
+    expect(patch.operationCount).toBeGreaterThan(0);
+    expect(patch.operations).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'replace' })]));
+    const applied = applyStructuredAstPatch(before, patch.operations);
+    expect(applied.ast).toEqual(expect.objectContaining({ type: 'document', srcByteLength: 0 }));
+    expect(applied.source).toContain('After');
+    expect(before).toMatchObject({ srcByteLength: 8 });
+  });
+  it('rejects malformed or excessive AST patches', () => {
+    const ast = parse('# Hello');
+    expect(() => applyStructuredAstPatch(ast, [{ op: 'replace', path: '/nope', value: true }])).toThrow(/does not exist/);
+    expect(() => createStructuredAstPatch({ type: 'doc' }, ast)).toThrow(/document/);
+    expect(() => applyStructuredAstPatch(ast, [{ op: 'move', path: '/children/0', value: true }])).toThrow(/unknown patch operation/);
+    expect(() => applyStructuredAstPatch(ast, [{ op: 'remove', path: '/children/0', value: true }])).toThrow(/must not carry a value/);
+    expect(() => applyStructuredAstPatch(ast, Array.from({ length: MAX_AST_PATCH_OPERATIONS + 1 }, () => ({ op: 'remove', path: '/children/0' })))).toThrow(/limit/);
+    expect(() => applyStructuredAstPatch(ast, [{ op: 'replace', path: '/children/0', value: 'x'.repeat(MAX_SOURCE_BYTES) }])).toThrow(/limit/);
+  });
+  it('orders patch paths deterministically by code point', () => {
+    const before = parse('[x]{Foo="1" bar="2"}');
+    const after = parse('[x]{Foo="9" bar="8"}');
+    expect(createStructuredAstPatch(before, after).operations.map(({ path }) => path)).toEqual([
+      '/children/0/children/0/attrs/keyValues/Foo',
+      '/children/0/children/0/attrs/keyValues/bar',
+    ]);
+  });
+  it('normalizes the returned AST to match its rendered source', () => {
+    const ast = parse('Body');
+    const footnote = { type: 'footnote', label: 'note', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Note' }] }] };
+    const applied = applyStructuredAstPatch(ast, [{ op: 'replace', path: '/children', value: [footnote, ...ast.children] }]);
+    expect(createStructuredAstPatch(applied.ast, parse(applied.source)).operationCount).toBe(0);
+  });
   it('migrates each input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({
       value: expect.stringContaining('Hello'),

@@ -10,6 +10,10 @@ default and can be enabled for explicitly configured document roots.
 - `carve_format` produces canonical Carve and reports rendering losses.
 - `carve_render` renders HTML, Markdown, plain text, or ANSI.
 - `carve_parse` returns the resolved, position-aware interchange AST.
+- `carve_create_ast_patch` compares two interchange ASTs and returns a
+  position-independent patch.
+- `carve_apply_ast_patch` validates and previews a patch as both an AST and
+  canonical Carve source without changing files.
 - `carve_migrate` converts HTML, Markdown, or Djot and reports migration fidelity.
 
 Tools return concise text for readers alongside schema-validated structured

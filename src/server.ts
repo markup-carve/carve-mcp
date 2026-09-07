@@ -2,7 +2,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
-import { format as formatCarve, lint, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
+import { applyStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
@@ -45,6 +45,8 @@ const warningOutput = z.object({
 const lintOutput = z.object({ valid: z.boolean(), warningCount: z.number().int(), warnings: z.array(warningOutput) }).loose();
 const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
+const astPatchCreateOutput = z.object({ operations: z.array(z.unknown()), operationCount: z.number().int() }).loose();
+const astPatchApplyOutput = z.object({ ast: z.unknown(), source: z.string() }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
@@ -64,6 +66,8 @@ function summary(value: unknown): string {
     if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
+    if (typeof record.operationCount === 'number') return `Created ${record.operationCount} AST patch operation${record.operationCount === 1 ? '' : 's'}.`;
+    if (record.ast && typeof record.source === 'string') return 'Applied the AST patch and produced canonical Carve source.';
     if (typeof record.value === 'string') return 'Produced the requested output.';
   }
   return 'Completed successfully.';
@@ -256,6 +260,29 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     outputSchema: parseOutput,
     annotations: readOnly,
   }, safe('carve_parse', observe, ({ source: document }) => parse(document)));
+
+  server.registerTool('carve_create_ast_patch', {
+    title: 'Create structured AST patch',
+    description: 'Compare two PART 12 Carve ASTs and return position-independent add, replace, and remove operations.',
+    inputSchema: z.object({
+      before: z.unknown().describe(`PART 12 AST before the edit (maximum ${MAX_SOURCE_BYTES} JSON bytes)`),
+      after: z.unknown().describe(`PART 12 AST after the edit (maximum ${MAX_SOURCE_BYTES} JSON bytes)`),
+    }),
+    outputSchema: astPatchCreateOutput,
+    annotations: readOnly,
+  }, safe('carve_create_ast_patch', observe, ({ before, after }) => createStructuredAstPatch(before, after)));
+
+  server.registerTool('carve_apply_ast_patch', {
+    title: 'Apply structured AST patch',
+    description: 'Validate and apply structured operations to a PART 12 Carve AST, returning the patched AST and canonical Carve source.',
+    inputSchema: z.object({
+      ast: z.unknown().describe(`PART 12 base AST (maximum ${MAX_SOURCE_BYTES} JSON bytes)`),
+      operations: z.array(z.unknown()).max(MAX_AST_PATCH_OPERATIONS)
+        .describe(`Structured patch operations (maximum ${MAX_AST_PATCH_OPERATIONS} operations and ${MAX_SOURCE_BYTES} JSON bytes)`),
+    }),
+    outputSchema: astPatchApplyOutput,
+    annotations: readOnly,
+  }, safe('carve_apply_ast_patch', observe, ({ ast, operations }) => applyStructuredAstPatch(ast, operations)));
 
   server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',

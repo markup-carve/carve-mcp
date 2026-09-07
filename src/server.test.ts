@@ -15,7 +15,8 @@ describe('MCP server', () => {
 
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual([
-      'carve_lint', 'carve_format', 'carve_render', 'carve_parse', 'carve_migrate',
+      'carve_lint', 'carve_format', 'carve_render', 'carve_parse',
+      'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_migrate',
     ]);
     expect(listed.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -34,6 +35,16 @@ describe('MCP server', () => {
     expect(called.content).toEqual([{ type: 'text', text: 'Produced the requested output.' }]);
     expect(called.structuredContent).toEqual(expect.objectContaining({ value: expect.stringContaining('<h1') }));
     expect(listed.tools.every((tool) => tool.outputSchema?.type === 'object')).toBe(true);
+
+    const before = (await client.callTool({ name: 'carve_parse', arguments: { source: '# Before' } })).structuredContent;
+    const after = (await client.callTool({ name: 'carve_parse', arguments: { source: '# After' } })).structuredContent;
+    const patch = await client.callTool({ name: 'carve_create_ast_patch', arguments: { before, after } });
+    expect(patch.structuredContent).toMatchObject({ operationCount: 2 });
+    const applied = await client.callTool({
+      name: 'carve_apply_ast_patch',
+      arguments: { ast: before, operations: (patch.structuredContent as { operations: unknown[] }).operations },
+    });
+    expect(applied.structuredContent).toMatchObject({ source: expect.stringContaining('After') });
   });
 
   it('offers a small set of writer-controlled workflows', async () => {

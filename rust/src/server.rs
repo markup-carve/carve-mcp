@@ -27,6 +27,15 @@ use serde_json::{Value, json};
 use crate::{resources, workspace::Workspace};
 
 pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
+const MAX_AST_PATCH_OPERATIONS: usize = 1_000;
+
+fn ast_patch_path(operation: &carve::AstPatchOperation) -> &str {
+    match operation {
+        carve::AstPatchOperation::Add { path, .. }
+        | carve::AstPatchOperation::Replace { path, .. }
+        | carve::AstPatchOperation::Remove { path } => path,
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -52,6 +61,19 @@ struct ParseOutputSchema {
     r#type: String,
     children: Vec<Value>,
     src_byte_length: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct AstPatchCreateOutputSchema {
+    operations: Vec<Value>,
+    operation_count: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AstPatchApplyOutputSchema {
+    ast: Value,
+    source: String,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -341,6 +363,25 @@ struct WorkspaceWriteInput {
 struct SourceInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AstPatchCreateInput {
+    #[schemars(description = "PART 12 AST before the edit (maximum 1000000 JSON bytes)")]
+    before: Value,
+    #[schemars(description = "PART 12 AST after the edit (maximum 1000000 JSON bytes)")]
+    after: Value,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AstPatchApplyInput {
+    #[schemars(description = "PART 12 base AST (maximum 1000000 JSON bytes)")]
+    ast: Value,
+    #[schemars(
+        length(max = 1000),
+        description = "Structured patch operations (maximum 1000 operations and 1000000 JSON bytes)"
+    )]
+    operations: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -858,6 +899,22 @@ impl CarveServer {
             })
             .or_else(|| {
                 value
+                    .get("operationCount")
+                    .and_then(Value::as_u64)
+                    .map(|count| {
+                        format!(
+                            "Created {count} AST patch operation{}.",
+                            if count == 1 { "" } else { "s" }
+                        )
+                    })
+            })
+            .or_else(|| {
+                (value.get("ast").is_some()
+                    && value.get("source").and_then(Value::as_str).is_some())
+                .then(|| "Applied the AST patch and produced canonical Carve source.".into())
+            })
+            .or_else(|| {
+                value
                     .get("value")
                     .and_then(Value::as_str)
                     .map(|_| "Produced the requested output.".into())
@@ -1320,6 +1377,139 @@ impl CarveServer {
         match serde_json::from_str(&value) {
             Ok(value) => Self::output(value),
             Err(error) => Self::error(format!("AST serialization failed: {error}")),
+        }
+    }
+
+    #[tool(
+        name = "carve_create_ast_patch",
+        title = "Create structured AST patch",
+        description = "Compare two PART 12 Carve ASTs and return position-independent add, replace, and remove operations.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstPatchCreateOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn create_ast_patch(
+        &self,
+        Parameters(input): Parameters<AstPatchCreateInput>,
+    ) -> CallToolResult {
+        let before_json = match serde_json::to_string(&input.before) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "Before AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => {
+                return Self::error(format!("Before AST must be JSON-serializable: {error}"));
+            }
+        };
+        let after_json = match serde_json::to_string(&input.after) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "After AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => {
+                return Self::error(format!("After AST must be JSON-serializable: {error}"));
+            }
+        };
+        let result = carve::from_json(&before_json)
+            .and_then(|before| carve::from_json(&after_json).map(|after| (before, after)))
+            .map_err(|error| error.to_string())
+            .and_then(|(before, after)| {
+                carve::create_ast_patch(&before, &after).map_err(|error| error.to_string())
+            })
+            .and_then(|mut operations| {
+                operations.sort_by(|left, right| ast_patch_path(left).cmp(ast_patch_path(right)));
+                let count = operations.len();
+                if count > MAX_AST_PATCH_OPERATIONS {
+                    return Err(format!(
+                        "Patch has {count} operations; the limit is {MAX_AST_PATCH_OPERATIONS}."
+                    ));
+                }
+                carve::ast_patch_to_json(&operations)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| {
+                        if value.len() > MAX_SOURCE_BYTES {
+                            Err(format!(
+                                "Patch operations is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                                value.len()
+                            ))
+                        } else {
+                            Ok((value, count))
+                        }
+                    })
+            });
+        match result {
+            Ok((operations, count)) => match serde_json::from_str::<Value>(&operations) {
+                Ok(operations) => {
+                    Self::output(json!({"operations": operations, "operationCount": count}))
+                }
+                Err(error) => Self::error(format!("AST patch serialization failed: {error}")),
+            },
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(
+        name = "carve_apply_ast_patch",
+        title = "Apply structured AST patch",
+        description = "Validate and apply structured operations to a PART 12 Carve AST, returning the patched AST and canonical Carve source.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstPatchApplyOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn apply_ast_patch(&self, Parameters(input): Parameters<AstPatchApplyInput>) -> CallToolResult {
+        if input.operations.len() > MAX_AST_PATCH_OPERATIONS {
+            return Self::error(format!(
+                "Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.",
+                input.operations.len()
+            ));
+        }
+        let operations_json = match serde_json::to_string(&input.operations) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "Patch operations is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => {
+                return Self::error(format!(
+                    "Patch operations must be JSON-serializable: {error}"
+                ));
+            }
+        };
+        let operations = match carve::ast_patch_from_json(&operations_json) {
+            Ok(operations) => operations,
+            Err(error) => return Self::error(error.to_string()),
+        };
+        let ast_json = match serde_json::to_string(&input.ast) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => return Self::error(format!("AST must be JSON-serializable: {error}")),
+        };
+        let result = carve::from_json(&ast_json)
+            .map(|ast| (ast, operations))
+            .map_err(|error| error.to_string())
+            .and_then(|(ast, operations)| {
+                carve::apply_ast_patch(&ast, &operations).map_err(|error| error.to_string())
+            })
+            .and_then(|patched| {
+                let source = carve::render_carve(&patched).map_err(|error| error.to_string())?;
+                let ast = carve::try_to_json(&patched).map_err(|error| error.to_string())?;
+                Ok((ast, source))
+            });
+        match result {
+            Ok((ast, source)) => match serde_json::from_str::<Value>(&ast) {
+                Ok(ast) => Self::output(json!({"ast": ast, "source": source})),
+                Err(error) => Self::error(format!("AST serialization failed: {error}")),
+            },
+            Err(error) => Self::error(error),
         }
     }
 
