@@ -10,10 +10,16 @@ import { reviewWorkspace } from './project.js';
 import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
 import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
+import { createSourcePatch } from './source-patch.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
+const sourceEditOutput = z.object({ start: z.number().int().min(0), end: z.number().int().min(0), replacement: z.string(),
+  kind: z.enum(['formatting', 'syntax-migration', 'quick-fix', 'refactor']), code: z.string().min(1) }).strict();
+const sourcePatchOutput = z.object({ version: z.literal(1), sourceFingerprint: z.string().regex(/^fnv1a64:[0-9a-f]{16}$/),
+  sourceBytes: z.number().int().min(0), edits: z.array(sourceEditOutput),
+  unresolved: z.array(sourceEditOutput.extend({ message: z.string().min(1) })) }).strict();
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
 const renderSettings = {
   preset: z.enum(['default', 'portable', 'static-html']).default('default').describe('portable lowercases IDs and transliterates where possible; static-html is HTML-only.'),
@@ -44,7 +50,7 @@ const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), con
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
 const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dryRun: z.boolean(), created: z.boolean(), currentSha256: z.string().nullable(), sha256: z.string(), bytes: z.number().int() }).loose();
-const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
+const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 
@@ -122,20 +128,23 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     })));
     server.registerTool('carve_prepare_edit', {
       title: 'Preview canonical Carve formatting',
-      description: 'Read and canonically format a Carve workspace file, returning a hash-guarded proposal without writing.',
+      description: 'Read and canonically format a Carve workspace file without writing. A lossless result includes a stale-guarded patch with UTF-8 byte ranges; a lossy writer-review result has patch: null.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: editOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe('carve_prepare_edit', observe, async ({ rootIndex, path }) => {
       if (!['.crv', '.carve'].some((extension) => path.toLowerCase().endsWith(extension))) throw new Error('Edit previews require a .crv or .carve file.');
       const current = await workspace.read(rootIndex, path);
       const proposal = formatCarve(current.content);
+      const patch = proposal.totalLosses === 0
+        ? createSourcePatch(current.content, proposal.value, 'formatting', 'canonical-format')
+        : null;
       const diff = unifiedDiff(path, current.content, proposal.value);
       return { rootIndex, path, expectedSha256: current.sha256, changed: proposal.value !== current.content, proposedContent: proposal.value,
-        unifiedDiff: diff.value, diffTruncated: diff.truncated, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
+        unifiedDiff: diff.value, diffTruncated: diff.truncated, patch, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
     }));
     server.registerTool('carve_prepare_workspace_edits', {
       title: 'Preview canonical formatting across a workspace',
-      description: 'Prepare bounded, hash-guarded formatting proposals and unified diffs for selected or discovered Carve files without writing.',
+      description: 'Prepare bounded formatting proposals and unified diffs without writing. Lossless items include stale-guarded UTF-8 byte patches; lossy writer-review items have patch: null.',
       inputSchema: z.object({
         rootIndex: z.number().int().min(0), paths: z.array(z.string().min(1)).max(100).optional(),
         maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(100).default(100),

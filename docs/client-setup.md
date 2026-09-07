@@ -123,5 +123,9 @@ The native binary includes the same prompts, authoring resources, guarded
 workspace review, preview, and writes. Use the package-based server when you
 need HTTP transport.
 
+For an editor running its MCP client in a browser worker, see
+[Browser workers and Content Security Policy](browser-workers.md). It shows
+one shared asynchronous connection and a restrictive deployment policy.
+
 On Windows, if a client reports that it cannot find `npx`, set the command to
 `npx.cmd`. The native Windows binary avoids this shell-specific difference.
