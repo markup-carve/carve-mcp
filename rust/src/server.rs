@@ -117,9 +117,91 @@ struct EditOutputSchema {
     proposed_content: String,
     unified_diff: String,
     diff_truncated: bool,
+    patch: Option<SourcePatchOutputSchema>,
     losses: Vec<Value>,
     total_losses: i64,
     truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SourcePatchOutputSchema {
+    version: i64,
+    source_fingerprint: String,
+    source_bytes: i64,
+    edits: Vec<SourceEditOutputSchema>,
+    unresolved: Vec<SourceSuggestionOutputSchema>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SourceEditOutputSchema {
+    start: i64,
+    end: i64,
+    replacement: String,
+    kind: SourceEditKindOutputSchema,
+    code: String,
+}
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum SourceEditKindOutputSchema {
+    Formatting,
+    SyntaxMigration,
+    QuickFix,
+    Refactor,
+}
+
+fn source_patch(source: &str, replacement: &str) -> SourcePatchOutputSchema {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in source.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    let before = source.as_bytes();
+    let after = replacement.as_bytes();
+    let mut start = before.iter().zip(after).take_while(|(a, b)| a == b).count();
+    while start > 0 && (!source.is_char_boundary(start) || !replacement.is_char_boundary(start)) {
+        start -= 1;
+    }
+    let (mut old_end, mut new_end) = (before.len(), after.len());
+    while old_end > start && new_end > start && before[old_end - 1] == after[new_end - 1] {
+        old_end -= 1;
+        new_end -= 1;
+    }
+    while !source.is_char_boundary(old_end) || !replacement.is_char_boundary(new_end) {
+        old_end += 1;
+        new_end += 1;
+    }
+    let edits = if source == replacement {
+        Vec::new()
+    } else {
+        vec![SourceEditOutputSchema {
+            start: start as i64,
+            end: old_end as i64,
+            replacement: replacement[start..new_end].into(),
+            kind: SourceEditKindOutputSchema::Formatting,
+            code: "canonical-format".into(),
+        }]
+    };
+    SourcePatchOutputSchema {
+        version: 1,
+        source_fingerprint: format!("fnv1a64:{hash:016x}"),
+        source_bytes: source.len() as i64,
+        edits,
+        unresolved: Vec::new(),
+    }
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SourceSuggestionOutputSchema {
+    start: i64,
+    end: i64,
+    replacement: String,
+    kind: SourceEditKindOutputSchema,
+    code: String,
+    message: String,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -892,7 +974,7 @@ impl CarveServer {
         }
     }
 
-    #[tool(name = "carve_prepare_edit", title = "Preview canonical Carve formatting", description = "Read and canonically format a Carve workspace file, returning a hash-guarded proposal without writing.", output_schema = rmcp::handler::server::tool::schema_for_type::<EditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    #[tool(name = "carve_prepare_edit", title = "Preview canonical Carve formatting", description = "Read and canonically format a Carve workspace file without writing. A lossless result includes a stale-guarded patch with UTF-8 byte ranges; a lossy writer-review result has patch: null.", output_schema = rmcp::handler::server::tool::schema_for_type::<EditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
     fn prepare_edit(&self, Parameters(input): Parameters<WorkspacePathInput>) -> CallToolResult {
         if !input.path.to_ascii_lowercase().ends_with(".crv")
             && !input.path.to_ascii_lowercase().ends_with(".carve")
@@ -913,15 +995,20 @@ impl CarveServer {
             Ok(result) => {
                 let (diff, diff_truncated) =
                     unified_diff(&input.path, source, &result.value, 100_000);
+                let patch = if result.total_losses == 0 {
+                    Some(source_patch(source, &result.value))
+                } else {
+                    None
+                };
                 Self::output(
-                    json!({"rootIndex":input.root_index,"path":input.path,"expectedSha256":read["sha256"],"changed":result.value != source,"proposedContent":result.value,"unifiedDiff":diff,"diffTruncated":diff_truncated,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"truncated":result.truncated}),
+                    json!({"rootIndex":input.root_index,"path":input.path,"expectedSha256":read["sha256"],"changed":result.value != source,"proposedContent":result.value,"unifiedDiff":diff,"diffTruncated":diff_truncated,"patch":patch,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"truncated":result.truncated}),
                 )
             }
             Err(error) => Self::error(error.to_string()),
         }
     }
 
-    #[tool(name = "carve_prepare_workspace_edits", title = "Preview canonical formatting across a workspace", description = "Prepare bounded, hash-guarded formatting proposals and unified diffs for selected or discovered Carve files without writing.", output_schema = rmcp::handler::server::tool::schema_for_type::<BatchEditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    #[tool(name = "carve_prepare_workspace_edits", title = "Preview canonical formatting across a workspace", description = "Prepare bounded formatting proposals and unified diffs without writing. Lossless items include stale-guarded UTF-8 byte patches; lossy writer-review items have patch: null.", output_schema = rmcp::handler::server::tool::schema_for_type::<BatchEditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
     fn prepare_workspace_edits(
         &self,
         Parameters(input): Parameters<WorkspaceBatchEditInput>,
@@ -1015,7 +1102,12 @@ impl CarveServer {
                     let changed = result.value != source;
                     let (diff, diff_truncated) =
                         unified_diff(&path, source, &result.value, maximum_diff_bytes);
-                    let mut item = json!({"path":path,"status":"ready","expectedSha256":read["sha256"],"changed":changed,"mode":if result.total_losses == 0 { "automatic-format" } else { "writer-review" },"unifiedDiff":diff,"diffTruncated":diff_truncated,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"lossesTruncated":result.truncated});
+                    let patch = if result.total_losses == 0 {
+                        Some(source_patch(source, &result.value))
+                    } else {
+                        None
+                    };
+                    let mut item = json!({"path":path,"status":"ready","expectedSha256":read["sha256"],"changed":changed,"mode":if result.total_losses == 0 { "automatic-format" } else { "writer-review" },"unifiedDiff":diff,"diffTruncated":diff_truncated,"patch":patch,"losses":result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"totalLosses":result.total_losses,"lossesTruncated":result.truncated});
                     if changed && input.include_content {
                         item["proposedContent"] = Value::String(result.value);
                     }

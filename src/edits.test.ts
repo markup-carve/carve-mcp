@@ -30,7 +30,10 @@ describe('edit previews', () => {
     expect(preview).toMatchObject({ filesDiscovered: 2, filesPrepared: 2, filesChanged: 2, errorCount: 0 });
     expect(preview.items.map(({ path }) => path)).toEqual(['a.crv', 'b.crv']);
     expect(preview.items[1]).toMatchObject({ status: 'ready', mode: 'automatic-format', changed: true,
-      expectedSha256: expect.stringMatching(/^[a-f0-9]{64}$/), unifiedDiff: expect.stringContaining('-# B   ') });
+      expectedSha256: expect.stringMatching(/^[a-f0-9]{64}$/), unifiedDiff: expect.stringContaining('-# B   '),
+      patch: { version: 1, sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) } });
+    const item = preview.items[1] as { patch: { edits: Array<{ start: number; end: number; replacement: string }> } };
+    expect(item.patch.edits).toEqual([{ start: 3, end: 6, replacement: '\n', kind: 'formatting', code: 'canonical-format' }]);
     expect(preview.items[1]).not.toHaveProperty('proposedContent');
     expect(await readFile(join(root, 'b.crv'), 'utf8')).toBe('# B   ');
     await expect(prepareWorkspaceEdits(workspace, 0, { paths: ['notes.md'] })).rejects.toThrow(/\.crv/);

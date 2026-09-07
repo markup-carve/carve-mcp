@@ -1,6 +1,7 @@
 import { extname } from 'node:path';
 import { structuredPatch } from 'diff';
 import { format as formatCarve } from './tools.js';
+import { createSourcePatch } from './source-patch.js';
 import type { Workspace } from './workspace.js';
 
 const CARVE_EXTENSIONS = new Set(['.crv', '.carve']);
@@ -61,12 +62,16 @@ export async function prepareWorkspaceEdits(
       if (totalBytes + current.bytes > MAX_BATCH_BYTES) { sizeTruncated = true; break; }
       totalBytes += current.bytes;
       const proposal = formatCarve(current.content);
+      const sourcePatch = proposal.totalLosses === 0
+        ? createSourcePatch(current.content, proposal.value, 'formatting', 'canonical-format')
+        : null;
       const changed = proposal.value !== current.content;
       const diff = unifiedDiff(path, current.content, proposal.value, maximumDiffBytes);
       const item: Record<string, unknown> = {
         path, status: 'ready', expectedSha256: current.sha256, changed,
         mode: proposal.totalLosses === 0 ? 'automatic-format' : 'writer-review',
         unifiedDiff: diff.value, diffTruncated: diff.truncated,
+        patch: sourcePatch,
         losses: proposal.losses, totalLosses: proposal.totalLosses, lossesTruncated: proposal.truncated,
       };
       if (changed && options.includeContent) item.proposedContent = proposal.value;

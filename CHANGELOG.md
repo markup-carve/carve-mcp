@@ -24,6 +24,10 @@ All notable changes to this project are documented in this file.
   from diagnostics or rendering losses requiring writer judgment.
 - Bounded single-file and selective batch previews with unified diffs,
   opt-in batch content, and per-file stale-write hashes in both servers.
+- Versioned, fingerprint-guarded UTF-8 source patches on single-file and batch
+  previews, shared by the npm and native Rust servers.
+- Worker-safe asynchronous client initialization and concrete Content Security
+  Policy guidance for browser-hosted editors.
 
 ## 0.1.2 - 2026-09-06
 
