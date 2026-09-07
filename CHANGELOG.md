@@ -20,6 +20,10 @@ All notable changes to this project are documented in this file.
   prioritized next actions, and an honest client compatibility checklist.
 - Optional project configuration shared by the package and Rust servers.
 - Privacy-safe tool event logging and opt-in HTTP aggregate metrics.
+- Ordered workspace fix plans that distinguish lossless canonical formatting
+  from diagnostics or rendering losses requiring writer judgment.
+- Bounded single-file and selective batch previews with unified diffs,
+  opt-in batch content, and per-file stale-write hashes in both servers.
 
 ## 0.1.2 - 2026-09-06
 
