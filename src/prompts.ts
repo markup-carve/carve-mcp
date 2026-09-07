@@ -27,6 +27,6 @@ export const writerPrompts = [
   {
     name: 'review-workspace', title: 'Review a documentation folder',
     description: 'Review an authorized documentation workspace as a bounded project.',
-    text: 'Review the authorized documentation workspace with carve_review_workspace. Prioritize problems that affect readers, group repeated diagnostics, call out broken local links and anchors, and propose a small ordered change set. Do not write files without previewing and receiving approval.',
+    text: 'Review the authorized documentation workspace with carve_review_workspace. Prioritize problems that affect readers, use its fix plan to separate lossless formatting from changes requiring judgment, and call out broken local links and anchors. Use carve_prepare_workspace_edits for a readable batch preview. Do not write files without previewing and receiving approval.',
   },
 ] as const;

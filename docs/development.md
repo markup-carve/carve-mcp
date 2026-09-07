@@ -49,8 +49,21 @@ aborting the remaining review. A review reads at most 25 MB in total, in
 addition to the 1 MB per-file limit.
 
 `carve_prepare_edit` reads and canonically formats a `.crv` or `.carve` file,
-then returns the proposed content and the source hash without writing. A caller
-can inspect that proposal and pass its content and hash to `carve_write_file`.
+then returns the proposed content, a bounded unified diff, and the source hash
+without writing. `carve_prepare_workspace_edits` does the same for up to 100
+selected or discovered Carve files and 25 MB of input. Each result says whether
+the proposal is lossless automatic formatting or requires writer review. To
+keep the batch response compact, full proposed content is opt-in with
+`includeContent`; callers can otherwise request a single-file preview before
+writing. A caller can inspect a proposal and pass its content and hash to
+`carve_write_file`; batch preview never writes or weakens stale-write checks.
+
+Workspace review returns an ordered fix plan. Lossless canonical formatting is
+kept separate from grouped diagnostics and any formatting that reports content
+loss, so clients can present safe cleanup without implying that subjective or
+lossy changes are automatic.
+Formatting-loss groups list their affected paths in the fix plan; they do not
+change lint-oriented `valid` or `warningCount` fields.
 
 Add `--allow-write` to register `carve_write_file`. Writes default to dry runs,
 stay inside canonicalized roots, preserve existing file modes, and require the

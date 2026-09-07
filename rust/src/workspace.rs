@@ -6,6 +6,7 @@ use std::{
 };
 
 use atomic_write_file::OpenOptions as AtomicOpenOptions;
+use carve::CheckedRenderOptions;
 use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -473,6 +474,58 @@ impl Workspace {
                 *counts.entry(rule.into()).or_default() += 1;
             }
         }
+        let mut automatic_paths = Vec::new();
+        let mut loss_paths = Vec::new();
+        for (path, source) in &sources {
+            if !matches!(
+                Path::new(path)
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("crv" | "carve")
+            ) {
+                continue;
+            }
+            let formatted = carve::to_carve_with_report(source, CheckedRenderOptions::default())
+                .map_err(|error| error.to_string())?;
+            if formatted.value == *source {
+                continue;
+            }
+            if formatted.total_losses == 0 {
+                automatic_paths.push(path.clone());
+            } else {
+                loss_paths.push(path.clone());
+            }
+        }
+        let mut writer_review = counts.iter().map(|(rule, count)| {
+            let project = project_warnings.iter().find(|warning| warning["rule"] == rule.as_str());
+            let action = project
+                .and_then(|warning| warning["suggestion"].as_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("Review the {rule} diagnostics and choose the smallest reader-focused correction."));
+            json!({"rule":rule,"code":project.and_then(|warning| warning["code"].as_str()).unwrap_or(rule),"severity":project.and_then(|warning| warning["severity"].as_str()).unwrap_or("warning"),"count":count,"mode":"writer-review","action":action})
+        }).collect::<Vec<_>>();
+        if !loss_paths.is_empty() {
+            writer_review.push(json!({"rule":"format-loss","code":"CARVE_PROJECT_FORMAT_LOSS","severity":"warning","count":loss_paths.len(),"paths":loss_paths,"mode":"writer-review","action":"Inspect formatting losses before accepting canonical output."}));
+        }
+        writer_review.sort_by(|left, right| {
+            let left_rank = if left["severity"] == "error" { 0 } else { 1 };
+            let right_rank = if right["severity"] == "error" { 0 } else { 1 };
+            left_rank
+                .cmp(&right_rank)
+                .then_with(|| left["rule"].as_str().cmp(&right["rule"].as_str()))
+        });
+        for (index, group) in writer_review.iter_mut().enumerate() {
+            group["priority"] = json!(index + 1);
+        }
+        let automatic = if automatic_paths.is_empty() {
+            vec![]
+        } else {
+            vec![
+                json!({"kind":"canonical-format","mode":"automatic-format","paths":automatic_paths,"action":"Preview canonical formatting; it requires no writer judgment and reports no losses."}),
+            ]
+        };
         let errors = project_warnings
             .iter()
             .filter(|warning| warning["severity"] == "error")
@@ -496,7 +549,7 @@ impl Workspace {
         }
         warning_count += project_warnings.len();
         Ok(
-            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes}),
+            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"fixPlan":{"automatic":automatic,"writerReview":writer_review},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes}),
         )
     }
 }
