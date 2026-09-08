@@ -132,6 +132,23 @@ than producing element-by-element operations. Returned ASTs omit source
 positions and use `srcByteLength: 0`; render the included canonical source when
 presenting the result to a writer.
 
+For an undoable workflow, create a patch with
+`carve_create_reversible_ast_patch`, then pass the current source and patch to
+`carve_apply_reversible_ast_patch`. The apply tool checks a semantic AST
+fingerprint before replaying either the forward or inverse operations. It also
+returns a versioned source patch guarded by the exact source bytes. The source
+patch is the narrowest single UTF-8 replacement between the authored source
+and canonical preview; bytes outside that range remain untouched. Review the
+preview because formatting inside the changed range may be canonicalized. On
+non-canonical input, that range can span nearly the whole document even for a
+small semantic change.
+
+The version 1 MCP patch format deliberately uses cross-engine `fnv1a64`
+fingerprints. Treat it as an MCP wire contract rather than passing it directly
+to an engine's in-process reversible-patch API, whose fingerprint encoding may
+differ. Both directions are verified during apply so a successful preview is
+also safe to reverse.
+
 ## Native Rust server
 
 The native server uses `carve-lang` directly and exposes the same document

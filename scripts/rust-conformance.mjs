@@ -25,6 +25,18 @@ const headingPatch = [
   { op: 'replace', path: '/children/0/children/0/value', value: 'After' },
   { op: 'replace', path: '/children/0/attrs/id', value: 'After' },
 ];
+const reversibleHeadingPatch = {
+  version: 1,
+  forward: [headingPatch[1], headingPatch[0]],
+  inverse: [
+    { op: 'replace', path: '/children/0/attrs/id', value: 'Before' },
+    { op: 'replace', path: '/children/0/children/0/value', value: 'Before' },
+  ],
+  beforeFingerprint: 'fnv1a64:c95f59fa021c068a',
+  afterFingerprint: 'fnv1a64:ee1e68df9e2a18a0',
+};
+const keyValueBeforeAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '1' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
+const keyValueAfterAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '2' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
 
 const calls = [
   ['carve_format', { source: '# Hello' }],
@@ -38,6 +50,12 @@ const calls = [
   ['carve_render', { source: '```=latex\nx\n```', target: 'plain' }],
   ['carve_parse', { source: '# Hello' }],
   ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
+  ['carve_create_reversible_ast_patch', { before: beforeAst, after: afterAst }],
+  ['carve_create_reversible_ast_patch', { before: keyValueBeforeAst, after: keyValueAfterAst }],
+  ['carve_apply_reversible_ast_patch', { source: '# Before', patch: reversibleHeadingPatch, inverse: false }],
+  ['carve_apply_reversible_ast_patch', { source: '# After', patch: reversibleHeadingPatch, inverse: true }],
+  ['carve_apply_reversible_ast_patch', { source: '# Before', patch: { ...reversibleHeadingPatch, forward: [] }, inverse: false }],
+  ['carve_apply_reversible_ast_patch', { source: '# Before', patch: { ...reversibleHeadingPatch, inverse: [] }, inverse: false }],
   ['carve_apply_ast_patch', { ast: beforeAst, operations: headingPatch }],
   ['carve_apply_ast_patch', { ast: beforeAst, operations: [{ op: 'move', path: '/children/0', value: true }] }],
   ['carve_migrate', { source: '<strong>Hello</strong>', format: 'html' }],

@@ -12,6 +12,8 @@ Implemented tool names:
 - `carve_parse`
 - `carve_create_ast_patch`
 - `carve_apply_ast_patch`
+- `carve_create_reversible_ast_patch`
+- `carve_apply_reversible_ast_patch`
 - `carve_migrate`
 
 With one or more `--root` arguments it also provides guarded file discovery,

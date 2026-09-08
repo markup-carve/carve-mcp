@@ -25,6 +25,7 @@ import {
   type AstJsonDocument,
   type AstPatchOperation,
 } from '@markup-carve/carve';
+import { createSourcePatch } from './source-patch.js';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
@@ -145,6 +146,41 @@ export function createStructuredAstPatch(before: unknown, after: unknown) {
   return { operations, operationCount: operations.length };
 }
 
+function semanticAst(value: unknown, stripMetadata = true): unknown {
+  if (Array.isArray(value)) return value.map((item) => semanticAst(item, stripMetadata));
+  if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(value as Record<string, unknown>).sort()
+    .filter((key) => !stripMetadata || (key !== 'pos' && key !== 'srcByteLength'))
+    .map((key) => [key, semanticAst(record[key], stripMetadata && key !== 'keyValues')]));
+}
+
+function astFingerprint(ast: AstJsonDocument): string {
+  const bytes = Buffer.from(JSON.stringify(semanticAst(ast)));
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of bytes) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  return `fnv1a64:${hash.toString(16).padStart(16, '0')}`;
+}
+
+export interface ReversibleStructuredAstPatch {
+  version: 1;
+  forward: AstPatchOperation[];
+  inverse: AstPatchOperation[];
+  beforeFingerprint: string;
+  afterFingerprint: string;
+}
+
+export function createReversibleStructuredAstPatch(before: unknown, after: unknown): ReversibleStructuredAstPatch {
+  const beforeAst = validateAst(before, 'Before AST');
+  const afterAst = validateAst(after, 'After AST');
+  const forward = createStructuredAstPatch(beforeAst, afterAst).operations;
+  const inverse = createStructuredAstPatch(afterAst, beforeAst).operations;
+  const patch = { version: 1 as const, forward, inverse,
+    beforeFingerprint: astFingerprint(beforeAst), afterFingerprint: astFingerprint(afterAst) };
+  validateStructuredPayload(patch, 'Reversible patch');
+  return patch;
+}
+
 function validatePatchOperations(operations: unknown[]): asserts operations is AstPatchOperation[] {
   for (const operation of operations) {
     if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
@@ -171,6 +207,46 @@ export function applyStructuredAstPatch(ast: unknown, operations: unknown[]) {
   const patched = applyAstPatch(base, operations);
   const normalized = fromAstJson(patched, Buffer.byteLength(JSON.stringify(patched), 'utf8'));
   return { ast: toAstJson(normalized), source: renderCarve(normalized) };
+}
+
+function validateReversiblePatch(value: unknown): ReversibleStructuredAstPatch {
+  validateStructuredPayload(value, 'Reversible patch');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Reversible patch must be an object.');
+  const patch = value as Record<string, unknown>;
+  if (Object.keys(patch).some((key) => !['version', 'forward', 'inverse', 'beforeFingerprint', 'afterFingerprint'].includes(key))) {
+    throw new Error('Reversible patch has an unknown property.');
+  }
+  if (patch.version !== 1) throw new Error('Unsupported reversible patch version.');
+  if (!Array.isArray(patch.forward) || !Array.isArray(patch.inverse)) throw new Error('Reversible patch requires forward and inverse operations.');
+  for (const operations of [patch.forward, patch.inverse]) {
+    if (operations.length > MAX_AST_PATCH_OPERATIONS) throw new Error(`Patch has ${operations.length} operations; the limit is ${MAX_AST_PATCH_OPERATIONS}.`);
+    validatePatchOperations(operations);
+  }
+  if (typeof patch.beforeFingerprint !== 'string' || typeof patch.afterFingerprint !== 'string'
+    || !/^fnv1a64:[0-9a-f]{16}$/.test(patch.beforeFingerprint) || !/^fnv1a64:[0-9a-f]{16}$/.test(patch.afterFingerprint)) {
+    throw new Error('Reversible patch requires valid before and after fingerprints.');
+  }
+  return patch as unknown as ReversibleStructuredAstPatch;
+}
+
+export function applyReversibleStructuredAstPatch(source: string, value: unknown, inverse = false) {
+  validateSource(source);
+  const patch = validateReversiblePatch(value);
+  const ast = parse(source);
+  const expected = inverse ? patch.afterFingerprint : patch.beforeFingerprint;
+  if (astFingerprint(ast) !== expected) throw new Error('patch precondition does not match the document');
+  const operations = inverse ? patch.inverse : patch.forward;
+  const applied = applyStructuredAstPatch(ast, operations);
+  const expectedResult = inverse ? patch.beforeFingerprint : patch.afterFingerprint;
+  if (astFingerprint(applied.ast) !== expectedResult) throw new Error('patch postcondition does not match the document');
+  const restored = applyStructuredAstPatch(applied.ast, inverse ? patch.forward : patch.inverse);
+  if (astFingerprint(restored.ast) !== expected) throw new Error('patch reverse direction does not restore the document');
+  return {
+    direction: inverse ? 'inverse' as const : 'forward' as const,
+    ast: applied.ast,
+    source: applied.source,
+    sourcePatch: createSourcePatch(source, applied.source, 'refactor', inverse ? 'revert-structured-ast-patch' : 'apply-structured-ast-patch'),
+  };
 }
 
 export function migrate(source: string, format: SourceFormat, dialect?: MarkdownDialect): MigrationResult {

@@ -77,6 +77,25 @@ struct AstPatchApplyOutputSchema {
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReversibleAstPatchOutputSchema {
+    version: i64,
+    forward: Vec<Value>,
+    inverse: Vec<Value>,
+    before_fingerprint: String,
+    after_fingerprint: String,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReversibleAstPatchApplyOutputSchema {
+    direction: String,
+    ast: Value,
+    source: String,
+    source_patch: SourcePatchOutputSchema,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 struct MigrateOutputSchema {
     value: String,
     report: MigrationReportOutputSchema,
@@ -175,6 +194,20 @@ enum SourceEditKindOutputSchema {
 }
 
 fn source_patch(source: &str, replacement: &str) -> SourcePatchOutputSchema {
+    source_patch_with_kind(
+        source,
+        replacement,
+        SourceEditKindOutputSchema::Formatting,
+        "canonical-format",
+    )
+}
+
+fn source_patch_with_kind(
+    source: &str,
+    replacement: &str,
+    kind: SourceEditKindOutputSchema,
+    code: &str,
+) -> SourcePatchOutputSchema {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in source.bytes() {
         hash ^= u64::from(byte);
@@ -202,8 +235,8 @@ fn source_patch(source: &str, replacement: &str) -> SourcePatchOutputSchema {
             start: start as i64,
             end: old_end as i64,
             replacement: replacement[start..new_end].into(),
-            kind: SourceEditKindOutputSchema::Formatting,
-            code: "canonical-format".into(),
+            kind,
+            code: code.into(),
         }]
     };
     SourcePatchOutputSchema {
@@ -382,6 +415,31 @@ struct AstPatchApplyInput {
         description = "Structured patch operations (maximum 1000 operations and 1000000 JSON bytes)"
     )]
     operations: Vec<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReversibleAstPatchInput {
+    version: u8,
+    #[schemars(length(max = 1000))]
+    forward: Vec<Value>,
+    #[schemars(length(max = 1000))]
+    inverse: Vec<Value>,
+    before_fingerprint: String,
+    after_fingerprint: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ReversibleAstPatchApplyInput {
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: String,
+    #[schemars(
+        description = "Version 1 reversible AST patch (maximum 1000000 JSON bytes and 1000 operations per direction)"
+    )]
+    patch: ReversibleAstPatchInput,
+    #[serde(default)]
+    #[schemars(default, description = "Apply inverse operations to undo the patch.")]
+    inverse: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -907,6 +965,22 @@ impl CarveServer {
                             if count == 1 { "" } else { "s" }
                         )
                     })
+            })
+            .or_else(|| {
+                value.get("forward").and_then(Value::as_array).and_then(|forward| {
+                    value.get("inverse").and_then(Value::as_array).map(|inverse| {
+                        format!("Created a reversible AST patch with {} forward and {} inverse operations.", forward.len(), inverse.len())
+                    })
+                })
+            })
+            .or_else(|| {
+                (value.get("sourcePatch").is_some() && value.get("direction").is_some()).then(|| {
+                    if value.get("direction").and_then(Value::as_str) == Some("inverse") {
+                        "Reverted the AST patch and prepared a stale-guarded source edit.".into()
+                    } else {
+                        "Applied the AST patch and prepared a stale-guarded source edit.".into()
+                    }
+                })
             })
             .or_else(|| {
                 (value.get("ast").is_some()
@@ -1507,6 +1581,199 @@ impl CarveServer {
         match result {
             Ok((ast, source)) => match serde_json::from_str::<Value>(&ast) {
                 Ok(ast) => Self::output(json!({"ast": ast, "source": source})),
+                Err(error) => Self::error(format!("AST serialization failed: {error}")),
+            },
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(
+        name = "carve_create_reversible_ast_patch",
+        title = "Create reversible AST patch",
+        description = "Compare two PART 12 ASTs and return forward and inverse operations with semantic stale-edit fingerprints.", output_schema = rmcp::handler::server::tool::schema_for_type::<ReversibleAstPatchOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn create_reversible_ast_patch(
+        &self,
+        Parameters(input): Parameters<AstPatchCreateInput>,
+    ) -> CallToolResult {
+        let before_json = match serde_json::to_string(&input.before) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "Before AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => {
+                return Self::error(format!("Before AST must be JSON-serializable: {error}"));
+            }
+        };
+        let after_json = match serde_json::to_string(&input.after) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "After AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => {
+                return Self::error(format!("After AST must be JSON-serializable: {error}"));
+            }
+        };
+        let result = carve::from_json(&before_json)
+            .and_then(|before| carve::from_json(&after_json).map(|after| (before, after)))
+            .map_err(|error| error.to_string())
+            .and_then(|(before, after)| carve::create_reversible_ast_patch(&before, &after).map_err(|error| error.to_string()))
+            .and_then(|mut patch| {
+                patch.forward.sort_by(|left, right| ast_patch_path(left).cmp(ast_patch_path(right)));
+                patch.inverse.sort_by(|left, right| ast_patch_path(left).cmp(ast_patch_path(right)));
+                for operations in [&patch.forward, &patch.inverse] {
+                    if operations.len() > MAX_AST_PATCH_OPERATIONS {
+                        return Err(format!("Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.", operations.len()));
+                    }
+                }
+                let forward = carve::ast_patch_to_json(&patch.forward).map_err(|error| error.to_string())?;
+                let inverse = carve::ast_patch_to_json(&patch.inverse).map_err(|error| error.to_string())?;
+                let value = json!({
+                    "version": 1,
+                    "forward": serde_json::from_str::<Value>(&forward).map_err(|error| error.to_string())?,
+                    "inverse": serde_json::from_str::<Value>(&inverse).map_err(|error| error.to_string())?,
+                    "beforeFingerprint": patch.before_fingerprint,
+                    "afterFingerprint": patch.after_fingerprint,
+                });
+                let bytes = serde_json::to_vec(&value).map_err(|error| error.to_string())?.len();
+                if bytes > MAX_SOURCE_BYTES { return Err(format!("Reversible patch is {bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes.")); }
+                Ok(value)
+            });
+        match result {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(
+        name = "carve_apply_reversible_ast_patch",
+        title = "Preview reversible AST patch as source edits",
+        description = "Verify a reversible AST patch against source, apply or undo it, and return a minimal stale-guarded UTF-8 source edit without writing files.", output_schema = rmcp::handler::server::tool::schema_for_type::<ReversibleAstPatchApplyOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn apply_reversible_ast_patch(
+        &self,
+        Parameters(input): Parameters<ReversibleAstPatchApplyInput>,
+    ) -> CallToolResult {
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        if input.patch.version != 1 {
+            return Self::error("Unsupported reversible patch version.");
+        }
+        for operations in [&input.patch.forward, &input.patch.inverse] {
+            if operations.len() > MAX_AST_PATCH_OPERATIONS {
+                return Self::error(format!(
+                    "Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.",
+                    operations.len()
+                ));
+            }
+        }
+        let patch_bytes = serde_json::to_vec(&input.patch)
+            .map(|value| value.len())
+            .unwrap_or(MAX_SOURCE_BYTES + 1);
+        if patch_bytes > MAX_SOURCE_BYTES {
+            return Self::error(format!(
+                "Reversible patch is {patch_bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes."
+            ));
+        }
+        let decode = |operations: &[Value]| -> Result<Vec<carve::AstPatchOperation>, String> {
+            let value = serde_json::to_string(operations).map_err(|error| error.to_string())?;
+            carve::ast_patch_from_json(&value).map_err(|error| error.to_string())
+        };
+        let forward = match decode(&input.patch.forward) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let inverse = match decode(&input.patch.inverse) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let fingerprint_valid = |value: &str| {
+            value.len() == 24
+                && value.starts_with("fnv1a64:")
+                && value[8..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        };
+        if !fingerprint_valid(&input.patch.before_fingerprint)
+            || !fingerprint_valid(&input.patch.after_fingerprint)
+        {
+            return Self::error("Reversible patch requires valid before and after fingerprints.");
+        }
+        let patch = carve::ReversibleAstPatch {
+            forward,
+            inverse,
+            before_fingerprint: input.patch.before_fingerprint,
+            after_fingerprint: input.patch.after_fingerprint,
+        };
+        let expected_result = if input.inverse {
+            patch.before_fingerprint.clone()
+        } else {
+            patch.after_fingerprint.clone()
+        };
+        let result =
+            carve::apply_reversible_ast_patch(&carve::parse(&input.source), &patch, input.inverse)
+                .map_err(|error| error.to_string())
+                .and_then(|document| {
+                    let actual = carve::create_reversible_ast_patch(&document, &document)
+                        .map_err(|error| error.to_string())?
+                        .before_fingerprint;
+                    if actual != expected_result {
+                        return Err("patch postcondition does not match the document".into());
+                    }
+                    let restored = carve::apply_ast_patch(
+                        &document,
+                        if input.inverse {
+                            &patch.forward
+                        } else {
+                            &patch.inverse
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                    let restored_fingerprint =
+                        carve::create_reversible_ast_patch(&restored, &restored)
+                            .map_err(|error| error.to_string())?
+                            .before_fingerprint;
+                    let expected_restored = if input.inverse {
+                        &patch.after_fingerprint
+                    } else {
+                        &patch.before_fingerprint
+                    };
+                    if &restored_fingerprint != expected_restored {
+                        return Err("patch reverse direction does not restore the document".into());
+                    }
+                    let source =
+                        carve::render_carve(&document).map_err(|error| error.to_string())?;
+                    let ast = carve::try_to_json(&document).map_err(|error| error.to_string())?;
+                    Ok((ast, source))
+                });
+        match result {
+            Ok((ast, source)) => match serde_json::from_str::<Value>(&ast) {
+                Ok(ast) => {
+                    let direction = if input.inverse { "inverse" } else { "forward" };
+                    let code = if input.inverse {
+                        "revert-structured-ast-patch"
+                    } else {
+                        "apply-structured-ast-patch"
+                    };
+                    let source_patch = source_patch_with_kind(
+                        &input.source,
+                        &source,
+                        SourceEditKindOutputSchema::Refactor,
+                        code,
+                    );
+                    Self::output(
+                        json!({"direction": direction, "ast": ast, "source": source, "sourcePatch": source_patch}),
+                    )
+                }
                 Err(error) => Self::error(format!("AST serialization failed: {error}")),
             },
             Err(error) => Self::error(error),
