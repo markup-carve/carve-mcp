@@ -28,12 +28,253 @@ use crate::{resources, workspace::Workspace};
 
 pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
 const MAX_AST_PATCH_OPERATIONS: usize = 1_000;
+const MAX_AST_SELECTOR_MATCHES: usize = 100;
+const AST_CHILD_FIELDS: [&str; 9] = [
+    "children",
+    "items",
+    "rows",
+    "cells",
+    "inline",
+    "content",
+    "caption",
+    "shortCaption",
+    "title",
+];
 
 fn ast_patch_path(operation: &carve::AstPatchOperation) -> &str {
     match operation {
         carve::AstPatchOperation::Add { path, .. }
         | carve::AstPatchOperation::Replace { path, .. }
         | carve::AstPatchOperation::Remove { path } => path,
+    }
+}
+
+fn pointer(path: &str, part: &str) -> String {
+    format!("{path}/{}", part.replace('~', "~0").replace('/', "~1"))
+}
+
+fn node_text(value: &Value) -> String {
+    fn append(output: &mut String, value: &str) {
+        let remaining = 121usize.saturating_sub(output.chars().count());
+        output.extend(value.chars().take(remaining));
+    }
+    fn visit(value: &Value, output: &mut String) {
+        if output.chars().count() >= 121 {
+            return;
+        }
+        if let Some(values) = value.as_array() {
+            for (index, child) in values.iter().enumerate() {
+                if index > 0 {
+                    append(output, " ");
+                }
+                visit(child, output);
+            }
+            return;
+        }
+        let Some(record) = value.as_object() else {
+            return;
+        };
+        if record.get("type").and_then(Value::as_str) == Some("text")
+            && let Some(value) = record.get("value").and_then(Value::as_str)
+        {
+            append(output, value);
+        }
+        for field in AST_CHILD_FIELDS {
+            if let Some(child) = record.get(field) {
+                visit(child, output);
+            }
+        }
+    }
+    let mut output = String::new();
+    visit(value, &mut output);
+    output
+}
+
+fn human_text(value: &str, maximum: usize) -> String {
+    let mut output = String::new();
+    let mut pending_space = false;
+    for character in value.chars() {
+        if character.is_whitespace() || character.is_control() || character == '\u{feff}' {
+            pending_space = !output.is_empty();
+            continue;
+        }
+        if pending_space {
+            output.push(' ');
+            pending_space = false;
+        }
+        output.push(character);
+    }
+    output.chars().take(maximum).collect()
+}
+
+fn node_identity(record: &serde_json::Map<String, Value>) -> Option<&str> {
+    match record.get("type").and_then(Value::as_str) {
+        Some("heading") => record.get("attrs")?.as_object()?.get("id")?.as_str(),
+        Some("footnote") => record.get("label")?.as_str(),
+        _ => None,
+    }
+}
+
+fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, Value>)> {
+    fn visit<'a>(
+        value: &'a Value,
+        path: String,
+        nodes: &mut Vec<(String, &'a serde_json::Map<String, Value>)>,
+    ) {
+        if let Some(values) = value.as_array() {
+            for (index, child) in values.iter().enumerate() {
+                visit(child, pointer(&path, &index.to_string()), nodes);
+            }
+            return;
+        }
+        let Some(record) = value.as_object() else {
+            return;
+        };
+        if record.get("type").and_then(Value::as_str).is_some() {
+            nodes.push((path.clone(), record));
+        }
+        for key in AST_CHILD_FIELDS {
+            if let Some(child) = record.get(key) {
+                visit(child, pointer(&path, key), nodes);
+            }
+        }
+    }
+    let mut nodes = Vec::new();
+    visit(value, String::new(), &mut nodes);
+    nodes
+}
+
+fn explain_ast_operations(
+    ast: &Value,
+    operations: &[carve::AstPatchOperation],
+) -> Vec<PatchChangeOutputSchema> {
+    let mut nodes = ast_nodes(ast);
+    nodes.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    operations
+        .iter()
+        .map(|operation| {
+            let path = ast_patch_path(operation);
+            let ancestors = nodes.iter().filter(|(node_path, _)| {
+                node_path.is_empty()
+                    || path == node_path
+                    || path
+                        .strip_prefix(node_path)
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+            });
+            let owner = ancestors
+                .clone()
+                .find(|(_, node)| node_identity(node).is_some())
+                .or_else(|| {
+                    ancestors
+                        .clone()
+                        .find(|(_, node)| node.get("type").and_then(Value::as_str) != Some("text"))
+                })
+                .or_else(|| ancestors.into_iter().next());
+            let (owner_type, identity) = owner
+                .map(|(_, node)| {
+                    (
+                        node.get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("document"),
+                        node_identity(node),
+                    )
+                })
+                .unwrap_or(("document", None));
+            let identity = identity
+                .map(|identity| human_text(identity, 80))
+                .filter(|identity| !identity.is_empty());
+            let target = identity
+                .map(|identity| format!("{owner_type} “{identity}”"))
+                .unwrap_or_else(|| owner_type.into());
+            let field = path
+                .rsplit('/')
+                .next()
+                .filter(|value| !value.is_empty())
+                .unwrap_or("document")
+                .replace("~1", "/")
+                .replace("~0", "~");
+            let (mut kind, verb) = match operation {
+                carve::AstPatchOperation::Add { .. } => (PatchChangeKind::Add, "Added"),
+                carve::AstPatchOperation::Remove { .. } => (PatchChangeKind::Remove, "Removed"),
+                carve::AstPatchOperation::Replace { .. } => (PatchChangeKind::Replace, "Changed"),
+            };
+            let mut summary = if field == "value" && owner.is_some() {
+                format!("Changed text in {target}.")
+            } else {
+                format!("{verb} {field} on {target}.")
+            };
+            if let carve::AstPatchOperation::Replace { value, .. } = operation
+                && let Ok(after_value) = serde_json::from_str::<Value>(value)
+                && let (Some(before), Some(after)) = (
+                    value_at_pointer(ast, path).and_then(Value::as_array),
+                    after_value.as_array(),
+                )
+                && before.len() != after.len()
+                && (is_subsequence(before, after) || is_subsequence(after, before))
+            {
+                let count = before.len().abs_diff(after.len());
+                let noun = if count == 1 { "item" } else { "items" };
+                if after.len() > before.len() {
+                    kind = PatchChangeKind::Add;
+                    summary = format!("Added {count} {noun} in {target}.");
+                } else {
+                    kind = PatchChangeKind::Remove;
+                    summary = format!("Removed {count} {noun} in {target}.");
+                }
+            }
+            PatchChangeOutputSchema {
+                kind,
+                path: path.into(),
+                target,
+                summary,
+                extra: std::collections::BTreeMap::new(),
+            }
+        })
+        .collect()
+}
+
+fn value_at_pointer<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.is_empty() {
+        return Some(value);
+    }
+    value.pointer(path)
+}
+
+fn is_subsequence(shorter: &[Value], longer: &[Value]) -> bool {
+    if shorter.len() > longer.len() {
+        return false;
+    }
+    let mut index = 0;
+    for value in longer {
+        if index < shorter.len() && semantic_ast_equal(&shorter[index], value) {
+            index += 1;
+        }
+    }
+    index == shorter.len()
+}
+
+fn semantic_ast_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| semantic_ast_equal(left, right))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            let relevant = |key: &&String| key.as_str() != "pos" && key.as_str() != "srcByteLength";
+            left.keys().filter(relevant).count() == right.keys().filter(relevant).count()
+                && left
+                    .iter()
+                    .filter(|(key, _)| relevant(key))
+                    .all(|(key, value)| {
+                        right
+                            .get(key)
+                            .is_some_and(|other| semantic_ast_equal(value, other))
+                    })
+        }
+        _ => left == right,
     }
 }
 
@@ -68,6 +309,26 @@ struct ParseOutputSchema {
 struct AstPatchCreateOutputSchema {
     operations: Vec<Value>,
     operation_count: i64,
+    changes: Vec<PatchChangeOutputSchema>,
+    change_count: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum PatchChangeKind {
+    Add,
+    Remove,
+    Replace,
+}
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+struct PatchChangeOutputSchema {
+    kind: PatchChangeKind,
+    path: String,
+    target: String,
+    summary: String,
+    #[serde(flatten)]
+    extra: std::collections::BTreeMap<String, Value>,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -84,6 +345,27 @@ struct ReversibleAstPatchOutputSchema {
     inverse: Vec<Value>,
     before_fingerprint: String,
     after_fingerprint: String,
+    changes: Vec<PatchChangeOutputSchema>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct AstSelectionOutputSchema {
+    selector: AstSelectorInput,
+    match_count: i64,
+    matches: Vec<AstSelectorMatchOutputSchema>,
+    truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct AstSelectorMatchOutputSchema {
+    path: String,
+    r#type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    identity: Option<String>,
+    preview: String,
+    #[serde(rename = "previewTruncated")]
+    preview_truncated: bool,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -427,6 +709,31 @@ struct ReversibleAstPatchInput {
     inverse: Vec<Value>,
     before_fingerprint: String,
     after_fingerprint: String,
+    #[serde(default)]
+    changes: Option<Vec<PatchChangeOutputSchema>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum AstSelectorKind {
+    HeadingId,
+    FootnoteLabel,
+    NodeType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AstSelectorInput {
+    kind: AstSelectorKind,
+    #[schemars(length(min = 1, max = 256))]
+    value: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AstSelectInput {
+    #[schemars(description = "PART 12 AST (maximum 1000000 JSON bytes)")]
+    ast: Value,
+    selector: AstSelectorInput,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -954,6 +1261,9 @@ impl CarveServer {
             .or_else(|| {
                 (value.get("type").and_then(Value::as_str) == Some("document"))
                     .then(|| "Parsed the document successfully.".into())
+            })
+            .or_else(|| {
+                value.get("matchCount").and_then(Value::as_u64).map(|count| format!("Found {count} matching AST node{}.", if count == 1 { "" } else { "s" }))
             })
             .or_else(|| {
                 value
@@ -1502,6 +1812,7 @@ impl CarveServer {
                         "Patch has {count} operations; the limit is {MAX_AST_PATCH_OPERATIONS}."
                     ));
                 }
+                let changes = explain_ast_operations(&input.before, &operations);
                 carve::ast_patch_to_json(&operations)
                     .map_err(|error| error.to_string())
                     .and_then(|value| {
@@ -1511,14 +1822,25 @@ impl CarveServer {
                                 value.len()
                             ))
                         } else {
-                            Ok((value, count))
+                            Ok((value, count, changes))
                         }
                     })
             });
         match result {
-            Ok((operations, count)) => match serde_json::from_str::<Value>(&operations) {
+            Ok((operations, count, changes)) => match serde_json::from_str::<Value>(&operations) {
                 Ok(operations) => {
-                    Self::output(json!({"operations": operations, "operationCount": count}))
+                    let change_count = changes.len();
+                    let value = json!({"operations": operations, "operationCount": count, "changes": changes, "changeCount": change_count});
+                    match serde_json::to_vec(&value) {
+                        Ok(bytes) if bytes.len() <= MAX_SOURCE_BYTES => Self::output(value),
+                        Ok(bytes) => Self::error(format!(
+                            "AST patch result is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                            bytes.len()
+                        )),
+                        Err(error) => {
+                            Self::error(format!("AST patch serialization failed: {error}"))
+                        }
+                    }
                 }
                 Err(error) => Self::error(format!("AST patch serialization failed: {error}")),
             },
@@ -1588,6 +1910,82 @@ impl CarveServer {
     }
 
     #[tool(
+        name = "carve_select_ast_nodes",
+        title = "Find AST nodes by semantic selector",
+        description = "Resolve a heading ID, footnote label, or node type to reviewable PART 12 AST paths without silently choosing among multiple matches.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstSelectionOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn select_ast_nodes(&self, Parameters(input): Parameters<AstSelectInput>) -> CallToolResult {
+        if input.selector.value.is_empty() {
+            return Self::error("Selector value must not be empty.");
+        }
+        if input.selector.value.chars().count() > 256 {
+            return Self::error("Selector value may contain at most 256 characters.");
+        }
+        let ast_json = match serde_json::to_string(&input.ast) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => return Self::error(format!("AST must be JSON-serializable: {error}")),
+        };
+        if let Err(error) = carve::from_json(&ast_json) {
+            return Self::error(error.to_string());
+        }
+        let selected = ast_nodes(&input.ast)
+            .into_iter()
+            .filter(|(_, node)| match input.selector.kind {
+                AstSelectorKind::HeadingId => {
+                    node.get("type").and_then(Value::as_str) == Some("heading")
+                        && node_identity(node) == Some(input.selector.value.as_str())
+                }
+                AstSelectorKind::FootnoteLabel => {
+                    node.get("type").and_then(Value::as_str) == Some("footnote")
+                        && node_identity(node) == Some(input.selector.value.as_str())
+                }
+                AstSelectorKind::NodeType => {
+                    node.get("type").and_then(Value::as_str) == Some(input.selector.value.as_str())
+                }
+            })
+            .collect::<Vec<_>>();
+        let match_count = selected.len();
+        let matches = selected
+            .into_iter()
+            .take(MAX_AST_SELECTOR_MATCHES)
+            .map(|(path, node)| {
+                let full_preview = human_text(&node_text(&Value::Object(node.clone())), 121);
+                let preview_truncated = full_preview.chars().count() > 120;
+                let preview = full_preview.chars().take(120).collect();
+                AstSelectorMatchOutputSchema {
+                    path,
+                    r#type: node
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .into(),
+                    identity: node_identity(node)
+                        .map(|value| human_text(value, 80))
+                        .filter(|value| !value.is_empty()),
+                    preview,
+                    preview_truncated,
+                }
+            })
+            .collect::<Vec<_>>();
+        let value = json!({"selector": input.selector, "matchCount": match_count, "matches": matches, "truncated": match_count > MAX_AST_SELECTOR_MATCHES});
+        match serde_json::to_vec(&value) {
+            Ok(bytes) if bytes.len() <= MAX_SOURCE_BYTES => Self::output(value),
+            Ok(bytes) => Self::error(format!(
+                "AST selector result is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                bytes.len()
+            )),
+            Err(error) => Self::error(format!("AST selector result serialization failed: {error}")),
+        }
+    }
+
+    #[tool(
         name = "carve_create_reversible_ast_patch",
         title = "Create reversible AST patch",
         description = "Compare two PART 12 ASTs and return forward and inverse operations with semantic stale-edit fingerprints.", output_schema = rmcp::handler::server::tool::schema_for_type::<ReversibleAstPatchOutputSchema>(),
@@ -1635,12 +2033,14 @@ impl CarveServer {
                 }
                 let forward = carve::ast_patch_to_json(&patch.forward).map_err(|error| error.to_string())?;
                 let inverse = carve::ast_patch_to_json(&patch.inverse).map_err(|error| error.to_string())?;
+                let changes = explain_ast_operations(&input.before, &patch.forward);
                 let value = json!({
                     "version": 1,
                     "forward": serde_json::from_str::<Value>(&forward).map_err(|error| error.to_string())?,
                     "inverse": serde_json::from_str::<Value>(&inverse).map_err(|error| error.to_string())?,
                     "beforeFingerprint": patch.before_fingerprint,
                     "afterFingerprint": patch.after_fingerprint,
+                    "changes": changes,
                 });
                 let bytes = serde_json::to_vec(&value).map_err(|error| error.to_string())?.len();
                 if bytes > MAX_SOURCE_BYTES { return Err(format!("Reversible patch is {bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes.")); }

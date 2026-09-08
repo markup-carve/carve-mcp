@@ -34,6 +34,10 @@ const reversibleHeadingPatch = {
   ],
   beforeFingerprint: 'fnv1a64:c95f59fa021c068a',
   afterFingerprint: 'fnv1a64:ee1e68df9e2a18a0',
+  changes: [
+    { kind: 'replace', path: '/children/0/attrs/id', target: 'heading “Before”', summary: 'Changed id on heading “Before”.' },
+    { kind: 'replace', path: '/children/0/children/0/value', target: 'heading “Before”', summary: 'Changed text in heading “Before”.' },
+  ],
 };
 const keyValueBeforeAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '1' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
 const keyValueAfterAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '2' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
@@ -50,6 +54,7 @@ const calls = [
   ['carve_render', { source: '```=latex\nx\n```', target: 'plain' }],
   ['carve_parse', { source: '# Hello' }],
   ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
+  ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'heading-id', value: 'Before' } }],
   ['carve_create_reversible_ast_patch', { before: beforeAst, after: afterAst }],
   ['carve_create_reversible_ast_patch', { before: keyValueBeforeAst, after: keyValueAfterAst }],
   ['carve_apply_reversible_ast_patch', { source: '# Before', patch: reversibleHeadingPatch, inverse: false }],

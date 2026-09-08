@@ -30,6 +30,8 @@ All notable changes to this project are documented in this file.
   Policy guidance for browser-hosted editors.
 - Position-independent structured AST patches, plus reversible forward/inverse
   patches that preview as stale-guarded UTF-8 source edits in both servers.
+- Semantic AST selectors and concise, structured explanations for generated
+  patch operations.
 
 ## 0.1.2 - 2026-09-06
 
