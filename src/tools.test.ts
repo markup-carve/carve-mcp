@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, validateSource } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, validateSource } from './tools.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -62,6 +62,28 @@ describe('Carve operations', () => {
     const footnote = { type: 'footnote', label: 'note', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Note' }] }] };
     const applied = applyStructuredAstPatch(ast, [{ op: 'replace', path: '/children', value: [footnote, ...ast.children] }]);
     expect(createStructuredAstPatch(applied.ast, parse(applied.source)).operationCount).toBe(0);
+  });
+  it('creates, applies, and reverses stale-guarded AST patches as source edits', () => {
+    const beforeSource = '# Before\n\nBody   \n';
+    const before = parse(beforeSource);
+    const after = parse('# After\n\nBody   \n');
+    const patch = createReversibleStructuredAstPatch(before, after);
+    expect(patch).toMatchObject({ version: 1, beforeFingerprint: expect.stringMatching(/^fnv1a64:/), forward: expect.any(Array), inverse: expect.any(Array) });
+    const applied = applyReversibleStructuredAstPatch(beforeSource, patch);
+    expect(applied).toMatchObject({ direction: 'forward', source: expect.stringContaining('# After'), sourcePatch: { sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) } });
+    const reverted = applyReversibleStructuredAstPatch(applied.source, patch, true);
+    expect(reverted.source).toContain('# Before');
+    expect(() => applyReversibleStructuredAstPatch('# Stale', patch)).toThrow(/precondition/);
+    expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, forward: [] })).toThrow(/postcondition/);
+    expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, inverse: [] })).toThrow(/reverse direction/);
+  });
+  it('fingerprints author keyValues without treating their type as an AST node', () => {
+    const first = parse('[x]{type=widget pos=1}');
+    const second = parse('[x]{type=widget pos=2}');
+    const fingerprints = createReversibleStructuredAstPatch(first, second);
+    expect(fingerprints.beforeFingerprint).not.toBe(fingerprints.afterFingerprint);
+    const patch = createReversibleStructuredAstPatch(first, parse('[y]{type=widget pos=1}'));
+    expect(() => applyReversibleStructuredAstPatch('[x]{type=widget pos=2}', patch)).toThrow(/precondition/);
   });
   it('migrates each input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({

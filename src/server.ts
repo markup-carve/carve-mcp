@@ -2,7 +2,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
-import { applyStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
@@ -47,6 +47,12 @@ const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()),
 const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
 const astPatchCreateOutput = z.object({ operations: z.array(z.unknown()), operationCount: z.number().int() }).loose();
 const astPatchApplyOutput = z.object({ ast: z.unknown(), source: z.string() }).loose();
+const reversiblePatchSchema = z.object({ version: z.number().int().min(0).max(255),
+  forward: z.array(z.unknown()).max(MAX_AST_PATCH_OPERATIONS), inverse: z.array(z.unknown()).max(MAX_AST_PATCH_OPERATIONS),
+  beforeFingerprint: z.string(), afterFingerprint: z.string() }).strict();
+const reversibleAstPatchOutput = z.object({ version: z.number().int(), forward: z.array(z.unknown()), inverse: z.array(z.unknown()),
+  beforeFingerprint: z.string(), afterFingerprint: z.string() }).loose();
+const reversibleAstPatchApplyOutput = z.object({ direction: z.enum(['forward', 'inverse']), ast: z.unknown(), source: z.string(), sourcePatch: sourcePatchOutput }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
@@ -67,6 +73,8 @@ function summary(value: unknown): string {
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
     if (typeof record.operationCount === 'number') return `Created ${record.operationCount} AST patch operation${record.operationCount === 1 ? '' : 's'}.`;
+    if (Array.isArray(record.forward) && Array.isArray(record.inverse)) return `Created a reversible AST patch with ${record.forward.length} forward and ${record.inverse.length} inverse operations.`;
+    if (record.sourcePatch && typeof record.direction === 'string') return `${record.direction === 'inverse' ? 'Reverted' : 'Applied'} the AST patch and prepared a stale-guarded source edit.`;
     if (record.ast && typeof record.source === 'string') return 'Applied the AST patch and produced canonical Carve source.';
     if (typeof record.value === 'string') return 'Produced the requested output.';
   }
@@ -283,6 +291,25 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     outputSchema: astPatchApplyOutput,
     annotations: readOnly,
   }, safe('carve_apply_ast_patch', observe, ({ ast, operations }) => applyStructuredAstPatch(ast, operations)));
+
+  server.registerTool('carve_create_reversible_ast_patch', {
+    title: 'Create reversible AST patch',
+    description: 'Compare two PART 12 ASTs and return forward and inverse operations with semantic stale-edit fingerprints.',
+    inputSchema: z.object({
+      before: z.unknown().describe(`PART 12 AST before the edit (maximum ${MAX_SOURCE_BYTES} JSON bytes)`),
+      after: z.unknown().describe(`PART 12 AST after the edit (maximum ${MAX_SOURCE_BYTES} JSON bytes)`),
+    }), outputSchema: reversibleAstPatchOutput, annotations: readOnly,
+  }, safe('carve_create_reversible_ast_patch', observe, ({ before, after }) => createReversibleStructuredAstPatch(before, after)));
+
+  server.registerTool('carve_apply_reversible_ast_patch', {
+    title: 'Preview reversible AST patch as source edits',
+    description: 'Verify a reversible AST patch against source, apply or undo it, and return a minimal stale-guarded UTF-8 source edit without writing files.',
+    inputSchema: z.object({
+      source: sourceSchema,
+      patch: reversiblePatchSchema.describe(`Version 1 reversible AST patch (maximum ${MAX_SOURCE_BYTES} JSON bytes and ${MAX_AST_PATCH_OPERATIONS} operations per direction)`),
+      inverse: z.boolean().default(false).describe('Apply inverse operations to undo the patch.'),
+    }), outputSchema: reversibleAstPatchApplyOutput, annotations: readOnly,
+  }, safe('carve_apply_reversible_ast_patch', observe, ({ source, patch, inverse }) => applyReversibleStructuredAstPatch(source, patch, inverse)));
 
   server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',

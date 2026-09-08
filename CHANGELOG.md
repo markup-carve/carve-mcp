@@ -28,6 +28,8 @@ All notable changes to this project are documented in this file.
   previews, shared by the npm and native Rust servers.
 - Worker-safe asynchronous client initialization and concrete Content Security
   Policy guidance for browser-hosted editors.
+- Position-independent structured AST patches, plus reversible forward/inverse
+  patches that preview as stale-guarded UTF-8 source edits in both servers.
 
 ## 0.1.2 - 2026-09-06
 

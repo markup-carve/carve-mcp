@@ -16,7 +16,8 @@ describe('MCP server', () => {
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       'carve_lint', 'carve_format', 'carve_render', 'carve_parse',
-      'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_migrate',
+      'carve_create_ast_patch', 'carve_apply_ast_patch',
+      'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate',
     ]);
     expect(listed.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -45,6 +46,9 @@ describe('MCP server', () => {
       arguments: { ast: before, operations: (patch.structuredContent as { operations: unknown[] }).operations },
     });
     expect(applied.structuredContent).toMatchObject({ source: expect.stringContaining('After') });
+    const reversible = await client.callTool({ name: 'carve_create_reversible_ast_patch', arguments: { before, after } });
+    const sourceEdit = await client.callTool({ name: 'carve_apply_reversible_ast_patch', arguments: { source: '# Before', patch: reversible.structuredContent } });
+    expect(sourceEdit.structuredContent).toMatchObject({ direction: 'forward', source: expect.stringContaining('After'), sourcePatch: { edits: expect.any(Array) } });
   });
 
   it('offers a small set of writer-controlled workflows', async () => {

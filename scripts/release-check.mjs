@@ -46,7 +46,7 @@ await client.connect(transport);
 try {
   const tools = await client.listTools();
   const names = tools.tools.map(({ name }) => name);
-  for (const required of ['carve_lint', 'carve_format', 'carve_render', 'carve_parse', 'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_migrate']) {
+  for (const required of ['carve_lint', 'carve_format', 'carve_render', 'carve_parse', 'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate']) {
     if (!names.includes(required)) throw new Error(`Packed server contract is missing ${required}.`);
   }
   const result = await client.callTool({ name: 'carve_render', arguments: { source: '# Release check', target: 'html' } });
