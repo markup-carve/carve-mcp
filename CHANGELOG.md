@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.3 - 2026-09-09
+
 ### Added
 
 - Schema-declared structured results alongside concise human-readable tool
