@@ -44,7 +44,14 @@ try {
   const render = await client.callTool({
     name: 'carve_render', arguments: { source: '# Release smoke', target: 'html' },
   });
-  if (render.isError || !(render.content ?? []).some((item) => item.type === 'text' && item.text.includes('Release smoke'))) {
+  // Rendered output moved into structuredContent.value once carve_render gained
+  // an output schema; content[] now carries a summary string. Accept either
+  // place so the check validates rendering, not the response envelope's shape.
+  const renderedText = [
+    ...(render.content ?? []).filter((item) => item.type === 'text').map((item) => item.text),
+    typeof render.structuredContent?.value === 'string' ? render.structuredContent.value : '',
+  ].join('\n');
+  if (render.isError || !renderedText.includes('Release smoke')) {
     throw new Error('Released binary failed a render request.');
   }
 } finally {
