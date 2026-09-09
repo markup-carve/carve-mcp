@@ -29,6 +29,7 @@ import { createSourcePatch } from './source-patch.js';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
+export const MAX_AST_SELECTOR_MATCHES = 100;
 export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
 export type SourceFormat = 'html' | 'markdown' | 'djot';
 export type RenderPreset = 'default' | 'portable' | 'static-html';
@@ -128,6 +129,143 @@ function validateAst(value: unknown, label: string): AstJsonDocument {
   return value as AstJsonDocument;
 }
 
+export type AstSelector = { kind: 'heading-id' | 'footnote-label' | 'node-type'; value: string };
+const AST_CHILD_FIELDS = ['children', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title'] as const;
+
+function pointer(path: string, part: string): string {
+  return `${path}/${part.replaceAll('~', '~0').replaceAll('/', '~1')}`;
+}
+
+function nodeText(value: unknown, maximum = 121): string {
+  let output = '';
+  const append = (text: string): void => {
+    const remaining = maximum - Array.from(output).length;
+    if (remaining > 0) output += Array.from(text).slice(0, remaining).join('');
+  };
+  const visit = (item: unknown): void => {
+    if (Array.from(output).length >= maximum || !item || typeof item !== 'object') return;
+    if (Array.isArray(item)) {
+      item.forEach((child, index) => { if (index > 0) append(' '); visit(child); });
+      return;
+    }
+    const record = item as Record<string, unknown>;
+    if (record.type === 'text' && typeof record.value === 'string') append(record.value);
+    for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(record, field)) visit(record[field]);
+  };
+  visit(value);
+  return output;
+}
+
+function humanText(value: string, maximum = 80): string {
+  return Array.from(value.replace(/[\p{White_Space}\p{Cc}\uFEFF]+/gu, ' ').trim()).slice(0, maximum).join('');
+}
+
+function nodeIdentity(record: Record<string, unknown>): string | undefined {
+  if (record.type === 'heading') {
+    const attrs = record.attrs as Record<string, unknown> | undefined;
+    if (typeof attrs?.id === 'string') return attrs.id;
+  }
+  if (record.type === 'footnote' && typeof record.label === 'string') return record.label;
+  return undefined;
+}
+
+function astNodes(ast: AstJsonDocument) {
+  const nodes: Array<{ path: string; node: Record<string, unknown> }> = [];
+  const visit = (value: unknown, path: string): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { value.forEach((child, index) => visit(child, pointer(path, String(index)))); return; }
+    const record = value as Record<string, unknown>;
+    if (typeof record.type === 'string') nodes.push({ path, node: record });
+    for (const key of AST_CHILD_FIELDS) if (Object.hasOwn(record, key)) visit(record[key], pointer(path, key));
+  };
+  visit(ast, '');
+  return nodes;
+}
+
+export function selectAstNodes(value: unknown, selector: AstSelector) {
+  const ast = validateAst(value, 'AST');
+  if (!selector.value) throw new Error('Selector value must not be empty.');
+  if (Array.from(selector.value).length > 256) throw new Error('Selector value may contain at most 256 characters.');
+  const selected = astNodes(ast).filter(({ node }) => {
+    if (selector.kind === 'heading-id') return node.type === 'heading' && nodeIdentity(node) === selector.value;
+    if (selector.kind === 'footnote-label') return node.type === 'footnote' && nodeIdentity(node) === selector.value;
+    return node.type === selector.value;
+  });
+  const truncated = selected.length > MAX_AST_SELECTOR_MATCHES;
+  const matches = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => {
+    const fullPreview = humanText(nodeText(node, 121), 121);
+    const preview = Array.from(fullPreview).slice(0, 120).join('');
+    const identity = nodeIdentity(node);
+    const displayIdentity = identity === undefined ? '' : humanText(identity);
+    return {
+    path, type: String(node.type), ...(displayIdentity ? { identity: displayIdentity } : {}),
+    preview, previewTruncated: Array.from(fullPreview).length > 120,
+  }; });
+  const output = { selector, matchCount: selected.length, matches, truncated };
+  validateStructuredPayload(output, 'AST selector result');
+  return output;
+}
+
+function explainOperations(ast: AstJsonDocument, operations: AstPatchOperation[]) {
+  const nodes = astNodes(ast).sort((left, right) => right.path.length - left.path.length);
+  return operations.map((operation) => {
+    const ancestors = nodes.filter(({ path }) => path === '' || operation.path === path || operation.path.startsWith(`${path}/`));
+    const owner = ancestors.find(({ node }) => nodeIdentity(node) !== undefined)
+      ?? ancestors.find(({ node }) => node.type !== 'text') ?? ancestors[0];
+    const ownerType = String(owner?.node.type ?? 'document');
+    const identity = owner ? humanText(nodeIdentity(owner.node) ?? '') : '';
+    const target = identity ? `${ownerType} “${identity}”` : ownerType;
+    const field = operation.path.split('/').at(-1)?.replaceAll('~1', '/').replaceAll('~0', '~') || 'document';
+    let kind = operation.op;
+    let summary = `${operation.op === 'add' ? 'Added' : operation.op === 'remove' ? 'Removed' : 'Changed'} ${field} on ${target}.`;
+    const previous = valueAtPointer(ast, operation.path);
+    if (operation.op === 'replace' && Array.isArray(previous) && Array.isArray(operation.value) && previous.length !== operation.value.length
+      && (isSubsequence(previous, operation.value) || isSubsequence(operation.value, previous))) {
+      const added = operation.value.length > previous.length;
+      const count = Math.abs(operation.value.length - previous.length);
+      kind = added ? 'add' : 'remove';
+      summary = `${added ? 'Added' : 'Removed'} ${count} item${count === 1 ? '' : 's'} in ${target}.`;
+    }
+    if (field === 'value' && owner) summary = `Changed text in ${target}.`;
+    return { kind, path: operation.path, target, summary };
+  });
+}
+
+function isSubsequence(shorter: unknown[], longer: unknown[]): boolean {
+  if (shorter.length > longer.length) return false;
+  let index = 0;
+  for (const value of longer) {
+    if (index < shorter.length && semanticAstEqual(shorter[index], value)) index += 1;
+  }
+  return index === shorter.length;
+}
+
+function semanticAstEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => semanticAstEqual(value, right[index]));
+  }
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  const ignored = new Set(['pos', 'srcByteLength']);
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).filter((key) => !ignored.has(key)).sort();
+  const rightKeys = Object.keys(rightRecord).filter((key) => !ignored.has(key)).sort();
+  return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index]
+    && semanticAstEqual(leftRecord[key], rightRecord[key]));
+}
+
+function valueAtPointer(value: unknown, path: string): unknown {
+  if (path === '') return value;
+  let current = value;
+  for (const part of path.slice(1).split('/').map((item) => item.replaceAll('~1', '/').replaceAll('~0', '~'))) {
+    if (!current || typeof current !== 'object' || !Object.hasOwn(current, part)) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
 export function createStructuredAstPatch(before: unknown, after: unknown) {
   const beforeAst = validateAst(before, 'Before AST');
   const afterAst = validateAst(after, 'After AST');
@@ -143,7 +281,10 @@ export function createStructuredAstPatch(before: unknown, after: unknown) {
     throw new Error(`Patch has ${operations.length} operations; the limit is ${MAX_AST_PATCH_OPERATIONS}.`);
   }
   validateStructuredPayload(operations, 'Patch operations');
-  return { operations, operationCount: operations.length };
+  const changes = explainOperations(beforeAst, operations);
+  const output = { operations, operationCount: operations.length, changes, changeCount: changes.length };
+  validateStructuredPayload(output, 'AST patch result');
+  return output;
 }
 
 function semanticAst(value: unknown, stripMetadata = true): unknown {
@@ -168,6 +309,7 @@ export interface ReversibleStructuredAstPatch {
   inverse: AstPatchOperation[];
   beforeFingerprint: string;
   afterFingerprint: string;
+  changes?: Array<{ kind: string; path: string; target: string; summary: string }>;
 }
 
 export function createReversibleStructuredAstPatch(before: unknown, after: unknown): ReversibleStructuredAstPatch {
@@ -176,7 +318,8 @@ export function createReversibleStructuredAstPatch(before: unknown, after: unkno
   const forward = createStructuredAstPatch(beforeAst, afterAst).operations;
   const inverse = createStructuredAstPatch(afterAst, beforeAst).operations;
   const patch = { version: 1 as const, forward, inverse,
-    beforeFingerprint: astFingerprint(beforeAst), afterFingerprint: astFingerprint(afterAst) };
+    beforeFingerprint: astFingerprint(beforeAst), afterFingerprint: astFingerprint(afterAst),
+    changes: explainOperations(beforeAst, forward) };
   validateStructuredPayload(patch, 'Reversible patch');
   return patch;
 }
@@ -213,11 +356,18 @@ function validateReversiblePatch(value: unknown): ReversibleStructuredAstPatch {
   validateStructuredPayload(value, 'Reversible patch');
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Reversible patch must be an object.');
   const patch = value as Record<string, unknown>;
-  if (Object.keys(patch).some((key) => !['version', 'forward', 'inverse', 'beforeFingerprint', 'afterFingerprint'].includes(key))) {
+  if (Object.keys(patch).some((key) => !['version', 'forward', 'inverse', 'beforeFingerprint', 'afterFingerprint', 'changes'].includes(key))) {
     throw new Error('Reversible patch has an unknown property.');
   }
   if (patch.version !== 1) throw new Error('Unsupported reversible patch version.');
   if (!Array.isArray(patch.forward) || !Array.isArray(patch.inverse)) throw new Error('Reversible patch requires forward and inverse operations.');
+  if (patch.changes !== undefined && !Array.isArray(patch.changes)) throw new Error('Reversible patch change explanations must be an array.');
+  for (const change of patch.changes ?? []) {
+    if (!change || typeof change !== 'object' || Array.isArray(change)) throw new Error('Patch change explanation must be an object.');
+    const record = change as Record<string, unknown>;
+    if (!['add', 'remove', 'replace'].includes(String(record.kind)) || typeof record.path !== 'string'
+      || typeof record.target !== 'string' || typeof record.summary !== 'string') throw new Error('Patch change explanation is invalid.');
+  }
   for (const operations of [patch.forward, patch.inverse]) {
     if (operations.length > MAX_AST_PATCH_OPERATIONS) throw new Error(`Patch has ${operations.length} operations; the limit is ${MAX_AST_PATCH_OPERATIONS}.`);
     validatePatchOperations(operations);

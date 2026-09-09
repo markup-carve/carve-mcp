@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, validateSource } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, selectAstNodes, validateSource } from './tools.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -34,11 +34,40 @@ describe('Carve operations', () => {
     const after = parse('# After');
     const patch = createStructuredAstPatch(before, after);
     expect(patch.operationCount).toBeGreaterThan(0);
+    expect(patch.changes).toEqual(expect.arrayContaining([expect.objectContaining({ summary: expect.stringContaining('heading') })]));
     expect(patch.operations).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'replace' })]));
     const applied = applyStructuredAstPatch(before, patch.operations);
     expect(applied.ast).toEqual(expect.objectContaining({ type: 'document', srcByteLength: 0 }));
     expect(applied.source).toContain('After');
     expect(before).toMatchObject({ srcByteLength: 8 });
+  });
+  it('selects stable semantic nodes and reports ambiguous type matches', () => {
+    const ast = parse('# First\n\nText\n\n# Second\n\n[^n]: Note');
+    expect(selectAstNodes(ast, { kind: 'heading-id', value: 'First' })).toMatchObject({ matchCount: 1, matches: [{ type: 'heading', identity: 'First', preview: 'First' }] });
+    expect(selectAstNodes(ast, { kind: 'footnote-label', value: 'n' })).toMatchObject({ matchCount: 1, matches: [{ type: 'footnote', identity: 'n' }] });
+    expect(selectAstNodes(ast, { kind: 'node-type', value: 'heading' }).matchCount).toBe(2);
+  });
+  it('bounds selectors and reports empty, missing, and truncated results', () => {
+    const source = Array.from({ length: 101 }, (_, index) => `# Heading ${index}`).join('\n\n');
+    const selected = selectAstNodes(parse(source), { kind: 'node-type', value: 'heading' });
+    expect(selected).toMatchObject({ matchCount: 101, truncated: true });
+    expect(selected.matches).toHaveLength(100);
+    expect(selectAstNodes(parse('# Hello'), { kind: 'heading-id', value: 'missing' })).toMatchObject({ matchCount: 0, matches: [], truncated: false });
+    expect(() => selectAstNodes(parse('# Hello'), { kind: 'heading-id', value: '' })).toThrow(/must not be empty/);
+    expect(() => selectAstNodes(parse('# Hello'), { kind: 'heading-id', value: 'x'.repeat(257) })).toThrow(/256/);
+  });
+  it('describes collection changes and keeps explanations human-readable', () => {
+    const before = parse('# Heading\n\nFirst\n\nSecond');
+    const after = parse('# Heading\n\nFirst');
+    const patch = createStructuredAstPatch(before, after);
+    expect(patch.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'remove', summary: expect.stringMatching(/^Removed 1 item in/) }),
+    ]));
+    expect(patch.changes.every(({ target, summary }) => !target.includes('\n') && !summary.includes('\n'))).toBe(true);
+    const mixed = createStructuredAstPatch(parse('- a\n- b'), parse('- x\n- b\n- c'));
+    expect(mixed.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'replace', summary: expect.stringMatching(/^Changed items on/) }),
+    ]));
   });
   it('rejects malformed or excessive AST patches', () => {
     const ast = parse('# Hello');
@@ -76,6 +105,8 @@ describe('Carve operations', () => {
     expect(() => applyReversibleStructuredAstPatch('# Stale', patch)).toThrow(/precondition/);
     expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, forward: [] })).toThrow(/postcondition/);
     expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, inverse: [] })).toThrow(/reverse direction/);
+    const { changes: _changes, ...legacyPatch } = patch;
+    expect(applyReversibleStructuredAstPatch(beforeSource, legacyPatch).source).toContain('# After');
   });
   it('fingerprints author keyValues without treating their type as an AST node', () => {
     const first = parse('[x]{type=widget pos=1}');

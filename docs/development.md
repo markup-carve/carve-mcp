@@ -132,6 +132,13 @@ than producing element-by-element operations. Returned ASTs omit source
 positions and use `srcByteLength: 0`; render the included canonical source when
 presenting the result to a writer.
 
+Generated patches include concise change explanations tied to their operation
+paths. Use `carve_select_ast_nodes` to find headings by ID, footnotes by label,
+or all nodes of a given type. The tool returns every match (up to 100) and never
+silently chooses one when a selector is ambiguous. Treat the returned path as
+a resolved location for the current AST, not as a durable identifier across
+unrelated edits.
+
 For an undoable workflow, create a patch with
 `carve_create_reversible_ast_patch`, then pass the current source and patch to
 `carve_apply_reversible_ast_patch`. The apply tool checks a semantic AST

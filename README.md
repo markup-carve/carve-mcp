@@ -14,6 +14,8 @@ default and can be enabled for explicitly configured document roots.
   position-independent patch.
 - `carve_apply_ast_patch` validates and previews a patch as both an AST and
   canonical Carve source without changing files.
+- `carve_select_ast_nodes` finds headings, footnotes, or node types without
+  making an ambiguous selection for the caller.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic
   stale-edit fingerprints.
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations

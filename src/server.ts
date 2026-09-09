@@ -2,7 +2,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, selectAstNodes } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
@@ -45,14 +45,17 @@ const warningOutput = z.object({
 const lintOutput = z.object({ valid: z.boolean(), warningCount: z.number().int(), warnings: z.array(warningOutput) }).loose();
 const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
-const astPatchCreateOutput = z.object({ operations: z.array(z.unknown()), operationCount: z.number().int() }).loose();
+const patchChangeOutput = z.object({ kind: z.enum(['add', 'remove', 'replace']), path: z.string(), target: z.string(), summary: z.string() }).loose();
+const astPatchCreateOutput = z.object({ operations: z.array(z.unknown()), operationCount: z.number().int(), changes: z.array(patchChangeOutput), changeCount: z.number().int() }).loose();
 const astPatchApplyOutput = z.object({ ast: z.unknown(), source: z.string() }).loose();
 const reversiblePatchSchema = z.object({ version: z.number().int().min(0).max(255),
   forward: z.array(z.unknown()).max(MAX_AST_PATCH_OPERATIONS), inverse: z.array(z.unknown()).max(MAX_AST_PATCH_OPERATIONS),
-  beforeFingerprint: z.string(), afterFingerprint: z.string() }).strict();
+  beforeFingerprint: z.string(), afterFingerprint: z.string(), changes: z.array(patchChangeOutput).optional() }).strict();
 const reversibleAstPatchOutput = z.object({ version: z.number().int(), forward: z.array(z.unknown()), inverse: z.array(z.unknown()),
-  beforeFingerprint: z.string(), afterFingerprint: z.string() }).loose();
+  beforeFingerprint: z.string(), afterFingerprint: z.string(), changes: z.array(patchChangeOutput) }).loose();
 const reversibleAstPatchApplyOutput = z.object({ direction: z.enum(['forward', 'inverse']), ast: z.unknown(), source: z.string(), sourcePatch: sourcePatchOutput }).loose();
+const astSelector = z.object({ kind: z.enum(['heading-id', 'footnote-label', 'node-type']), value: z.string().min(1).max(256) }).strict();
+const astSelectionOutput = z.object({ selector: astSelector, matchCount: z.number().int(), matches: z.array(z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose()), truncated: z.boolean() }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
@@ -72,6 +75,7 @@ function summary(value: unknown): string {
     if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
+    if (typeof record.matchCount === 'number') return `Found ${record.matchCount} matching AST node${record.matchCount === 1 ? '' : 's'}.`;
     if (typeof record.operationCount === 'number') return `Created ${record.operationCount} AST patch operation${record.operationCount === 1 ? '' : 's'}.`;
     if (Array.isArray(record.forward) && Array.isArray(record.inverse)) return `Created a reversible AST patch with ${record.forward.length} forward and ${record.inverse.length} inverse operations.`;
     if (record.sourcePatch && typeof record.direction === 'string') return `${record.direction === 'inverse' ? 'Reverted' : 'Applied'} the AST patch and prepared a stale-guarded source edit.`;
@@ -291,6 +295,13 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     outputSchema: astPatchApplyOutput,
     annotations: readOnly,
   }, safe('carve_apply_ast_patch', observe, ({ ast, operations }) => applyStructuredAstPatch(ast, operations)));
+
+  server.registerTool('carve_select_ast_nodes', {
+    title: 'Find AST nodes by semantic selector',
+    description: 'Resolve a heading ID, footnote label, or node type to reviewable PART 12 AST paths without silently choosing among multiple matches.',
+    inputSchema: z.object({ ast: z.unknown().describe(`PART 12 AST (maximum ${MAX_SOURCE_BYTES} JSON bytes)`), selector: astSelector }),
+    outputSchema: astSelectionOutput, annotations: readOnly,
+  }, safe('carve_select_ast_nodes', observe, ({ ast, selector }) => selectAstNodes(ast, selector)));
 
   server.registerTool('carve_create_reversible_ast_patch', {
     title: 'Create reversible AST patch',
