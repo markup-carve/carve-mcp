@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.4 - 2026-09-09
+
+### Added
+
+- Semantic AST selectors and concise, structured explanations for generated
+  patch operations.
+
+### Fixed
+
+- Completed the release that 0.1.3 could not publish: the release smoke-test
+  harness now reads the render result from `structuredContent.value`, so the
+  release binaries and the npm publish complete.
+
 ## 0.1.3 - 2026-09-09
 
 ### Added
@@ -32,8 +45,6 @@ All notable changes to this project are documented in this file.
   Policy guidance for browser-hosted editors.
 - Position-independent structured AST patches, plus reversible forward/inverse
   patches that preview as stale-guarded UTF-8 source edits in both servers.
-- Semantic AST selectors and concise, structured explanations for generated
-  patch operations.
 
 ## 0.1.2 - 2026-09-06
 
