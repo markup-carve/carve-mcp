@@ -92,6 +92,8 @@ const calls = [
   ['carve_lint', { source: '😀 @person and #12', platforms: ['github'] }],
   ['carve_lint', { source: '`@person #12`', platforms: ['github'] }],
   ['carve_lint', { source: '@person\n:::', platforms: ['github'] }],
+  ['carve_diagnose_and_fix', { source: ':::\nBody' }],
+  ['carve_diagnose_and_fix', { source: ':::\nBody', applyFixIds: ['unclosed-container-fence:0:3:0'] }],
   ['carve_render', { source: '# Hello', target: 'markdown' }],
   ['carve_render', { source: '# Hello', target: 'ansi' }],
   ['carve_render', { source: '# HéLLo', target: 'html', preset: 'portable', lowercaseHeadingIds: false }],

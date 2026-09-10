@@ -7,6 +7,7 @@ default and can be enabled for explicitly configured document roots.
 ## Tools
 
 - `carve_lint` checks a document and returns precise, structured warnings.
+- `carve_diagnose_and_fix` previews safe fixes, applies selected fix IDs, and returns an undo patch; ambiguous repairs remain writer-review items.
 - `carve_format` produces canonical Carve and reports rendering losses.
 - `carve_render` renders HTML, Markdown, plain text, or ANSI.
 - `carve_parse` returns the resolved, position-aware interchange AST.

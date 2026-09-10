@@ -585,6 +585,21 @@ struct LintOutputSchema {
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+struct DiagnosticFixOutputSchema {
+    valid: bool,
+    warning_count: i64,
+    warnings: Vec<Value>,
+    fixes: Vec<Value>,
+    applied_fix_ids: Vec<String>,
+    value: String,
+    remaining_warning_count: i64,
+    remaining_valid: bool,
+    patch: SourcePatchOutputSchema,
+    undo_patch: SourcePatchOutputSchema,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct RenderOutputSchema {
     value: String,
     losses: Vec<Value>,
@@ -1102,6 +1117,20 @@ struct LintInput {
     platforms: Vec<LintPlatform>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+struct DiagnosticFixInput {
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: String,
+    #[serde(default)]
+    #[schemars(default = "empty_platforms")]
+    platforms: Vec<LintPlatform>,
+    #[serde(default)]
+    #[schemars(default, length(max = 100))]
+    apply_fix_ids: Vec<String>,
+}
+
 fn empty_platforms() -> Vec<LintPlatform> {
     Vec::new()
 }
@@ -1407,6 +1436,17 @@ fn utf16_offset(source: &str, byte: usize) -> usize {
         boundary -= 1;
     }
     source[..boundary].encode_utf16().count()
+}
+
+fn byte_offset_from_utf16(source: &str, offset: usize) -> usize {
+    let mut units = 0;
+    for (byte, character) in source.char_indices() {
+        if units >= offset {
+            return byte;
+        }
+        units += character.len_utf16();
+    }
+    source.len()
 }
 
 pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
@@ -1966,6 +2006,124 @@ impl CarveServer {
         let warnings = lint_values(&input.source, &input.platforms);
         Self::output(
             json!({"valid": warnings.is_empty(), "warningCount": warnings.len(), "warnings": warnings}),
+        )
+    }
+
+    #[tool(
+        name = "carve_diagnose_and_fix",
+        title = "Diagnose and fix Carve",
+        description = "Diagnose Carve source, propose bounded fixes, and optionally apply selected safe fix IDs with forward and undo patches. Writer-review fixes are never applied automatically.", output_schema = rmcp::handler::server::tool::schema_for_type::<DiagnosticFixOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn diagnose_and_fix(
+        &self,
+        Parameters(input): Parameters<DiagnosticFixInput>,
+    ) -> CallToolResult {
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        if input.apply_fix_ids.len() > 100 {
+            return Self::error("applyFixIds must contain at most 100 items.");
+        }
+        let warnings = lint_values(&input.source, &input.platforms);
+        let unclosed_count = warnings
+            .iter()
+            .filter(|warning| warning["rule"] == "unclosed-container-fence")
+            .count();
+        let mut fixes = Vec::new();
+        let mut automatic =
+            std::collections::BTreeMap::<String, (usize, usize, String, String)>::new();
+        for (index, warning) in warnings.iter().enumerate() {
+            let rule = warning["rule"].as_str().unwrap_or_default();
+            let start_utf16 = warning["start"].as_u64().unwrap_or(0) as usize;
+            let end_utf16 = warning["end"].as_u64().unwrap_or(0) as usize;
+            let id = format!("{rule}:{start_utf16}:{end_utf16}:{index}");
+            let edit = if rule == "bidi-control-in-source" {
+                Some((
+                    byte_offset_from_utf16(&input.source, start_utf16),
+                    byte_offset_from_utf16(&input.source, end_utf16),
+                    String::new(),
+                    rule.to_owned(),
+                ))
+            } else if rule == "unclosed-container-fence" && unclosed_count == 1 {
+                let marker = input.source[byte_offset_from_utf16(&input.source, start_utf16)..]
+                    .chars()
+                    .take_while(|character| *character == ':')
+                    .collect::<String>();
+                let prefix = if input.source.ends_with('\n') {
+                    ""
+                } else {
+                    "\n"
+                };
+                (!marker.is_empty()).then(|| {
+                    (
+                        input.source.len(),
+                        input.source.len(),
+                        format!("{prefix}{marker}\n"),
+                        rule.to_owned(),
+                    )
+                })
+            } else {
+                None
+            };
+            if let Some(edit) = edit.as_ref() {
+                automatic.insert(id.clone(), edit.clone());
+            }
+            fixes.push(json!({"id":id,"rule":rule,"message":warning["message"],"applicability":if edit.is_some(){"automatic"}else{"writer-review"},"edit":edit.map(|(start,end,replacement,code)|json!({"start":start,"end":end,"replacement":replacement,"kind":"quick-fix","code":code}))}));
+        }
+        let requested = input
+            .apply_fix_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        for id in &input.apply_fix_ids {
+            if !fixes.iter().any(|fix| fix["id"] == *id) {
+                return Self::error(format!("Unknown fix id: {id}"));
+            }
+            if !automatic.contains_key(id) {
+                return Self::error(format!(
+                    "Fix {id} requires writer review and cannot be applied automatically."
+                ));
+            }
+        }
+        let applied_fix_ids = fixes
+            .iter()
+            .filter_map(|fix| fix["id"].as_str())
+            .filter(|id| requested.contains(*id))
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let mut selected = applied_fix_ids
+            .iter()
+            .filter_map(|id| automatic.get(id).cloned())
+            .collect::<Vec<_>>();
+        selected.sort_by(|left, right| right.0.cmp(&left.0).then(right.1.cmp(&left.1)));
+        for pair in selected.windows(2) {
+            if pair[1].1 > pair[0].0 {
+                return Self::error("Selected quick fixes overlap.");
+            }
+        }
+        let mut value = input.source.clone();
+        for (start, end, replacement, _) in &selected {
+            value.replace_range(*start..*end, replacement);
+        }
+        let remaining = lint_values(&value, &input.platforms);
+        if !selected.is_empty() && remaining.len() > warnings.len() {
+            return Self::error("Selected quick fixes made diagnostics worse; refusing the patch.");
+        }
+        let patch = source_patch_with_kind(
+            &input.source,
+            &value,
+            SourceEditKindOutputSchema::QuickFix,
+            "diagnostic-fixes",
+        );
+        let undo_patch = source_patch_with_kind(
+            &value,
+            &input.source,
+            SourceEditKindOutputSchema::QuickFix,
+            "undo-diagnostic-fixes",
+        );
+        Self::output(
+            json!({"valid":warnings.is_empty(),"warningCount":warnings.len(),"warnings":warnings,"fixes":fixes,"appliedFixIds":applied_fix_ids,"value":value,"remainingWarningCount":remaining.len(),"remainingValid":remaining.is_empty(),"patch":patch,"undoPatch":undo_patch}),
         )
     }
 

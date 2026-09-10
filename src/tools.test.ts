@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
+import { diagnoseAndFix } from './diagnostics.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -9,6 +10,28 @@ describe('Carve operations', () => {
       warningCount: 1,
       warnings: [{ line: 1, column: 1, rule: 'unclosed-container-fence' }],
     });
+  });
+  it('previews, applies, and reverses safe diagnostic fixes', () => {
+    const source = '::: note\nBody';
+    const preview = diagnoseAndFix(source);
+    expect(preview).toMatchObject({ warningCount: 1, fixes: [{ applicability: 'automatic' }], appliedFixIds: [], value: source });
+    const applied = diagnoseAndFix(source, [], [preview.fixes[0]!.id]);
+    expect(applied).toMatchObject({ value: '::: note\nBody\n:::\n', remainingWarningCount: 0, remainingValid: true });
+    expect(applied.undoPatch.edits).toHaveLength(1);
+    expect(diagnoseAndFix(source, [], [preview.fixes[0]!.id, preview.fixes[0]!.id]).value).toBe('::: note\nBody\n:::\n');
+    expect(() => diagnoseAndFix(source, [], ['missing-fix'])).toThrow(/Unknown fix id/);
+  });
+  it('converts lint UTF-16 positions to UTF-8 patch offsets', () => {
+    const source = '😀\u202e text';
+    const preview = diagnoseAndFix(source);
+    const applied = diagnoseAndFix(source, [], [preview.fixes[0]!.id]);
+    expect(applied.value).toBe('😀 text');
+    expect(applied.patch.edits[0]).toMatchObject({ start: 4, end: 7, replacement: '' });
+  });
+  it('refuses to auto-apply writer-review diagnostics', () => {
+    const preview = diagnoseAndFix('See </#missing>.');
+    expect(preview.fixes[0]).toMatchObject({ applicability: 'writer-review', edit: null });
+    expect(() => diagnoseAndFix('See </#missing>.', [], [preview.fixes[0]!.id])).toThrow(/writer review/);
   });
   it('formats source canonically', () => expect(format('# Hello').value).toContain('Hello'));
   it('renders every supported target', () => {

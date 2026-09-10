@@ -8,6 +8,9 @@ All notable changes to this project are documented in this file.
 
 - A review-first semantic edit planner that resolves exactly one AST node and
   returns an explained, reversible, stale-guarded source patch without writing.
+- `carve_diagnose_and_fix` previews automatic and writer-review diagnostics,
+  applies only explicitly selected safe fixes, and returns guarded forward and
+  undo source patches.
 
 ## 0.1.4 - 2026-09-09
 
