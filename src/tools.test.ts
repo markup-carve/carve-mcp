@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
 import { diagnoseAndFix } from './diagnostics.js';
+import { compatibilityMatrix } from './compatibility.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -39,6 +40,15 @@ describe('Carve operations', () => {
     expect(render('# Hello', 'markdown').value).toContain('# Hello');
     expect(render('# Hello', 'plain').value).toContain('Hello');
     expect(render('# Hello', 'ansi').value).toContain('Hello');
+  });
+  it('reports target-specific warnings and rendering losses', () => {
+    const github = compatibilityMatrix('Contact @person', ['github']);
+    expect(github).toMatchObject({ compatible: false, summary: { warning: 1 }, targets: [{ target: 'github', status: 'warning', warningCount: 1 }] });
+    const lossy = compatibilityMatrix('```=latex\nx\n```', ['plain', 'pdf']);
+    expect(lossy.summary.lossy).toBeGreaterThan(0);
+    expect(lossy.targets.find(({ target }) => target === 'pdf')?.status).toBe('lossy');
+    expect(lossy.targets.some(({ suggestions }) => suggestions.length > 0)).toBe(true);
+    expect(() => compatibilityMatrix('# Hello', [])).toThrow(/between 1 and 7/);
   });
   it('applies named presets and extensions', () => {
     expect(render('# Héllo', 'html', { preset: 'portable' }).value).toContain('id="hello"');

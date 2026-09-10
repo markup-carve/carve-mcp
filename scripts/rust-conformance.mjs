@@ -96,6 +96,8 @@ const calls = [
   ['carve_diagnose_and_fix', { source: ':::\nBody', applyFixIds: ['unclosed-container-fence:0:3:0'] }],
   ['carve_render', { source: '# Hello', target: 'markdown' }],
   ['carve_render', { source: '# Hello', target: 'ansi' }],
+  ['carve_check_targets', { source: '# Hello', targets: ['html', 'github'] }],
+  ['carve_check_targets', { source: '```=latex\nx\n```', targets: ['markdown', 'plain', 'ansi', 'wordpress', 'pdf'] }],
   ['carve_render', { source: '# HéLLo', target: 'html', preset: 'portable', lowercaseHeadingIds: false }],
   ['carve_render', { source: '`raw`{=latex}', target: 'plain', maxRenderLosses: 0 }],
   ['carve_render', { source: '`raw`{=latex}', target: 'plain', strictLosses: true }],

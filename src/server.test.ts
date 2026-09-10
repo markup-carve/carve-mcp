@@ -15,7 +15,7 @@ describe('MCP server', () => {
 
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual([
-      'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_parse',
+      'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets', 'carve_parse',
       'carve_create_ast_patch', 'carve_apply_ast_patch',
       'carve_select_ast_nodes', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate',
     ]);
@@ -36,6 +36,8 @@ describe('MCP server', () => {
     expect(called.content).toEqual([{ type: 'text', text: 'Produced the requested output.' }]);
     expect(called.structuredContent).toEqual(expect.objectContaining({ value: expect.stringContaining('<h1') }));
     expect(listed.tools.every((tool) => tool.outputSchema?.type === 'object')).toBe(true);
+    const matrix = await client.callTool({ name: 'carve_check_targets', arguments: { source: '# Hello', targets: ['html', 'github'] } });
+    expect(matrix.structuredContent).toMatchObject({ compatible: true, targetCount: 2, summary: { compatible: 2, warning: 0, lossy: 0 } });
 
     const diagnosed = await client.callTool({ name: 'carve_diagnose_and_fix', arguments: { source: '::: tip\nBody' } });
     const fixId = (diagnosed.structuredContent as { fixes: Array<{ id: string }> }).fixes[0]!.id;

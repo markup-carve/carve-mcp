@@ -609,6 +609,23 @@ struct RenderOutputSchema {
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+struct CompatibilityOutputSchema {
+    compatible: bool,
+    target_count: i64,
+    summary: CompatibilitySummarySchema,
+    targets: Vec<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct CompatibilitySummarySchema {
+    compatible: i64,
+    warning: i64,
+    lossy: i64,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct ParseOutputSchema {
     r#type: String,
     children: Vec<Value>,
@@ -1148,6 +1165,38 @@ enum RenderTarget {
     Markdown,
     Plain,
     Ansi,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum CompatibilityTarget {
+    Html,
+    Markdown,
+    Plain,
+    Ansi,
+    Github,
+    Wordpress,
+    Pdf,
+}
+
+fn default_compatibility_targets() -> Vec<CompatibilityTarget> {
+    vec![
+        CompatibilityTarget::Html,
+        CompatibilityTarget::Markdown,
+        CompatibilityTarget::Github,
+        CompatibilityTarget::Wordpress,
+        CompatibilityTarget::Pdf,
+    ]
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CompatibilityInput {
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: String,
+    #[serde(default = "default_compatibility_targets")]
+    #[schemars(default = "default_compatibility_targets", length(min = 1, max = 7))]
+    targets: Vec<CompatibilityTarget>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -2249,6 +2298,144 @@ impl CarveServer {
                 .expect("JSON values always serialize"),
             )]),
         }
+    }
+
+    #[tool(
+        name = "carve_check_targets",
+        title = "Check Carve publishing targets",
+        description = "Compare one Carve document across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles, returning target-specific warnings, losses, and fallbacks.", output_schema = rmcp::handler::server::tool::schema_for_type::<CompatibilityOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn check_targets(&self, Parameters(input): Parameters<CompatibilityInput>) -> CallToolResult {
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        if input.targets.is_empty() || input.targets.len() > 7 {
+            return Self::error("targets must contain between 1 and 7 items.");
+        }
+        let mut selected = Vec::new();
+        for target in input.targets {
+            if !selected.contains(&target) {
+                selected.push(target);
+            }
+        }
+        let mut results = Vec::new();
+        for target in selected {
+            let (name, render_target, github, note) = match target {
+                CompatibilityTarget::Html => (
+                    "html",
+                    CarveRenderTarget::Html,
+                    false,
+                    "Generic sanitized HTML.",
+                ),
+                CompatibilityTarget::Markdown => (
+                    "markdown",
+                    CarveRenderTarget::Markdown,
+                    false,
+                    "Portable Markdown output.",
+                ),
+                CompatibilityTarget::Plain => (
+                    "plain",
+                    CarveRenderTarget::Plain,
+                    false,
+                    "Plain-text projection.",
+                ),
+                CompatibilityTarget::Ansi => (
+                    "ansi",
+                    CarveRenderTarget::Ansi,
+                    false,
+                    "Terminal-oriented ANSI text.",
+                ),
+                CompatibilityTarget::Github => (
+                    "github",
+                    CarveRenderTarget::Markdown,
+                    true,
+                    "Markdown plus GitHub relinking diagnostics.",
+                ),
+                CompatibilityTarget::Wordpress => (
+                    "wordpress",
+                    CarveRenderTarget::Html,
+                    false,
+                    "Sanitized HTML suitable for the WordPress integration; host extensions remain host-dependent.",
+                ),
+                CompatibilityTarget::Pdf => (
+                    "pdf",
+                    CarveRenderTarget::Html,
+                    false,
+                    "HTML-stage compatibility for a print/PDF pipeline; pagination and fonts remain renderer-dependent.",
+                ),
+            };
+            let options = Options::default()
+                .with_raw_html(false)
+                .with_positions(true)
+                .with_profile(Profile::full().set_link_policy(Some(LinkPolicy::default())));
+            let rendered =
+                with_render_loss_report(render_target, CheckedRenderOptions::default(), || {
+                    match render_target {
+                        CarveRenderTarget::Html => {
+                            carve::try_to_html_with_options(&input.source, &options)
+                        }
+                        CarveRenderTarget::Markdown => {
+                            carve::try_to_markdown_with_options(&input.source, &options)
+                        }
+                        CarveRenderTarget::Plain => {
+                            carve::try_to_plain_text_with_options(&input.source, &options)
+                        }
+                        CarveRenderTarget::Ansi => {
+                            carve::try_to_ansi_with_options(&input.source, &options)
+                        }
+                        CarveRenderTarget::Carve => unreachable!(),
+                    }
+                });
+            let rendered = match rendered {
+                Ok(result) => result,
+                Err(error) => return Self::error(error.to_string()),
+            };
+            if let Err(error) = rendered.value {
+                return Self::error(error.to_string());
+            }
+            let warnings = lint_values(
+                &input.source,
+                if github { &[LintPlatform::Github] } else { &[] },
+            );
+            let loss_count = rendered.total_losses;
+            let status = if loss_count > 0 {
+                "lossy"
+            } else if warnings.is_empty() {
+                "compatible"
+            } else {
+                "warning"
+            };
+            let mut suggestions = Vec::new();
+            if loss_count > 0 {
+                suggestions.push(
+                    "Inspect the reported render losses and choose a target-specific fallback.",
+                );
+            }
+            if !warnings.is_empty() {
+                suggestions.push(if github {
+                    "Resolve the target-specific lint warnings before publishing."
+                } else {
+                    "Resolve the general lint warnings before publishing."
+                });
+            }
+            results.push(json!({"target":name,"renderTarget":render_target.as_str(),"status":status,"note":note,"warningCount":warnings.len(),"warnings":warnings,"lossCount":loss_count,"losses":rendered.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"lossesTruncated":rendered.truncated,"suggestions":suggestions}));
+        }
+        let compatible = results
+            .iter()
+            .filter(|item| item["status"] == "compatible")
+            .count();
+        let warning = results
+            .iter()
+            .filter(|item| item["status"] == "warning")
+            .count();
+        let lossy = results
+            .iter()
+            .filter(|item| item["status"] == "lossy")
+            .count();
+        Self::output(
+            json!({"compatible":warning == 0 && lossy == 0,"targetCount":results.len(),"summary":{"compatible":compatible,"warning":warning,"lossy":lossy},"targets":results}),
+        )
     }
 
     #[tool(

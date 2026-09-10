@@ -13,6 +13,7 @@ import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { buildReferenceGraph } from './reference-graph.js';
+import { compatibilityMatrix } from './compatibility.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -72,6 +73,7 @@ const semanticEditPlanOutput = z.object({
   reversiblePatch: reversibleAstPatchOutput, sourcePatch: sourcePatchOutput,
 }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
+const compatibilityOutput = z.object({ compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int() }), targets: z.array(z.unknown()) }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
@@ -302,6 +304,14 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   }, safe('carve_render', observe, ({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
     ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
   })));
+
+  server.registerTool('carve_check_targets', {
+    title: 'Check Carve publishing targets',
+    description: 'Compare one Carve document across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles, returning target-specific warnings, losses, and fallbacks.',
+    inputSchema: z.object({ source: sourceSchema, targets: z.array(z.enum(['html', 'markdown', 'plain', 'ansi', 'github', 'wordpress', 'pdf'])).min(1).max(7).default(['html', 'markdown', 'github', 'wordpress', 'pdf']) }).strict(),
+    outputSchema: compatibilityOutput,
+    annotations: readOnly,
+  }, safe('carve_check_targets', observe, ({ source: document, targets }) => compatibilityMatrix(document, targets)));
 
   server.registerTool('carve_parse', {
     title: 'Parse Carve',
