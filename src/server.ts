@@ -2,7 +2,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
@@ -66,10 +66,14 @@ const astSelector = z.object({ kind: z.enum(['heading-id', 'footnote-label', 'no
 const astSelectionOutput = z.object({ selector: astSelector, matchCount: z.number().int(), matches: z.array(z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose()), truncated: z.boolean() }).loose();
 const semanticEditKind = z.enum(['replace-text', 'rename-heading-id', 'delete-node', 'replace-node', 'insert-before', 'insert-after']);
 const semanticEdit = z.object({ kind: semanticEditKind, text: z.string().optional(), id: z.string().optional(), node: z.unknown().optional() }).strict();
+const semanticEditStep = z.object({ selector: astSelector, edit: semanticEdit }).strict();
+const semanticEditStepOutput = z.object({ selector: astSelector, edit: z.object({ kind: semanticEditKind }).loose(),
+  match: z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose(), notices: z.array(z.string()) }).loose();
 const semanticEditPlanOutput = z.object({
   selector: astSelector, edit: z.object({ kind: semanticEditKind }).loose(),
   match: z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose(),
   notices: z.array(z.string()),
+  editCount: z.number().int(), steps: z.array(semanticEditStepOutput),
   reversiblePatch: reversibleAstPatchOutput, sourcePatch: sourcePatchOutput,
 }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
@@ -94,7 +98,9 @@ function summary(value: unknown): string {
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
     if (typeof record.matchCount === 'number') return `Found ${record.matchCount} matching AST node${record.matchCount === 1 ? '' : 's'}.`;
-    if (record.sourcePatch && record.match && record.edit) return `Planned ${String((record.edit as Record<string, unknown>).kind)} for one matching AST node; no file was changed.`;
+    if (record.sourcePatch && record.match && record.edit) return typeof record.editCount === 'number' && record.editCount > 1
+      ? `Planned ${record.editCount} atomic semantic edits; no file was changed.`
+      : `Planned ${String((record.edit as Record<string, unknown>).kind)} for one matching AST node; no file was changed.`;
     if (typeof record.operationCount === 'number') return `Created ${record.operationCount} AST patch operation${record.operationCount === 1 ? '' : 's'}.`;
     if (Array.isArray(record.forward) && Array.isArray(record.inverse)) return `Created a reversible AST patch with ${record.forward.length} forward and ${record.inverse.length} inverse operations.`;
     if (record.sourcePatch && typeof record.direction === 'string') return `${record.direction === 'inverse' ? 'Reverted' : 'Applied'} the AST patch and prepared a stale-guarded source edit.`;
@@ -353,10 +359,12 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   server.registerTool('carve_plan_ast_edit', {
     title: 'Plan a semantic AST edit',
-    description: 'Resolve exactly one semantic AST node and return a human-readable, reversible, stale-guarded source patch without writing the document.',
-    inputSchema: z.object({ source: sourceSchema, selector: astSelector, edit: semanticEdit }),
+    description: 'Plan one or more atomic semantic AST edits and return a human-readable, reversible, stale-guarded source patch without writing the document.',
+    inputSchema: z.object({ source: sourceSchema, selector: astSelector, edit: semanticEdit,
+      then: z.array(semanticEditStep).max(MAX_SEMANTIC_EDIT_STEPS - 1).default([])
+        .describe(`Additional atomic edits resolved against the original source (maximum ${MAX_SEMANTIC_EDIT_STEPS} total steps).`) }),
     outputSchema: semanticEditPlanOutput, annotations: readOnly,
-  }, safe('carve_plan_ast_edit', observe, ({ source, selector, edit }) => planSemanticAstEdit(source, selector, edit as SemanticAstEdit)));
+  }, safe('carve_plan_ast_edit', observe, ({ source, selector, edit, then }) => planSemanticAstEdit(source, selector, edit as SemanticAstEdit, then as SemanticAstEditStep[])));
 
   server.registerTool('carve_create_reversible_ast_patch', {
     title: 'Create reversible AST patch',

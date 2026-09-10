@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { compatibilityMatrix } from './compatibility.js';
 
@@ -146,6 +146,54 @@ describe('Carve operations', () => {
     const source = 'a'.repeat(200_000);
     const plan = planSemanticAstEdit(source, { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'Short' });
     expect(plan.sourcePatch.sourceBytes).toBe(200_000);
+  });
+  it('plans multiple semantic edits atomically against the original source', () => {
+    const source = '# A\n\n# B';
+    const plan = planSemanticAstEdit(source, { kind: 'heading-id', value: 'B' }, { kind: 'rename-heading-id', id: 'A' }, [
+      { selector: { kind: 'heading-id', value: 'A' }, edit: { kind: 'rename-heading-id', id: 'C' } },
+    ]);
+    expect(plan).toMatchObject({ editCount: 2, steps: [
+      { selector: { value: 'B' }, match: { identity: 'B' } },
+      { selector: { value: 'A' }, match: { identity: 'A' } },
+    ] });
+    const applied = applyReversibleStructuredAstPatch(source, plan.reversiblePatch);
+    expect(applied.source).toContain('{#A}');
+    expect(applied.source).toContain('{#C}');
+    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('# A');
+  });
+  it('keeps single-edit output compatible and tolerates existing heading ID collisions', () => {
+    const source = '{#same}\n# A\n\n{#same}\n# B\n\nBody';
+    const plan = planSemanticAstEdit(source, { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'Updated' });
+    expect(plan).toMatchObject({ editCount: 1, steps: [{ edit: { kind: 'replace-text' } }] });
+    expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toContain('Updated');
+    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'heading-id', value: 'B' }, { kind: 'rename-heading-id', id: 'A' })).toThrow(/already in use/);
+  });
+  it('orders structural steps safely and rejects overlapping targets', () => {
+    const source = 'One\n\nTwo\n\nThree';
+    const plan = planSemanticAstEdit(source, { kind: 'ast-path', value: '/children/0' }, { kind: 'delete-node' }, [
+      { selector: { kind: 'ast-path', value: '/children/2' }, edit: { kind: 'delete-node' } },
+    ]);
+    expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source.trim()).toBe('Two');
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'B' }, [
+      { selector: { kind: 'ast-path', value: '/children/0/children/0' }, edit: { kind: 'delete-node' } },
+    ])).toThrow(/overlapping/);
+    const tooMany = Array.from({ length: MAX_SEMANTIC_EDIT_STEPS }, () => ({ selector: { kind: 'heading-id', value: 'A' } as const, edit: { kind: 'delete-node' } as const }));
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node' }, tooMany)).toThrow(/at most 100/);
+  });
+  it('applies text edits before structural edits resolved against the original AST', () => {
+    const source = 'One\n\nTwo\n\nThree';
+    const plan = planSemanticAstEdit(source, { kind: 'ast-path', value: '/children/0' }, { kind: 'delete-node' }, [
+      { selector: { kind: 'ast-path', value: '/children/2' }, edit: { kind: 'replace-text', text: 'Updated' } },
+    ]);
+    expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toBe('Two\n\nUpdated\n');
+  });
+  it('allows linked edits to remove a footnote and its references together', () => {
+    const source = 'Text[^a]\n\n[^a]: Note\n';
+    const paragraph = { type: 'paragraph', children: [{ type: 'text', value: 'Text' }] };
+    const plan = planSemanticAstEdit(source, { kind: 'ast-path', value: '/children/0' }, { kind: 'replace-node', node: paragraph }, [
+      { selector: { kind: 'footnote-label', value: 'a' }, edit: { kind: 'delete-node' } },
+    ]);
+    expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toBe('Text\n');
   });
   it('rejects malformed or excessive AST patches', () => {
     const ast = parse('# Hello');

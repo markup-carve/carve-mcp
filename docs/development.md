@@ -154,6 +154,13 @@ that heading or paragraph, and preserves existing heading IDs; the result
 includes notices for those effects. A referenced footnote cannot be deleted
 until its references are removed.
 
+Pass additional selector-and-intent pairs in `then` when several changes must
+succeed or fail together. The planner resolves every selector against the
+original document, refuses overlapping targets, and returns one patch for the
+whole plan. This allows linked changes such as removing a footnote reference
+and its definition together, or handing a heading ID from one heading to
+another. Plans are limited to 100 steps so they remain practical to review.
+
 For an undoable workflow, create a patch with
 `carve_create_reversible_ast_patch`, then pass the current source and patch to
 `carve_apply_reversible_ast_patch`. The apply tool checks a semantic AST
