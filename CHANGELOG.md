@@ -13,6 +13,8 @@ All notable changes to this project are documented in this file.
   undo source patches.
 - A bounded workspace reference graph for headings, footnotes, abbreviations,
   document links, and images, with broken-edge and orphan reporting.
+- A publishing-target compatibility matrix with target-specific lint warnings,
+  rendering losses, and fallback guidance.
 
 ## 0.1.4 - 2026-09-09
 
