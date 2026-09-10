@@ -144,6 +144,302 @@ fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, V
     nodes
 }
 
+fn selector_matches(
+    path: &str,
+    node: &serde_json::Map<String, Value>,
+    selector: &AstSelectorInput,
+) -> bool {
+    match selector.kind {
+        AstSelectorKind::AstPath => path == selector.value,
+        AstSelectorKind::HeadingId => {
+            node.get("type").and_then(Value::as_str) == Some("heading")
+                && node_identity(node) == Some(selector.value.as_str())
+        }
+        AstSelectorKind::FootnoteLabel => {
+            node.get("type").and_then(Value::as_str) == Some("footnote")
+                && node_identity(node) == Some(selector.value.as_str())
+        }
+        AstSelectorKind::NodeType => {
+            node.get("type").and_then(Value::as_str) == Some(selector.value.as_str())
+        }
+    }
+}
+
+fn ast_match(path: String, node: &serde_json::Map<String, Value>) -> Value {
+    let full_preview = human_text(&node_text(&Value::Object(node.clone())), 121);
+    let identity = node_identity(node)
+        .map(|value| human_text(value, 80))
+        .filter(|value| !value.is_empty());
+    serde_json::to_value(AstSelectorMatchOutputSchema {
+        path,
+        r#type: node
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .into(),
+        identity,
+        preview: full_preview.chars().take(120).collect(),
+        preview_truncated: full_preview.chars().count() > 120,
+    })
+    .expect("AST match output is serializable")
+}
+
+fn apply_semantic_ast_edit(
+    ast: &mut Value,
+    path: &str,
+    edit: &SemanticAstEditInput,
+) -> Result<(), String> {
+    let selected_type = ast
+        .pointer(path)
+        .and_then(Value::as_object)
+        .and_then(|node| node.get("type"))
+        .and_then(Value::as_str)
+        .ok_or("Selected AST node no longer exists.")?;
+    match edit.kind {
+        SemanticAstEditKind::ReplaceText if !matches!(selected_type, "heading" | "paragraph") => {
+            return Err("replace-text supports heading and paragraph nodes.".into());
+        }
+        SemanticAstEditKind::RenameHeadingId if selected_type != "heading" => {
+            return Err("rename-heading-id requires a heading node.".into());
+        }
+        _ => {}
+    }
+    if matches!(edit.kind, SemanticAstEditKind::RenameHeadingId) {
+        let id = edit.id.as_deref().ok_or("rename-heading-id requires id.")?;
+        if id.is_empty() || id.chars().count() > 256 {
+            return Err("Heading ID must contain 1 to 256 characters.".into());
+        }
+        if human_text(id, 257) != id {
+            return Err("Heading ID must not contain control characters or surrounding or repeated whitespace.".into());
+        }
+        if ast_nodes(ast).into_iter().any(|(other_path, node)| {
+            other_path != path
+                && node.get("type").and_then(Value::as_str) == Some("heading")
+                && node_identity(node) == Some(id)
+        }) {
+            return Err(format!(
+                "Heading ID “{}” is already in use.",
+                human_text(id, 80)
+            ));
+        }
+    }
+
+    if matches!(
+        edit.kind,
+        SemanticAstEditKind::ReplaceText | SemanticAstEditKind::RenameHeadingId
+    ) {
+        let node = ast
+            .pointer_mut(path)
+            .and_then(Value::as_object_mut)
+            .ok_or("Selected AST node no longer exists.")?;
+        match edit.kind {
+            SemanticAstEditKind::ReplaceText => {
+                let text = edit.text.as_deref().ok_or("replace-text requires text.")?;
+                if text.len() > MAX_SOURCE_BYTES {
+                    return Err(format!(
+                        "Replacement text exceeds the {MAX_SOURCE_BYTES}-byte limit."
+                    ));
+                }
+                if text
+                    .chars()
+                    .any(|character| matches!(character, '\r' | '\n' | '\u{2028}' | '\u{2029}'))
+                {
+                    return Err(
+                        "replace-text accepts one text block and must not contain line breaks."
+                            .into(),
+                    );
+                }
+                node.insert(
+                    "children".into(),
+                    Value::Array(vec![json!({"type": "text", "value": text})]),
+                );
+            }
+            SemanticAstEditKind::RenameHeadingId => {
+                let attrs = node
+                    .entry("attrs")
+                    .or_insert_with(|| json!({}))
+                    .as_object_mut()
+                    .ok_or("Heading attrs must be an object.")?;
+                attrs.insert("id".into(), Value::String(edit.id.clone().unwrap()));
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+
+    let (parent_path, raw_index) = path.rsplit_once('/').ok_or_else(|| {
+        format!(
+            "{} requires a node contained in an AST array.",
+            edit.kind.name()
+        )
+    })?;
+    if !(raw_index == "0"
+        || (!raw_index.starts_with('0') && raw_index.bytes().all(|byte| byte.is_ascii_digit())))
+    {
+        return Err(format!(
+            "{} requires a node contained in an AST array.",
+            edit.kind.name()
+        ));
+    }
+    let index = raw_index.parse::<usize>().map_err(|_| {
+        format!(
+            "{} requires a node contained in an AST array.",
+            edit.kind.name()
+        )
+    })?;
+    if !ast
+        .pointer(parent_path)
+        .and_then(Value::as_array)
+        .is_some_and(|values| index < values.len())
+    {
+        return Err(format!(
+            "{} requires a node contained in an AST array.",
+            edit.kind.name()
+        ));
+    }
+    if matches!(
+        edit.kind,
+        SemanticAstEditKind::ReplaceNode
+            | SemanticAstEditKind::InsertBefore
+            | SemanticAstEditKind::InsertAfter
+    ) {
+        let node = edit.node.as_ref().ok_or_else(|| {
+            format!(
+                "{} requires node.",
+                if matches!(edit.kind, SemanticAstEditKind::ReplaceNode) {
+                    "replace-node"
+                } else {
+                    edit.kind.name()
+                }
+            )
+        })?;
+        let bytes = serde_json::to_vec(node)
+            .map_err(|error| error.to_string())?
+            .len();
+        if bytes > MAX_SOURCE_BYTES {
+            return Err(format!(
+                "{} node is {bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                if matches!(edit.kind, SemanticAstEditKind::ReplaceNode) {
+                    "Replacement"
+                } else {
+                    "Inserted"
+                }
+            ));
+        }
+    }
+    let parent = ast
+        .pointer_mut(parent_path)
+        .and_then(Value::as_array_mut)
+        .expect("validated AST array location");
+    match edit.kind {
+        SemanticAstEditKind::DeleteNode => {
+            parent.remove(index);
+        }
+        SemanticAstEditKind::ReplaceNode => {
+            parent[index] = edit.node.clone().ok_or("replace-node requires node.")?;
+        }
+        SemanticAstEditKind::InsertBefore | SemanticAstEditKind::InsertAfter => {
+            let node = edit
+                .node
+                .clone()
+                .ok_or_else(|| format!("{} requires node.", edit.kind.name()))?;
+            let offset = usize::from(matches!(edit.kind, SemanticAstEditKind::InsertAfter));
+            parent.insert(index + offset, node);
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+impl SemanticAstEditKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::ReplaceText => "replace-text",
+            Self::RenameHeadingId => "rename-heading-id",
+            Self::DeleteNode => "delete-node",
+            Self::ReplaceNode => "replace-node",
+            Self::InsertBefore => "insert-before",
+            Self::InsertAfter => "insert-after",
+        }
+    }
+}
+
+fn validate_semantic_edit_shape(edit: &SemanticAstEditInput) -> Result<(), String> {
+    let mut unexpected = Vec::new();
+    if edit.text.is_some() && !matches!(edit.kind, SemanticAstEditKind::ReplaceText) {
+        unexpected.push("text");
+    }
+    if edit.id.is_some() && !matches!(edit.kind, SemanticAstEditKind::RenameHeadingId) {
+        unexpected.push("id");
+    }
+    if edit.node.is_some()
+        && !matches!(
+            edit.kind,
+            SemanticAstEditKind::ReplaceNode
+                | SemanticAstEditKind::InsertBefore
+                | SemanticAstEditKind::InsertAfter
+        )
+    {
+        unexpected.push("node");
+    }
+    if unexpected.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} does not accept {}.",
+            edit.kind.name(),
+            unexpected.join(", ")
+        ))
+    }
+}
+
+fn semantic_edit_notices(
+    node: &serde_json::Map<String, Value>,
+    edit: &SemanticAstEditInput,
+) -> Vec<String> {
+    if !matches!(edit.kind, SemanticAstEditKind::ReplaceText) {
+        return Vec::new();
+    }
+    let node_type = node.get("type").and_then(Value::as_str).unwrap_or("node");
+    let formatting = format!("replace-text replaces inline formatting inside the {node_type}.");
+    node_identity(node)
+        .map(|identity| human_text(identity, 80))
+        .filter(|identity| !identity.is_empty())
+        .map(|identity| {
+            vec![
+                format!("Preserved heading ID “{identity}”."),
+                formatting.clone(),
+            ]
+        })
+        .unwrap_or_else(|| vec![formatting])
+}
+
+fn semantic_ast(value: &Value, strip_metadata: bool) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| semantic_ast(value, strip_metadata))
+                .collect(),
+        ),
+        Value::Object(record) => Value::Object(
+            record
+                .iter()
+                .filter(|(key, _)| {
+                    !strip_metadata || (key.as_str() != "pos" && key.as_str() != "srcByteLength")
+                })
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        semantic_ast(value, strip_metadata && key != "keyValues"),
+                    )
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
 fn explain_ast_operations(
     ast: &Value,
     operations: &[carve::AstPatchOperation],
@@ -366,6 +662,22 @@ struct AstSelectorMatchOutputSchema {
     preview: String,
     #[serde(rename = "previewTruncated")]
     preview_truncated: bool,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SemanticAstEditPlanOutputSchema {
+    selector: AstSelectorInput,
+    edit: SemanticAstEditSummaryOutputSchema,
+    r#match: AstSelectorMatchOutputSchema,
+    notices: Vec<String>,
+    reversible_patch: ReversibleAstPatchOutputSchema,
+    source_patch: SourcePatchOutputSchema,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct SemanticAstEditSummaryOutputSchema {
+    kind: SemanticAstEditKind,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -719,13 +1031,37 @@ enum AstSelectorKind {
     HeadingId,
     FootnoteLabel,
     NodeType,
+    AstPath,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+enum SemanticAstEditKind {
+    ReplaceText,
+    RenameHeadingId,
+    DeleteNode,
+    ReplaceNode,
+    InsertBefore,
+    InsertAfter,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SemanticAstEditInput {
+    kind: SemanticAstEditKind,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    node: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct AstSelectorInput {
     kind: AstSelectorKind,
-    #[schemars(length(min = 1, max = 256))]
+    #[schemars(length(min = 1, max = 4096))]
     value: String,
 }
 
@@ -734,6 +1070,14 @@ struct AstSelectInput {
     #[schemars(description = "PART 12 AST (maximum 1000000 JSON bytes)")]
     ast: Value,
     selector: AstSelectorInput,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct SemanticAstEditPlanInput {
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: String,
+    selector: AstSelectorInput,
+    edit: SemanticAstEditInput,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1264,6 +1608,15 @@ impl CarveServer {
             })
             .or_else(|| {
                 value.get("matchCount").and_then(Value::as_u64).map(|count| format!("Found {count} matching AST node{}.", if count == 1 { "" } else { "s" }))
+            })
+            .or_else(|| {
+                (value.get("sourcePatch").is_some()
+                    && value.get("match").is_some()
+                    && value.get("edit").is_some())
+                .then(|| {
+                    let kind = value["edit"]["kind"].as_str().unwrap_or("semantic edit");
+                    format!("Planned {kind} for one matching AST node; no file was changed.")
+                })
             })
             .or_else(|| {
                 value
@@ -1912,15 +2265,22 @@ impl CarveServer {
     #[tool(
         name = "carve_select_ast_nodes",
         title = "Find AST nodes by semantic selector",
-        description = "Resolve a heading ID, footnote label, or node type to reviewable PART 12 AST paths without silently choosing among multiple matches.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstSelectionOutputSchema>(),
+        description = "Resolve a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstSelectionOutputSchema>(),
         annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     fn select_ast_nodes(&self, Parameters(input): Parameters<AstSelectInput>) -> CallToolResult {
         if input.selector.value.is_empty() {
             return Self::error("Selector value must not be empty.");
         }
-        if input.selector.value.chars().count() > 256 {
-            return Self::error("Selector value may contain at most 256 characters.");
+        let selector_maximum = if matches!(input.selector.kind, AstSelectorKind::AstPath) {
+            4096
+        } else {
+            256
+        };
+        if input.selector.value.chars().count() > selector_maximum {
+            return Self::error(format!(
+                "Selector value may contain at most {selector_maximum} characters."
+            ));
         }
         let ast_json = match serde_json::to_string(&input.ast) {
             Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
@@ -1937,19 +2297,7 @@ impl CarveServer {
         }
         let selected = ast_nodes(&input.ast)
             .into_iter()
-            .filter(|(_, node)| match input.selector.kind {
-                AstSelectorKind::HeadingId => {
-                    node.get("type").and_then(Value::as_str) == Some("heading")
-                        && node_identity(node) == Some(input.selector.value.as_str())
-                }
-                AstSelectorKind::FootnoteLabel => {
-                    node.get("type").and_then(Value::as_str) == Some("footnote")
-                        && node_identity(node) == Some(input.selector.value.as_str())
-                }
-                AstSelectorKind::NodeType => {
-                    node.get("type").and_then(Value::as_str) == Some(input.selector.value.as_str())
-                }
-            })
+            .filter(|(path, node)| selector_matches(path, node, &input.selector))
             .collect::<Vec<_>>();
         let match_count = selected.len();
         let matches = selected
@@ -1982,6 +2330,187 @@ impl CarveServer {
                 bytes.len()
             )),
             Err(error) => Self::error(format!("AST selector result serialization failed: {error}")),
+        }
+    }
+
+    #[tool(
+        name = "carve_plan_ast_edit",
+        title = "Plan a semantic AST edit",
+        description = "Resolve exactly one semantic AST node and return a human-readable, reversible, stale-guarded source patch without writing the document.", output_schema = rmcp::handler::server::tool::schema_for_type::<SemanticAstEditPlanOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn plan_ast_edit(
+        &self,
+        Parameters(input): Parameters<SemanticAstEditPlanInput>,
+    ) -> CallToolResult {
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        if let Err(error) = validate_semantic_edit_shape(&input.edit) {
+            return Self::error(error);
+        }
+        if input.selector.value.is_empty() {
+            return Self::error("Selector value must not be empty.");
+        }
+        let selector_maximum = if matches!(input.selector.kind, AstSelectorKind::AstPath) {
+            4096
+        } else {
+            256
+        };
+        if input.selector.value.chars().count() > selector_maximum {
+            return Self::error(format!(
+                "Selector value may contain at most {selector_maximum} characters."
+            ));
+        }
+        let before_document = carve::parse(&input.source);
+        let before_json = match carve::try_to_json(&before_document) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error.to_string()),
+        };
+        let before = match serde_json::from_str::<Value>(&before_json) {
+            Ok(value) => value,
+            Err(error) => return Self::error(format!("AST serialization failed: {error}")),
+        };
+        let matches = ast_nodes(&before)
+            .into_iter()
+            .filter(|(path, node)| selector_matches(path, node, &input.selector))
+            .map(|(path, node)| (path, node.clone()))
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            return Self::error("Semantic selector did not match any AST node.");
+        }
+        if matches.len() > 1 {
+            return Self::error(format!(
+                "Semantic selector matched {} AST nodes; refine it before editing.",
+                matches.len()
+            ));
+        }
+        let (path, matched_node) = &matches[0];
+        let match_value = ast_match(path.clone(), matched_node);
+        let mut after = before.clone();
+        if let Err(error) = apply_semantic_ast_edit(&mut after, path, &input.edit) {
+            return Self::error(error);
+        }
+        if semantic_ast_equal(&before, &after) {
+            return Self::error("The requested semantic edit would not change the document.");
+        }
+        if matches!(input.edit.kind, SemanticAstEditKind::DeleteNode)
+            && matched_node.get("type").and_then(Value::as_str) == Some("footnote")
+        {
+            let label = node_identity(matched_node);
+            let referenced = ast_nodes(&after).into_iter().any(|(_, node)| {
+                node.get("type").and_then(Value::as_str) == Some("footnote_ref")
+                    && node.get("id").and_then(Value::as_str) == label
+            });
+            if referenced {
+                return Self::error(format!(
+                    "Cannot delete footnote “{}” while references remain.",
+                    human_text(label.unwrap_or(""), 80)
+                ));
+            }
+        }
+        let mut semantic_after = semantic_ast(&after, true);
+        if let Some(root) = semantic_after.as_object_mut() {
+            root.insert("srcByteLength".into(), Value::from(0));
+        }
+        let after_json = match serde_json::to_string(&semantic_after) {
+            Ok(value) if value.len() <= MAX_SOURCE_BYTES => value,
+            Ok(value) => {
+                return Self::error(format!(
+                    "Edited AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                    value.len()
+                ));
+            }
+            Err(error) => return Self::error(format!("Edited AST must be JSON: {error}")),
+        };
+        let edited_document = match carve::from_json(&after_json) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error.to_string()),
+        };
+        let rendered = match carve::render_carve(&edited_document) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error.to_string()),
+        };
+        let after_document = carve::parse(&rendered);
+        let mut patch = match carve::create_reversible_ast_patch(&before_document, &after_document)
+        {
+            Ok(value) => value,
+            Err(error) => return Self::error(error.to_string()),
+        };
+        patch
+            .forward
+            .sort_by(|left, right| ast_patch_path(left).cmp(ast_patch_path(right)));
+        patch
+            .inverse
+            .sort_by(|left, right| ast_patch_path(left).cmp(ast_patch_path(right)));
+        if patch.forward.is_empty() {
+            return Self::error("The requested semantic edit would not change the document.");
+        }
+        let forward_document =
+            match carve::apply_reversible_ast_patch(&before_document, &patch, false) {
+                Ok(value) => value,
+                Err(error) => return Self::error(error.to_string()),
+            };
+        match carve::render_carve(&forward_document) {
+            Ok(value) if value == rendered => {}
+            Ok(_) => return Self::error("Semantic edit source did not match its AST patch."),
+            Err(error) => return Self::error(error.to_string()),
+        }
+        if let Err(error) =
+            carve::apply_reversible_ast_patch(&carve::parse(&rendered), &patch, true)
+        {
+            return Self::error(format!("Semantic edit source is not reversible: {error}"));
+        }
+        for operations in [&patch.forward, &patch.inverse] {
+            if operations.len() > MAX_AST_PATCH_OPERATIONS {
+                return Self::error(format!(
+                    "Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.",
+                    operations.len()
+                ));
+            }
+        }
+        let encode_operations = |operations| -> Result<Value, String> {
+            let json = carve::ast_patch_to_json(operations).map_err(|error| error.to_string())?;
+            serde_json::from_str(&json).map_err(|error| error.to_string())
+        };
+        let forward = match encode_operations(&patch.forward) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let inverse = match encode_operations(&patch.inverse) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let changes = explain_ast_operations(&before, &patch.forward);
+        let notices = semantic_edit_notices(matched_node, &input.edit);
+        let reversible_patch = json!({
+            "version": 1,
+            "forward": forward,
+            "inverse": inverse,
+            "beforeFingerprint": patch.before_fingerprint,
+            "afterFingerprint": patch.after_fingerprint,
+            "changes": changes,
+        });
+        let value = json!({
+            "selector": input.selector,
+            "edit": {"kind": input.edit.kind},
+            "match": match_value,
+            "notices": notices,
+            "reversiblePatch": reversible_patch,
+            "sourcePatch": source_patch_with_kind(
+                &input.source,
+                &rendered,
+                SourceEditKindOutputSchema::Refactor,
+                "semantic-ast-edit",
+            ),
+        });
+        match serde_json::to_vec(&value) {
+            Ok(bytes) if bytes.len() <= MAX_SOURCE_BYTES => Self::output(value),
+            Ok(bytes) => Self::error(format!(
+                "Semantic edit plan is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                bytes.len()
+            )),
+            Err(error) => Self::error(format!("Semantic edit plan serialization failed: {error}")),
         }
     }
 
