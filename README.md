@@ -18,8 +18,8 @@ default and can be enabled for explicitly configured document roots.
   canonical Carve source without changing files.
 - `carve_select_ast_nodes` finds headings, footnotes, node types, or a current
   AST path without making an ambiguous selection for the caller.
-- `carve_plan_ast_edit` turns one exact semantic match and a small edit intent
-  into an explained, reversible source patch for approval.
+- `carve_plan_ast_edit` turns one or more exact semantic matches and small edit
+  intents into one explained, reversible source patch for approval.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic
   stale-edit fingerprints.
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations

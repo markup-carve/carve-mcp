@@ -136,6 +136,8 @@ export type SemanticAstEdit =
   | { kind: 'delete-node' }
   | { kind: 'replace-node'; node: unknown }
   | { kind: 'insert-before' | 'insert-after'; node: unknown };
+export type SemanticAstEditStep = { selector: AstSelector; edit: SemanticAstEdit };
+export const MAX_SEMANTIC_EDIT_STEPS = 100;
 const AST_CHILD_FIELDS = ['children', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title'] as const;
 
 function pointer(path: string, part: string): string {
@@ -221,19 +223,36 @@ function astMatch(path: string, node: Record<string, unknown>) {
     };
 }
 
-export function planSemanticAstEdit(source: string, selector: AstSelector, edit: SemanticAstEdit) {
+export function planSemanticAstEdit(source: string, selector: AstSelector, edit: SemanticAstEdit, then: SemanticAstEditStep[] = []) {
   validateSource(source);
-  validateSemanticEditShape(edit);
+  if (then.length > MAX_SEMANTIC_EDIT_STEPS - 1) throw new Error(`Semantic edit plan may contain at most ${MAX_SEMANTIC_EDIT_STEPS} steps.`);
   const before = parse(source);
-  const matches = matchingAstNodes(before, selector);
-  if (matches.length === 0) throw new Error('Semantic selector did not match any AST node.');
-  if (matches.length > 1) throw new Error(`Semantic selector matched ${matches.length} AST nodes; refine it before editing.`);
-  const match = matches[0]!;
+  const requests = [{ selector, edit }, ...then];
+  validateStructuredPayload(requests, 'Semantic edit steps');
+  const resolved = requests.map((request, index) => {
+    validateSemanticEditShape(request.edit);
+    const matches = matchingAstNodes(before, request.selector);
+    const label = requests.length === 1 ? 'Semantic selector' : `Semantic edit step ${index + 1}`;
+    if (matches.length === 0) throw new Error(`${label} did not match any AST node.`);
+    if (matches.length > 1) throw new Error(`${label} matched ${matches.length} AST nodes; refine it before editing.`);
+    return { ...request, match: matches[0]! };
+  });
+  for (let left = 0; left < resolved.length; left += 1) {
+    for (let right = left + 1; right < resolved.length; right += 1) {
+      if (pathsOverlap(resolved[left]!.match.path, resolved[right]!.match.path)) {
+        throw new Error(`Semantic edit steps ${left + 1} and ${right + 1} target overlapping AST nodes.`);
+      }
+    }
+  }
   const after = structuredClone(before);
-  applySemanticEdit(after, match.path, edit);
+  const structural = (step: typeof resolved[number]) => !['replace-text', 'rename-heading-id'].includes(step.edit.kind);
+  const ordered = [...resolved.filter((step) => !structural(step)),
+    ...resolved.filter(structural).sort((left, right) => compareStructuralPaths(right.match.path, left.match.path))];
+  for (const step of ordered) applySemanticEdit(after, step.match.path, step.edit);
+  assertNoNewHeadingIdCollisions(before, after);
   if (semanticAstEqual(before, after)) throw new Error('The requested semantic edit would not change the document.');
-  if (edit.kind === 'delete-node' && match.node.type === 'footnote') {
-    const label = nodeIdentity(match.node);
+  for (const step of resolved.filter(({ edit, match }) => edit.kind === 'delete-node' && match.node.type === 'footnote')) {
+    const label = nodeIdentity(step.match.node);
     const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.id === label);
     if (referenced) throw new Error(`Cannot delete footnote “${humanText(label ?? '')}” while references remain.`);
   }
@@ -248,17 +267,55 @@ export function planSemanticAstEdit(source: string, selector: AstSelector, edit:
   applyReversibleStructuredAstPatch(applied.source, reversiblePatch, true);
   const sourcePatch = { ...applied.sourcePatch,
     edits: applied.sourcePatch.edits.map((item) => ({ ...item, code: 'semantic-ast-edit' })) };
-  const notices = semanticEditNotices(match.node, edit);
+  const steps = resolved.map((step) => ({ selector: step.selector, edit: { kind: step.edit.kind },
+    match: astMatch(step.match.path, step.match.node), notices: semanticEditNotices(step.match.node, step.edit) }));
+  const notices = [...new Set(steps.flatMap((step) => step.notices))];
   const output = {
     selector,
     edit: { kind: edit.kind },
-    match: astMatch(match.path, match.node),
+    match: steps[0]!.match,
     notices,
+    editCount: steps.length,
+    steps,
     reversiblePatch,
     sourcePatch,
   };
   validateStructuredPayload(output, 'Semantic edit plan');
   return output;
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+function compareStructuralPaths(left: string, right: string): number {
+  const leftParts = left.split('/');
+  const rightParts = right.split('/');
+  if (leftParts.length !== rightParts.length) return leftParts.length - rightParts.length;
+  const leftParent = leftParts.slice(0, -1).join('/');
+  const rightParent = rightParts.slice(0, -1).join('/');
+  if (leftParent === rightParent) return Number(leftParts.at(-1)) - Number(rightParts.at(-1));
+  return left.localeCompare(right);
+}
+
+function headingIdCounts(ast: AstJsonDocument): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { node } of astNodes(ast)) {
+    if (node.type !== 'heading') continue;
+    const id = nodeIdentity(node);
+    if (!id) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function assertNoNewHeadingIdCollisions(before: AstJsonDocument, after: AstJsonDocument): void {
+  const beforeCounts = headingIdCounts(before);
+  for (const [id, count] of headingIdCounts(after)) {
+    if (count > 1 && count > (beforeCounts.get(id) ?? 0)) {
+      throw new Error(`Heading ID “${humanText(id)}” is already in use.`);
+    }
+  }
 }
 
 function validateSemanticEditShape(edit: SemanticAstEdit): void {
@@ -294,9 +351,6 @@ function applySemanticEdit(ast: AstJsonDocument, path: string, edit: SemanticAst
     if (node.type !== 'heading') throw new Error('rename-heading-id requires a heading node.');
     if (!edit.id || Array.from(edit.id).length > 256) throw new Error('Heading ID must contain 1 to 256 characters.');
     if (humanText(edit.id, 257) !== edit.id) throw new Error('Heading ID must not contain control characters or surrounding or repeated whitespace.');
-    const duplicate = astNodes(ast).some(({ path: otherPath, node: other }) => otherPath !== path
-      && other.type === 'heading' && nodeIdentity(other) === edit.id);
-    if (duplicate) throw new Error(`Heading ID “${humanText(edit.id)}” is already in use.`);
     node.attrs = { ...((node.attrs && typeof node.attrs === 'object' && !Array.isArray(node.attrs)) ? node.attrs as Record<string, unknown> : {}), id: edit.id };
     return;
   }
