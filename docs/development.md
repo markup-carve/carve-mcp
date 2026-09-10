@@ -139,6 +139,21 @@ silently chooses one when a selector is ambiguous. Treat the returned path as
 a resolved location for the current AST, not as a durable identifier across
 unrelated edits.
 
+For a review-first edit, `carve_plan_ast_edit` combines the current source, one
+selector, and one intent. It refuses zero or multiple matches and returns a
+reversible AST patch plus the narrowest stale-guarded source replacement. The
+initial intents are `replace-text` for headings and paragraphs,
+`rename-heading-id`, `delete-node`, `replace-node`, `insert-before`, and
+`insert-after`. Structural intents accept one PART 12 AST node. Review and
+apply the returned source patch separately; the planner never writes files.
+When a semantic selector is ambiguous, pass one of the paths returned by
+`carve_select_ast_nodes` back as an `ast-path` selector. Paths resolve only
+against the supplied source and are protected by the returned fingerprints.
+`replace-text` accepts one line of plain text, replaces inline formatting in
+that heading or paragraph, and preserves existing heading IDs; the result
+includes notices for those effects. A referenced footnote cannot be deleted
+until its references are removed.
+
 For an undoable workflow, create a patch with
 `carve_create_reversible_ast_patch`, then pass the current source and patch to
 `carve_apply_reversible_ast_patch`. The apply tool checks a semantic AST

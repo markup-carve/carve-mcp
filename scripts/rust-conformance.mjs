@@ -55,6 +55,21 @@ const calls = [
   ['carve_parse', { source: '# Hello' }],
   ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
   ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'heading-id', value: 'Before' } }],
+  ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'ast-path', value: '/children/0' } }],
+  ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'replace-text', text: 'After' } }],
+  ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'rename-heading-id', id: 'intro' } }],
+  ['carve_plan_ast_edit', { source: '# Title\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'delete-node' } }],
+  ['carve_plan_ast_edit', { source: '# Title\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'replace-node', node: { type: 'paragraph', children: [{ type: 'text', value: 'New' }] } } }],
+  ['carve_plan_ast_edit', { source: '# Title', selector: { kind: 'heading-id', value: 'Title' }, edit: { kind: 'insert-after', node: { type: 'paragraph', children: [{ type: 'text', value: 'New' }] } } }],
+  ['carve_plan_ast_edit', { source: '# Title', selector: { kind: 'heading-id', value: 'Title' }, edit: { kind: 'insert-before', node: { type: 'paragraph', children: [{ type: 'text', value: 'New' }] } } }],
+  ['carve_plan_ast_edit', { source: '# A\n\n# B', selector: { kind: 'node-type', value: 'heading' }, edit: { kind: 'delete-node' } }],
+  ['carve_plan_ast_edit', { source: '# A', selector: { kind: 'heading-id', value: 'missing' }, edit: { kind: 'delete-node' } }],
+  ['carve_plan_ast_edit', { source: '# A\n\n# B', selector: { kind: 'heading-id', value: 'A' }, edit: { kind: 'rename-heading-id', id: 'B' } }],
+  ['carve_plan_ast_edit', { source: 'Text[^a]\n\n[^a]: Note\n', selector: { kind: 'footnote-label', value: 'a' }, edit: { kind: 'delete-node' } }],
+  ['carve_plan_ast_edit', { source: 'Body', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'replace-text', text: 'a\n\nb' } }],
+  ['carve_plan_ast_edit', { source: '# A\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'rename-heading-id', id: 'A' } }],
+  ['carve_plan_ast_edit', { source: '# A', selector: { kind: 'heading-id', value: 'A' }, edit: { kind: 'delete-node', text: 'ignored' } }],
+  ['carve_plan_ast_edit', { source: '# A', selector: { kind: 'heading-id', value: 'A' }, edit: { kind: 'replace-text', text: 'A' } }],
   ['carve_create_reversible_ast_patch', { before: beforeAst, after: afterAst }],
   ['carve_create_reversible_ast_patch', { before: keyValueBeforeAst, after: keyValueAfterAst }],
   ['carve_apply_reversible_ast_patch', { source: '# Before', patch: reversibleHeadingPatch, inverse: false }],
@@ -142,7 +157,8 @@ async function results(command, args, engineVersion) {
     const output = [];
     for (const [name, callArgs] of calls) {
       const result = await client.callTool({ name, arguments: callArgs });
-      output.push({ name, isError: result.isError ?? false, value: result.structuredContent ?? JSON.parse(result.content[0].text) });
+      const isError = result.isError ?? false;
+      output.push({ name, isError, ...(isError ? {} : { text: result.content[0]?.text }), value: result.structuredContent ?? JSON.parse(result.content[0].text) });
     }
     const resources = await client.listResources();
     const templates = await client.listResourceTemplates();

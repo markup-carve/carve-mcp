@@ -13,6 +13,7 @@ Implemented tool names:
 - `carve_create_ast_patch`
 - `carve_apply_ast_patch`
 - `carve_select_ast_nodes`
+- `carve_plan_ast_edit`
 - `carve_create_reversible_ast_patch`
 - `carve_apply_reversible_ast_patch`
 - `carve_migrate`

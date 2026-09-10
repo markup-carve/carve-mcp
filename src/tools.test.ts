@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, render, selectAstNodes, validateSource } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
 
 describe('Carve operations', () => {
   it('lints valid input', () => expect(lint('# Hello').valid).toBe(true));
@@ -68,6 +68,51 @@ describe('Carve operations', () => {
     expect(mixed.changes).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'replace', summary: expect.stringMatching(/^Changed items on/) }),
     ]));
+  });
+  it('plans exact, reversible semantic edits without writing', () => {
+    const source = '# Before\n\nBody';
+    const plan = planSemanticAstEdit(source, { kind: 'heading-id', value: 'Before' }, { kind: 'replace-text', text: 'After' });
+    expect(plan).toMatchObject({
+      edit: { kind: 'replace-text' }, match: { type: 'heading', identity: 'Before', preview: 'Before' },
+      reversiblePatch: { version: 1, changes: expect.any(Array) },
+      sourcePatch: { sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) },
+    });
+    const applied = applyReversibleStructuredAstPatch(source, plan.reversiblePatch);
+    expect(applied.source).toContain('# After');
+    expect(applied.source).toContain('{#Before}');
+    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('# Before');
+    expect(plan.notices).toEqual(expect.arrayContaining([expect.stringContaining('Preserved heading ID'), expect.stringContaining('inline formatting')]));
+
+    const renamed = planSemanticAstEdit(source, { kind: 'heading-id', value: 'Before' }, { kind: 'rename-heading-id', id: 'intro' });
+    const renamedSource = applyReversibleStructuredAstPatch(source, renamed.reversiblePatch).source;
+    expect(renamedSource).toContain('{#intro}');
+    expect(applyReversibleStructuredAstPatch(renamedSource, renamed.reversiblePatch, true).source).toContain('# Before');
+  });
+  it('plans structural semantic edits and rejects unsafe selection', () => {
+    const paragraph = { type: 'paragraph', children: [{ type: 'text', value: 'New' }] };
+    const deleted = planSemanticAstEdit('# Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'delete-node' });
+    expect(applyReversibleStructuredAstPatch('# Title\n\nBody', deleted.reversiblePatch).source).not.toContain('Body');
+    const replaced = planSemanticAstEdit('# Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-node', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('# Title\n\nBody', replaced.reversiblePatch).source).toContain('New');
+    const inserted = planSemanticAstEdit('# Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-after', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('# Title', inserted.reversiblePatch).source).toContain('New');
+    const insertedBefore = planSemanticAstEdit('# Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-before', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('# Title', insertedBefore.reversiblePatch).source.startsWith('New')).toBe(true);
+    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'node-type', value: 'heading' }, { kind: 'delete-node' })).toThrow(/matched 2/);
+    const byPath = planSemanticAstEdit('# A\n\n# B', { kind: 'ast-path', value: '/children/1' }, { kind: 'delete-node' });
+    expect(applyReversibleStructuredAstPatch('# A\n\n# B', byPath.reversiblePatch).source).not.toContain('# B');
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'missing' }, { kind: 'delete-node' })).toThrow(/did not match/);
+    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'B' })).toThrow(/already in use/);
+    expect(() => planSemanticAstEdit('Text[^a]\n\n[^a]: Note\n', { kind: 'footnote-label', value: 'a' }, { kind: 'delete-node' })).toThrow(/references remain/);
+    expect(() => planSemanticAstEdit('Body', { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'a\n\nb' })).toThrow(/line breaks/);
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node', text: 'ignored' } as never)).toThrow(/does not accept text/);
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'A' })).toThrow(/would not change/);
+    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'bad\nid' })).toThrow(/control characters/);
+  });
+  it('plans edits for source documents larger than their positioned AST limit', () => {
+    const source = 'a'.repeat(200_000);
+    const plan = planSemanticAstEdit(source, { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'Short' });
+    expect(plan.sourcePatch.sourceBytes).toBe(200_000);
   });
   it('rejects malformed or excessive AST patches', () => {
     const ast = parse('# Hello');

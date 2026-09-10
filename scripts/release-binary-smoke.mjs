@@ -25,7 +25,7 @@ await client.connect(new StdioClientTransport({ command, stderr: 'pipe' }));
 try {
   const tools = await client.listTools();
   const names = tools.tools.map(({ name }) => name).sort();
-  const expected = ['carve_apply_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_create_ast_patch', 'carve_create_reversible_ast_patch', 'carve_format', 'carve_lint', 'carve_migrate', 'carve_parse', 'carve_render', 'carve_select_ast_nodes'];
+  const expected = ['carve_apply_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_create_ast_patch', 'carve_create_reversible_ast_patch', 'carve_format', 'carve_lint', 'carve_migrate', 'carve_parse', 'carve_plan_ast_edit', 'carve_render', 'carve_select_ast_nodes'];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(`Unexpected tool contract: ${names.join(', ')}`);
   }

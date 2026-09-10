@@ -129,7 +129,13 @@ function validateAst(value: unknown, label: string): AstJsonDocument {
   return value as AstJsonDocument;
 }
 
-export type AstSelector = { kind: 'heading-id' | 'footnote-label' | 'node-type'; value: string };
+export type AstSelector = { kind: 'heading-id' | 'footnote-label' | 'node-type' | 'ast-path'; value: string };
+export type SemanticAstEdit =
+  | { kind: 'replace-text'; text: string }
+  | { kind: 'rename-heading-id'; id: string }
+  | { kind: 'delete-node' }
+  | { kind: 'replace-node'; node: unknown }
+  | { kind: 'insert-before' | 'insert-after'; node: unknown };
 const AST_CHILD_FIELDS = ['children', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title'] as const;
 
 function pointer(path: string, part: string): string {
@@ -184,26 +190,139 @@ function astNodes(ast: AstJsonDocument) {
 
 export function selectAstNodes(value: unknown, selector: AstSelector) {
   const ast = validateAst(value, 'AST');
+  const selected = matchingAstNodes(ast, selector);
+  const truncated = selected.length > MAX_AST_SELECTOR_MATCHES;
+  const matches = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => astMatch(path, node));
+  const output = { selector, matchCount: selected.length, matches, truncated };
+  validateStructuredPayload(output, 'AST selector result');
+  return output;
+}
+
+function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
   if (!selector.value) throw new Error('Selector value must not be empty.');
-  if (Array.from(selector.value).length > 256) throw new Error('Selector value may contain at most 256 characters.');
-  const selected = astNodes(ast).filter(({ node }) => {
+  const maximum = selector.kind === 'ast-path' ? 4096 : 256;
+  if (Array.from(selector.value).length > maximum) throw new Error(`Selector value may contain at most ${maximum} characters.`);
+  return astNodes(ast).filter(({ path, node }) => {
+    if (selector.kind === 'ast-path') return path === selector.value;
     if (selector.kind === 'heading-id') return node.type === 'heading' && nodeIdentity(node) === selector.value;
     if (selector.kind === 'footnote-label') return node.type === 'footnote' && nodeIdentity(node) === selector.value;
     return node.type === selector.value;
   });
-  const truncated = selected.length > MAX_AST_SELECTOR_MATCHES;
-  const matches = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => {
+}
+
+function astMatch(path: string, node: Record<string, unknown>) {
     const fullPreview = humanText(nodeText(node, 121), 121);
     const preview = Array.from(fullPreview).slice(0, 120).join('');
     const identity = nodeIdentity(node);
     const displayIdentity = identity === undefined ? '' : humanText(identity);
     return {
-    path, type: String(node.type), ...(displayIdentity ? { identity: displayIdentity } : {}),
-    preview, previewTruncated: Array.from(fullPreview).length > 120,
-  }; });
-  const output = { selector, matchCount: selected.length, matches, truncated };
-  validateStructuredPayload(output, 'AST selector result');
+      path, type: String(node.type), ...(displayIdentity ? { identity: displayIdentity } : {}),
+      preview, previewTruncated: Array.from(fullPreview).length > 120,
+    };
+}
+
+export function planSemanticAstEdit(source: string, selector: AstSelector, edit: SemanticAstEdit) {
+  validateSource(source);
+  validateSemanticEditShape(edit);
+  const before = parse(source);
+  const matches = matchingAstNodes(before, selector);
+  if (matches.length === 0) throw new Error('Semantic selector did not match any AST node.');
+  if (matches.length > 1) throw new Error(`Semantic selector matched ${matches.length} AST nodes; refine it before editing.`);
+  const match = matches[0]!;
+  const after = structuredClone(before);
+  applySemanticEdit(after, match.path, edit);
+  if (semanticAstEqual(before, after)) throw new Error('The requested semantic edit would not change the document.');
+  if (edit.kind === 'delete-node' && match.node.type === 'footnote') {
+    const label = nodeIdentity(match.node);
+    const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.id === label);
+    if (referenced) throw new Error(`Cannot delete footnote “${humanText(label ?? '')}” while references remain.`);
+  }
+  const semanticAfter = semanticAst(after) as AstJsonDocument;
+  semanticAfter.srcByteLength = 0;
+  const editedBytes = validateStructuredPayload(semanticAfter, 'Edited AST');
+  const rendered = renderCarve(fromAstJson(semanticAfter, editedBytes));
+  const canonicalAfter = parse(rendered);
+  const reversiblePatch = createReversibleStructuredAstPatch(before, canonicalAfter);
+  if (reversiblePatch.forward.length === 0) throw new Error('The requested semantic edit would not change the document.');
+  const applied = applyReversibleStructuredAstPatch(source, reversiblePatch);
+  applyReversibleStructuredAstPatch(applied.source, reversiblePatch, true);
+  const sourcePatch = { ...applied.sourcePatch,
+    edits: applied.sourcePatch.edits.map((item) => ({ ...item, code: 'semantic-ast-edit' })) };
+  const notices = semanticEditNotices(match.node, edit);
+  const output = {
+    selector,
+    edit: { kind: edit.kind },
+    match: astMatch(match.path, match.node),
+    notices,
+    reversiblePatch,
+    sourcePatch,
+  };
+  validateStructuredPayload(output, 'Semantic edit plan');
   return output;
+}
+
+function validateSemanticEditShape(edit: SemanticAstEdit): void {
+  const allowed: Record<SemanticAstEdit['kind'], string[]> = {
+    'replace-text': ['kind', 'text'], 'rename-heading-id': ['kind', 'id'], 'delete-node': ['kind'],
+    'replace-node': ['kind', 'node'], 'insert-before': ['kind', 'node'], 'insert-after': ['kind', 'node'],
+  };
+  const unexpected = Object.keys(edit).filter((key) => !allowed[edit.kind]?.includes(key));
+  if (unexpected.length > 0) throw new Error(`${edit.kind} does not accept ${unexpected.join(', ')}.`);
+}
+
+function semanticEditNotices(node: Record<string, unknown>, edit: SemanticAstEdit): string[] {
+  if (edit.kind !== 'replace-text') return [];
+  const formatting = `replace-text replaces inline formatting inside the ${String(node.type)}.`;
+  const identity = humanText(nodeIdentity(node) ?? '');
+  return identity ? [`Preserved heading ID “${identity}”.`, formatting] : [formatting];
+}
+
+function applySemanticEdit(ast: AstJsonDocument, path: string, edit: SemanticAstEdit): void {
+  const selected = valueAtPointer(ast, path);
+  if (!selected || typeof selected !== 'object' || Array.isArray(selected)) throw new Error('Selected AST node no longer exists.');
+  const node = selected as Record<string, unknown>;
+  if (edit.kind === 'replace-text') {
+    if (typeof edit.text !== 'string') throw new Error('replace-text requires text.');
+    if (Buffer.byteLength(edit.text, 'utf8') > MAX_SOURCE_BYTES) throw new Error(`Replacement text exceeds the ${MAX_SOURCE_BYTES}-byte limit.`);
+    if (/[\r\n\u2028\u2029]/u.test(edit.text)) throw new Error('replace-text accepts one text block and must not contain line breaks.');
+    if (node.type !== 'heading' && node.type !== 'paragraph') throw new Error('replace-text supports heading and paragraph nodes.');
+    node.children = [{ type: 'text', value: edit.text }];
+    return;
+  }
+  if (edit.kind === 'rename-heading-id') {
+    if (typeof edit.id !== 'string') throw new Error('rename-heading-id requires id.');
+    if (node.type !== 'heading') throw new Error('rename-heading-id requires a heading node.');
+    if (!edit.id || Array.from(edit.id).length > 256) throw new Error('Heading ID must contain 1 to 256 characters.');
+    if (humanText(edit.id, 257) !== edit.id) throw new Error('Heading ID must not contain control characters or surrounding or repeated whitespace.');
+    const duplicate = astNodes(ast).some(({ path: otherPath, node: other }) => otherPath !== path
+      && other.type === 'heading' && nodeIdentity(other) === edit.id);
+    if (duplicate) throw new Error(`Heading ID “${humanText(edit.id)}” is already in use.`);
+    node.attrs = { ...((node.attrs && typeof node.attrs === 'object' && !Array.isArray(node.attrs)) ? node.attrs as Record<string, unknown> : {}), id: edit.id };
+    return;
+  }
+  const location = parentArrayLocation(ast, path);
+  if (!location) throw new Error(`${edit.kind} requires a node contained in an AST array.`);
+  if (edit.kind === 'delete-node') {
+    location.parent.splice(location.index, 1);
+  } else if (edit.kind === 'replace-node') {
+    if (edit.node === undefined) throw new Error('replace-node requires node.');
+    validateStructuredPayload(edit.node, 'Replacement node');
+    location.parent[location.index] = structuredClone(edit.node);
+  } else {
+    if (edit.node === undefined) throw new Error(`${edit.kind} requires node.`);
+    validateStructuredPayload(edit.node, 'Inserted node');
+    location.parent.splice(location.index + (edit.kind === 'insert-after' ? 1 : 0), 0, structuredClone(edit.node));
+  }
+}
+
+function parentArrayLocation(ast: AstJsonDocument, path: string): { parent: unknown[]; index: number } | undefined {
+  const separator = path.lastIndexOf('/');
+  if (separator < 0) return undefined;
+  const parent = valueAtPointer(ast, path.slice(0, separator));
+  const part = path.slice(separator + 1).replaceAll('~1', '/').replaceAll('~0', '~');
+  if (!Array.isArray(parent) || !/^(0|[1-9]\d*)$/.test(part)) return undefined;
+  const index = Number(part);
+  return index < parent.length ? { parent, index } : undefined;
 }
 
 function explainOperations(ast: AstJsonDocument, operations: AstPatchOperation[]) {

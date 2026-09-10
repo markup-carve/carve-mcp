@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- A review-first semantic edit planner that resolves exactly one AST node and
+  returns an explained, reversible, stale-guarded source patch without writing.
+
 ## 0.1.4 - 2026-09-09
 
 ### Added
