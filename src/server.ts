@@ -12,6 +12,7 @@ import type { ToolObserver } from './telemetry.js';
 import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
 import { diagnoseAndFix } from './diagnostics.js';
+import { buildReferenceGraph } from './reference-graph.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -78,6 +79,7 @@ const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dr
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+const referenceGraphOutput = z.object({ rootIndex: z.number().int(), definitions: z.array(z.unknown()), references: z.array(z.unknown()), brokenReferences: z.array(z.unknown()), orphans: z.array(z.unknown()), errors: z.array(z.unknown()), counts: z.object({ definitions: z.number().int(), references: z.number().int(), broken: z.number().int(), orphans: z.number().int() }), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 
 function summary(value: unknown): string {
   if (value && typeof value === 'object') {
@@ -156,6 +158,16 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       limit: limit ?? workspace.review.limit ?? 500,
       platforms: platforms ?? workspace.review.platforms ?? [],
       checkLinks: workspace.review.checkLinks, checkAnchors: workspace.review.checkAnchors,
+    })));
+    server.registerTool('carve_reference_graph', {
+      title: 'Build Carve reference graph',
+      description: 'Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional() }).strict(),
+      outputSchema: referenceGraphOutput,
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    }, safe('carve_reference_graph', observe, ({ rootIndex, maxDepth, limit }) => buildReferenceGraph(workspace, rootIndex, {
+      maxDepth: maxDepth ?? workspace.review.maxDepth ?? 10,
+      limit: limit ?? workspace.review.limit ?? 500,
     })));
     server.registerTool('carve_prepare_edit', {
       title: 'Preview canonical Carve formatting',

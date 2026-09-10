@@ -24,6 +24,7 @@ default and can be enabled for explicitly configured document roots.
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations
   as a guarded UTF-8 source edit.
 - `carve_migrate` converts HTML, Markdown, or Djot and reports migration fidelity.
+- `carve_reference_graph` indexes cross-document headings, footnotes, abbreviations, links, and images, including broken edges and orphaned definitions (when workspace access is enabled).
 
 Tools return concise text for readers alongside schema-validated structured
 results for clients. Six optional prompts guide common review, conversion, and
