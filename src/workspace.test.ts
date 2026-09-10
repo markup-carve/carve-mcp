@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { prepareWorkspace } from './workspace.js';
 import { reviewWorkspace } from './project.js';
+import { buildReferenceGraph } from './reference-graph.js';
 
 describe('workspace operations', () => {
   it('reads and atomically writes with dry runs and stale-write protection', async () => {
@@ -68,5 +69,16 @@ describe('workspace operations', () => {
     expect((await workspace.list(0)).files).toEqual(['guide.crv', 'index.crv']);
     const review = await reviewWorkspace(workspace, 0, { checkAnchors: false });
     expect(review.projectWarnings.map(({ rule }) => rule)).toEqual(['missing-local-file']);
+  });
+
+  it('builds a cross-document semantic reference graph', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await mkdir(join(root, 'docs'));
+    await writeFile(join(root, 'index.crv'), '# Home\n\n[guide](docs/guide.crv#Guide)\n[bad anchor](docs/guide.crv#Gone)\n[missing](gone.crv)\n\nSee </#Home>.\n\n[^used]: Used\n[^orphan]: Orphan\n\nUsed[^used].');
+    await writeFile(join(root, 'docs', 'guide.crv'), '# Guide\n\n![logo](logo.png)');
+    const graph = await buildReferenceGraph(await prepareWorkspace({ roots: [root] }), 0);
+    expect(graph.counts).toEqual({ definitions: 4, references: 6, broken: 2, orphans: 1 });
+    expect(graph.brokenReferences.map(({ id }) => id)).toEqual(['docs/guide.crv#Gone', 'gone.crv']);
+    expect(graph.orphans).toEqual([expect.objectContaining({ kind: 'footnote', id: 'orphan' })]);
   });
 });

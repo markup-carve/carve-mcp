@@ -11,6 +11,8 @@ All notable changes to this project are documented in this file.
 - `carve_diagnose_and_fix` previews automatic and writer-review diagnostics,
   applies only explicitly selected safe fixes, and returns guarded forward and
   undo source patches.
+- A bounded workspace reference graph for headings, footnotes, abbreviations,
+  document links, and images, with broken-edge and orphan reporting.
 
 ## 0.1.4 - 2026-09-09
 
