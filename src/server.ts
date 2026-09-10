@@ -11,11 +11,12 @@ import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
 import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
+import { diagnoseAndFix } from './diagnostics.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
-const sourceEditOutput = z.object({ start: z.number().int().min(0), end: z.number().int().min(0), replacement: z.string(),
+const sourceEditOutput = z.object({ start: z.number().int().min(0).describe('Inclusive UTF-8 byte offset'), end: z.number().int().min(0).describe('Exclusive UTF-8 byte offset'), replacement: z.string(),
   kind: z.enum(['formatting', 'syntax-migration', 'quick-fix', 'refactor']), code: z.string().min(1) }).strict();
 const sourcePatchOutput = z.object({ version: z.literal(1), sourceFingerprint: z.string().regex(/^fnv1a64:[0-9a-f]{16}$/),
   sourceBytes: z.number().int().min(0), edits: z.array(sourceEditOutput),
@@ -43,6 +44,11 @@ const warningOutput = z.object({
   start: z.number().int(), end: z.number().int(), resourceUri: z.string(), data: z.record(z.string(), z.unknown()).optional(),
 }).loose();
 const lintOutput = z.object({ valid: z.boolean(), warningCount: z.number().int(), warnings: z.array(warningOutput) }).loose();
+const diagnosticFixOutput = lintOutput.extend({
+  fixes: z.array(z.object({ id: z.string(), rule: z.string(), message: z.string(), applicability: z.enum(['automatic', 'writer-review']), edit: sourceEditOutput.nullable() }).strict()),
+  appliedFixIds: z.array(z.string()), value: z.string(), remainingWarningCount: z.number().int(), remainingValid: z.boolean(),
+  patch: sourcePatchOutput, undoPatch: sourcePatchOutput,
+}).loose();
 const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
 const patchChangeOutput = z.object({ kind: z.enum(['add', 'remove', 'replace']), path: z.string(), target: z.string(), summary: z.string() }).loose();
@@ -253,6 +259,17 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_lint', observe, ({ source: document, platforms }) => {
     const output = lint(document, platforms);
+    return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
+  }));
+
+  server.registerTool('carve_diagnose_and_fix', {
+    title: 'Diagnose and fix Carve',
+    description: 'Diagnose Carve source, propose bounded fixes, and optionally apply selected safe fix IDs with forward and undo patches. Writer-review fixes are never applied automatically.',
+    inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]), applyFixIds: z.array(z.string()).max(100).default([]) }).strict(),
+    outputSchema: diagnosticFixOutput,
+    annotations: readOnly,
+  }, safe('carve_diagnose_and_fix', observe, ({ source: document, platforms, applyFixIds }) => {
+    const output = diagnoseAndFix(document, platforms, applyFixIds);
     return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
   }));
 
