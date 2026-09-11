@@ -31,6 +31,10 @@ Tools return concise text for readers alongside schema-validated structured
 results for clients. Six optional prompts guide common review, conversion, and
 publishing workflows without replacing the writer's judgment.
 
+Use `--tool-profile review`, `convert`, `structure`, or `workspace` to expose
+only the tools needed for that job and reduce model context. The default `all`
+profile preserves the complete tool surface.
+
 Raw HTML passthrough is disabled by default because MCP inputs are untrusted.
 The server has no filesystem access unless you explicitly give it a workspace
 root.

@@ -36,6 +36,26 @@ one or more absolute roots at startup:
 node dist/index.js --root /absolute/project/path
 ```
 
+### Tool profiles
+
+The default `--tool-profile all` keeps every available tool. Select a smaller
+surface when a client places all tool schemas in model context:
+
+| Profile | Intended work |
+| --- | --- |
+| `review` | Lint, automatic fixes, formatting, rendering, and target checks |
+| `convert` | Migration, lint, rendering, and target checks |
+| `structure` | Parsing, semantic selection, and reversible AST edits |
+| `workspace` | Workspace review/edit tools plus document review tools |
+| `all` | Every tool; backward-compatible default |
+
+`workspace` still requires `--root`; its write tool additionally requires
+`--allow-write`. Profiles affect tool discovery, not prompts or resources.
+
+CI measures the parsed `tools/list` result with the pinned GPT-5/o200k
+tokenizer. Update `scripts/schema-token-budget.json` deliberately when a useful
+schema change exceeds its five-percent headroom.
+
 `carve_workspace_info` lists root indexes without exposing host paths.
 `carve_read_file` accepts common text-document extensions and excludes hidden
 paths and dependency directories.

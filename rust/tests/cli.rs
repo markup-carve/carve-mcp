@@ -34,4 +34,22 @@ fn rejects_unknown_or_extra_arguments() {
         assert!(stderr.contains("Unknown arguments"));
         assert!(arguments.iter().all(|argument| stderr.contains(argument)));
     }
+
+    let output = binary()
+        .args(["--tool-profile", "unknown"])
+        .output()
+        .expect("run invalid profile");
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Tool profile must be one of"));
+    assert!(stderr.contains("review, convert, structure, workspace, all"));
+
+    let output = binary()
+        .args(["--tool-profile", "--allow-write"])
+        .output()
+        .expect("run missing profile");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("--tool-profile requires a profile name")
+    );
 }

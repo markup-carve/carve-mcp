@@ -14,6 +14,7 @@ import { createSourcePatch } from './source-patch.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { buildReferenceGraph } from './reference-graph.js';
 import { compatibilityMatrix } from './compatibility.js';
+import { toolEnabled, type ToolProfile } from './tool-profile.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
@@ -138,24 +139,24 @@ function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefin
   };
 }
 
-export async function createServer(workspaceOptions?: WorkspaceOptions, observe?: ToolObserver): Promise<McpServer> {
+export async function createServer(workspaceOptions?: WorkspaceOptions, observe?: ToolObserver, toolProfile: ToolProfile = 'all'): Promise<McpServer> {
   const server = new McpServer({ name: 'carve-mcp', version: packageVersion });
   if (workspaceOptions?.roots.length) {
     const workspace = await prepareWorkspace(workspaceOptions);
-    server.registerTool('carve_read_file', {
+    if (toolEnabled(toolProfile, 'carve_read_file')) server.registerTool('carve_read_file', {
       title: 'Read Carve workspace file',
       description: 'Read a UTF-8 text file inside an explicitly configured workspace root.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: readOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe('carve_read_file', observe, ({ rootIndex, path }) => workspace.read(rootIndex, path)));
-    server.registerTool('carve_list_files', {
+    if (toolEnabled(toolProfile, 'carve_list_files')) server.registerTool('carve_list_files', {
       title: 'List Carve workspace files',
       description: 'List supported document files inside an explicitly configured root, with bounded recursion and no host paths.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).default(10), limit: z.number().int().min(1).max(2_000).default(500) }).strict(),
       outputSchema: listOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe('carve_list_files', observe, ({ rootIndex, maxDepth, limit }) => workspace.list(rootIndex, { maxDepth, limit })));
-    server.registerTool('carve_review_workspace', {
+    if (toolEnabled(toolProfile, 'carve_review_workspace')) server.registerTool('carve_review_workspace', {
       title: 'Review Carve workspace',
       description: 'Lint Carve files and validate explicit local document links and anchors across a bounded workspace scan.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional(), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).optional() }).strict(),
@@ -167,7 +168,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       platforms: platforms ?? workspace.review.platforms ?? [],
       checkLinks: workspace.review.checkLinks, checkAnchors: workspace.review.checkAnchors,
     })));
-    server.registerTool('carve_reference_graph', {
+    if (toolEnabled(toolProfile, 'carve_reference_graph')) server.registerTool('carve_reference_graph', {
       title: 'Build Carve reference graph',
       description: 'Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional() }).strict(),
@@ -177,7 +178,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       maxDepth: maxDepth ?? workspace.review.maxDepth ?? 10,
       limit: limit ?? workspace.review.limit ?? 500,
     })));
-    server.registerTool('carve_prepare_edit', {
+    if (toolEnabled(toolProfile, 'carve_prepare_edit')) server.registerTool('carve_prepare_edit', {
       title: 'Preview canonical Carve formatting',
       description: 'Read and canonically format a Carve workspace file without writing. A lossless result includes a stale-guarded patch with UTF-8 byte ranges; a lossy writer-review result has patch: null.',
       inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1) }).strict(), outputSchema: editOutput,
@@ -193,7 +194,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       return { rootIndex, path, expectedSha256: current.sha256, changed: proposal.value !== current.content, proposedContent: proposal.value,
         unifiedDiff: diff.value, diffTruncated: diff.truncated, patch, losses: proposal.losses, totalLosses: proposal.totalLosses, truncated: proposal.truncated };
     }));
-    server.registerTool('carve_prepare_workspace_edits', {
+    if (toolEnabled(toolProfile, 'carve_prepare_workspace_edits')) server.registerTool('carve_prepare_workspace_edits', {
       title: 'Preview canonical formatting across a workspace',
       description: 'Prepare bounded formatting proposals and unified diffs without writing. Lossless items include stale-guarded UTF-8 byte patches; lossy writer-review items have patch: null.',
       inputSchema: z.object({
@@ -207,14 +208,14 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     }, safe('carve_prepare_workspace_edits', observe, ({ rootIndex, paths, maxDepth, limit, maxDiffBytes, includeContent }) => (
       prepareWorkspaceEdits(workspace, rootIndex, { paths, maxDepth, limit, maxDiffBytes, includeContent })
     )));
-    server.registerTool('carve_workspace_info', {
+    if (toolEnabled(toolProfile, 'carve_workspace_info')) server.registerTool('carve_workspace_info', {
       title: 'List configured Carve workspace roots',
       description: 'List root indexes and whether writes are enabled. Paths are intentionally not exposed.',
       inputSchema: z.object({}).strict(),
       outputSchema: workspaceInfoOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe('carve_workspace_info', observe, () => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
-    if (workspaceOptions.allowWrite) {
+    if (workspaceOptions.allowWrite && toolEnabled(toolProfile, 'carve_write_file')) {
       server.registerTool('carve_write_file', {
         title: 'Write Carve workspace file',
         description: 'Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.',
@@ -271,7 +272,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
   });
 
-  server.registerTool('carve_lint', {
+  if (toolEnabled(toolProfile, 'carve_lint')) server.registerTool('carve_lint', {
     title: 'Lint Carve',
     description: 'Check Carve source for author-facing problems and silent degradation.',
     inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }),
@@ -282,7 +283,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
   }));
 
-  server.registerTool('carve_diagnose_and_fix', {
+  if (toolEnabled(toolProfile, 'carve_diagnose_and_fix')) server.registerTool('carve_diagnose_and_fix', {
     title: 'Diagnose and fix Carve',
     description: 'Diagnose Carve source, propose bounded fixes, and optionally apply selected safe fix IDs with forward and undo patches. Writer-review fixes are never applied automatically.',
     inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]), applyFixIds: z.array(z.string()).max(100).default([]) }).strict(),
@@ -293,7 +294,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
   }));
 
-  server.registerTool('carve_format', {
+  if (toolEnabled(toolProfile, 'carve_format')) server.registerTool('carve_format', {
     title: 'Format Carve',
     description: 'Format Carve source canonically and report any lossy raw-format nodes.',
     inputSchema: z.object({ source: sourceSchema }),
@@ -301,7 +302,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_format', observe, ({ source: document }) => formatCarve(document)));
 
-  server.registerTool('carve_render', {
+  if (toolEnabled(toolProfile, 'carve_render')) server.registerTool('carve_render', {
     title: 'Render Carve',
     description: 'Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.',
     inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings }),
@@ -311,7 +312,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
   })));
 
-  server.registerTool('carve_check_targets', {
+  if (toolEnabled(toolProfile, 'carve_check_targets')) server.registerTool('carve_check_targets', {
     title: 'Check Carve publishing targets',
     description: 'Compare one Carve document across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles, returning target-specific warnings, losses, and fallbacks.',
     inputSchema: z.object({ source: sourceSchema, targets: z.array(z.enum(['html', 'markdown', 'plain', 'ansi', 'github', 'wordpress', 'pdf'])).min(1).max(7).default(['html', 'markdown', 'github', 'wordpress', 'pdf']) }).strict(),
@@ -319,7 +320,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_check_targets', observe, ({ source: document, targets }) => compatibilityMatrix(document, targets)));
 
-  server.registerTool('carve_parse', {
+  if (toolEnabled(toolProfile, 'carve_parse')) server.registerTool('carve_parse', {
     title: 'Parse Carve',
     description: 'Parse and resolve Carve into its position-aware interchange AST.',
     inputSchema: z.object({ source: sourceSchema }),
@@ -327,7 +328,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_parse', observe, ({ source: document }) => parse(document)));
 
-  server.registerTool('carve_create_ast_patch', {
+  if (toolEnabled(toolProfile, 'carve_create_ast_patch')) server.registerTool('carve_create_ast_patch', {
     title: 'Create structured AST patch',
     description: 'Compare two PART 12 Carve ASTs and return position-independent add, replace, and remove operations.',
     inputSchema: z.object({
@@ -338,7 +339,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_create_ast_patch', observe, ({ before, after }) => createStructuredAstPatch(before, after)));
 
-  server.registerTool('carve_apply_ast_patch', {
+  if (toolEnabled(toolProfile, 'carve_apply_ast_patch')) server.registerTool('carve_apply_ast_patch', {
     title: 'Apply structured AST patch',
     description: 'Validate and apply structured operations to a PART 12 Carve AST, returning the patched AST and canonical Carve source.',
     inputSchema: z.object({
@@ -350,14 +351,14 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     annotations: readOnly,
   }, safe('carve_apply_ast_patch', observe, ({ ast, operations }) => applyStructuredAstPatch(ast, operations)));
 
-  server.registerTool('carve_select_ast_nodes', {
+  if (toolEnabled(toolProfile, 'carve_select_ast_nodes')) server.registerTool('carve_select_ast_nodes', {
     title: 'Find AST nodes by semantic selector',
     description: 'Resolve a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.',
     inputSchema: z.object({ ast: z.unknown().describe(`PART 12 AST (maximum ${MAX_SOURCE_BYTES} JSON bytes)`), selector: astSelector }),
     outputSchema: astSelectionOutput, annotations: readOnly,
   }, safe('carve_select_ast_nodes', observe, ({ ast, selector }) => selectAstNodes(ast, selector)));
 
-  server.registerTool('carve_plan_ast_edit', {
+  if (toolEnabled(toolProfile, 'carve_plan_ast_edit')) server.registerTool('carve_plan_ast_edit', {
     title: 'Plan a semantic AST edit',
     description: 'Plan one or more atomic semantic AST edits and return a human-readable, reversible, stale-guarded source patch without writing the document.',
     inputSchema: z.object({ source: sourceSchema, selector: astSelector, edit: semanticEdit,
@@ -366,7 +367,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     outputSchema: semanticEditPlanOutput, annotations: readOnly,
   }, safe('carve_plan_ast_edit', observe, ({ source, selector, edit, then }) => planSemanticAstEdit(source, selector, edit as SemanticAstEdit, then as SemanticAstEditStep[])));
 
-  server.registerTool('carve_create_reversible_ast_patch', {
+  if (toolEnabled(toolProfile, 'carve_create_reversible_ast_patch')) server.registerTool('carve_create_reversible_ast_patch', {
     title: 'Create reversible AST patch',
     description: 'Compare two PART 12 ASTs and return forward and inverse operations with semantic stale-edit fingerprints.',
     inputSchema: z.object({
@@ -375,7 +376,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     }), outputSchema: reversibleAstPatchOutput, annotations: readOnly,
   }, safe('carve_create_reversible_ast_patch', observe, ({ before, after }) => createReversibleStructuredAstPatch(before, after)));
 
-  server.registerTool('carve_apply_reversible_ast_patch', {
+  if (toolEnabled(toolProfile, 'carve_apply_reversible_ast_patch')) server.registerTool('carve_apply_reversible_ast_patch', {
     title: 'Preview reversible AST patch as source edits',
     description: 'Verify a reversible AST patch against source, apply or undo it, and return a minimal stale-guarded UTF-8 source edit without writing files.',
     inputSchema: z.object({
@@ -385,7 +386,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     }), outputSchema: reversibleAstPatchApplyOutput, annotations: readOnly,
   }, safe('carve_apply_reversible_ast_patch', observe, ({ source, patch, inverse }) => applyReversibleStructuredAstPatch(source, patch, inverse)));
 
-  server.registerTool('carve_migrate', {
+  if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
     description: 'Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.',
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']), markdownDialect }),
