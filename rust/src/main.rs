@@ -8,7 +8,7 @@ mod resources;
 mod server;
 mod workspace;
 
-const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write]\n       carve-mcp-rs [--help | --version]\n\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";
+const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write] [--tool-profile PROFILE]\n       carve-mcp-rs [--help | --version]\n\nProfiles: review, convert, structure, workspace, all (default).\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -26,10 +26,38 @@ async fn main() -> ExitCode {
             let mut roots = Vec::new();
             let mut allow_write = false;
             let mut config_path = None;
+            let mut tool_profile = server::ToolProfile::All;
             let mut index = 0;
             while index < arguments.len() {
                 match arguments[index].as_str() {
                     "--allow-write" => allow_write = true,
+                    "--tool-profile" => {
+                        index += 1;
+                        let Some(value) = arguments.get(index) else {
+                            eprintln!("--tool-profile requires a profile name.\n\n{HELP}");
+                            return ExitCode::from(2);
+                        };
+                        if value.starts_with("--") {
+                            eprintln!("--tool-profile requires a profile name.\n\n{HELP}");
+                            return ExitCode::from(2);
+                        }
+                        match server::ToolProfile::parse(value) {
+                            Ok(value) => tool_profile = value,
+                            Err(error) => {
+                                eprintln!("{error}\n\n{HELP}");
+                                return ExitCode::from(2);
+                            }
+                        }
+                    }
+                    value if value.starts_with("--tool-profile=") => {
+                        match server::ToolProfile::parse(&value[15..]) {
+                            Ok(value) => tool_profile = value,
+                            Err(error) => {
+                                eprintln!("{error}\n\n{HELP}");
+                                return ExitCode::from(2);
+                            }
+                        }
+                    }
                     "--config" => {
                         index += 1;
                         let Some(value) = arguments.get(index) else {
@@ -96,7 +124,7 @@ async fn main() -> ExitCode {
                     }
                 }
             };
-            match server::CarveServer::with_workspace(workspace)
+            match server::CarveServer::with_workspace_and_profile(workspace, tool_profile)
                 .serve(rmcp::transport::stdio())
                 .await
             {

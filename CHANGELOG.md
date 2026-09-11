@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Opt-in `review`, `convert`, `structure`, and `workspace` tool profiles that
+  reduce MCP schema context while keeping `all` as the default.
 - A review-first semantic edit planner that can combine up to 100 non-overlapping
   AST edits into one explained, reversible, stale-guarded source patch without
   writing.

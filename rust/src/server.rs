@@ -1665,13 +1665,96 @@ pub struct CarveServer {
     workspace: Option<Workspace>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ToolProfile {
+    Review,
+    Convert,
+    Structure,
+    Workspace,
+    #[default]
+    All,
+}
+
+impl ToolProfile {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "review" => Ok(Self::Review),
+            "convert" => Ok(Self::Convert),
+            "structure" => Ok(Self::Structure),
+            "workspace" => Ok(Self::Workspace),
+            "all" => Ok(Self::All),
+            _ => Err(
+                "Tool profile must be one of: review, convert, structure, workspace, all.".into(),
+            ),
+        }
+    }
+
+    fn enables(self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Review => matches!(
+                name,
+                "carve_lint"
+                    | "carve_diagnose_and_fix"
+                    | "carve_format"
+                    | "carve_render"
+                    | "carve_check_targets"
+            ),
+            Self::Convert => matches!(
+                name,
+                "carve_lint" | "carve_render" | "carve_check_targets" | "carve_migrate"
+            ),
+            Self::Structure => matches!(
+                name,
+                "carve_lint"
+                    | "carve_parse"
+                    | "carve_create_ast_patch"
+                    | "carve_apply_ast_patch"
+                    | "carve_select_ast_nodes"
+                    | "carve_plan_ast_edit"
+                    | "carve_create_reversible_ast_patch"
+                    | "carve_apply_reversible_ast_patch"
+            ),
+            Self::Workspace => matches!(
+                name,
+                "carve_workspace_info"
+                    | "carve_read_file"
+                    | "carve_list_files"
+                    | "carve_review_workspace"
+                    | "carve_prepare_edit"
+                    | "carve_prepare_workspace_edits"
+                    | "carve_write_file"
+                    | "carve_lint"
+                    | "carve_diagnose_and_fix"
+                    | "carve_format"
+                    | "carve_render"
+                    | "carve_check_targets"
+            ),
+        }
+    }
+}
+
 impl CarveServer {
     pub fn new() -> Self {
         Self::with_workspace(None)
     }
 
     pub fn with_workspace(workspace: Option<Workspace>) -> Self {
+        Self::with_workspace_and_profile(workspace, ToolProfile::All)
+    }
+
+    pub fn with_workspace_and_profile(workspace: Option<Workspace>, profile: ToolProfile) -> Self {
         let mut tools = Self::tool_router();
+        let registered = tools
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect::<Vec<_>>();
+        for name in registered {
+            if !profile.enables(&name) {
+                tools.remove_route(&name);
+            }
+        }
         if workspace.is_none() {
             for name in [
                 "carve_workspace_info",
@@ -3504,5 +3587,20 @@ mod tests {
         assert!(!truncated);
         assert!(value.starts_with("--- a/docs/übersicht.crv\n+++ b/docs/übersicht.crv\n"));
         assert!(value.contains("-a   \n+a\n keep\n\\ No newline at end of file\n"));
+    }
+
+    #[test]
+    fn tool_profiles_keep_only_their_capabilities() {
+        let names = |profile| {
+            CarveServer::with_workspace_and_profile(None, profile)
+                .tools
+                .list_all()
+                .into_iter()
+                .map(|tool| tool.name.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(ToolProfile::Convert).len(), 4);
+        assert!(names(ToolProfile::Structure).contains(&"carve_plan_ast_edit".into()));
+        assert_eq!(names(ToolProfile::All).len(), 13);
     }
 }

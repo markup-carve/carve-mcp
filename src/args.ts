@@ -1,4 +1,6 @@
-export interface CliOptions { roots: string[]; allowWrite: boolean; http: boolean; host: string; port: number; config?: string }
+import { parseToolProfile, type ToolProfile } from './tool-profile.js';
+
+export interface CliOptions { roots: string[]; allowWrite: boolean; http: boolean; host: string; port: number; toolProfile: ToolProfile; config?: string }
 
 export function parseArgs(args: string[]): CliOptions {
   const roots: string[] = [];
@@ -7,9 +9,16 @@ export function parseArgs(args: string[]): CliOptions {
   let host = '127.0.0.1';
   let port = 3000;
   let config: string | undefined;
+  let toolProfile: ToolProfile = 'all';
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--allow-write') allowWrite = true;
+    else if (argument.startsWith('--tool-profile=')) toolProfile = parseToolProfile(argument.slice(15));
+    else if (argument === '--tool-profile') {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) throw new Error('--tool-profile requires a profile name.');
+      toolProfile = parseToolProfile(value);
+    }
     else if (argument.startsWith('--config=')) {
       config = argument.slice(9);
       if (!config) throw new Error('--config requires a JSON file path.');
@@ -42,7 +51,7 @@ export function parseArgs(args: string[]): CliOptions {
   if (roots.some((root) => !isAbsolute(root))) throw new Error('Workspace roots must be absolute paths.');
   if (host.length === 0) throw new Error('--host requires a hostname or IP address.');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('--port must be an integer from 0 to 65535.');
-  return { roots: [...new Set(roots)], allowWrite, http, host, port, config };
+  return { roots: [...new Set(roots)], allowWrite, http, host, port, toolProfile, config };
 }
 
 import { isAbsolute } from 'node:path';

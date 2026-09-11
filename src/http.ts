@@ -5,6 +5,7 @@ import { createMcpHandler, type AuthInfo } from '@modelcontextprotocol/server';
 import { createServer } from './server.js';
 import type { WorkspaceOptions } from './workspace.js';
 import { SafeMetrics, type ToolObserver } from './telemetry.js';
+import type { ToolProfile } from './tool-profile.js';
 
 export const MAX_HTTP_BODY_BYTES = 7 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 32;
@@ -14,6 +15,7 @@ const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 export interface HttpOptions {
   host: string; port: number; token?: string; allowedHosts?: string[]; workspace?: WorkspaceOptions;
   metrics?: boolean; observe?: ToolObserver;
+  toolProfile?: ToolProfile;
 }
 
 export interface HttpServer {
@@ -70,7 +72,7 @@ export function createHttpServer(options: HttpOptions): HttpServer {
   const validateOrigin = originValidation(allowedHosts);
   const metrics = new SafeMetrics();
   const observe: ToolObserver = (event) => { metrics.observe(event); options.observe?.(event); };
-  const handler = createMcpHandler(() => createServer(options.workspace, observe), {
+  const handler = createMcpHandler(() => createServer(options.workspace, observe, options.toolProfile), {
     onerror: (error) => console.error(JSON.stringify({ level: 'error', event: 'mcp_error', errorType: error.name })),
   });
   const nodeHandler = toNodeHandler(handler, {

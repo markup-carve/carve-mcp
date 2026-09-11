@@ -77,6 +77,17 @@ describe('MCP server', () => {
     expect(prompt.messages[0].content).toMatchObject({ type: 'text', text: expect.stringContaining("preserve the author's voice") });
   });
 
+  it('advertises only tools in a selected profile', async () => {
+    const server = await createServer(undefined, undefined, 'convert');
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    closeables.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
+      'carve_lint', 'carve_render', 'carve_check_targets', 'carve_migrate',
+    ]);
+  });
+
   it('lists and reads versioned authoring resources', async () => {
     const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });

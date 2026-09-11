@@ -285,6 +285,20 @@ function normalizeEquivalentDiffs(result) {
   return normalized;
 }
 
+async function profileToolNames(command, baseArgs, profile) {
+  const client = new Client({ name: 'profile-conformance', version: '0.1.0' });
+  await client.connect(new StdioClientTransport({ command, args: [...baseArgs, '--tool-profile', profile], stderr: 'pipe' }));
+  try { return (await client.listTools()).tools.map(({ name }) => name).sort(); }
+  finally { await client.close(); }
+}
+
+for (const profile of ['review', 'convert', 'structure', 'workspace', 'all']) {
+  deepStrictEqual(
+    await profileToolNames(`${target}/debug/carve-mcp-rs`, [], profile),
+    await profileToolNames(process.execPath, ['dist/index.js'], profile),
+  );
+}
+
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-conformance-'));
 try {
   mkdirSync(join(workspaceRoot, 'docs'));
@@ -296,6 +310,14 @@ try {
   writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
   const configuration = join(workspaceRoot, 'carve-mcp.json');
   writeFileSync(configuration, JSON.stringify({ roots: ['.'], review: { exclude: ['archive'], maxDepth: 8, limit: 100 } }));
+  for (const profile of ['review', 'convert', 'structure', 'workspace', 'all']) {
+    const rootArgs = ['--root', workspaceRoot, '--allow-write'];
+    const rustNames = await profileToolNames(`${target}/debug/carve-mcp-rs`, rootArgs, profile);
+    const typescriptNames = await profileToolNames(process.execPath, ['dist/index.js', ...rootArgs], profile);
+    const knownTypeScriptOnly = ['workspace', 'all'].includes(profile) ? ['carve_reference_graph'] : [];
+    deepStrictEqual(typescriptNames.filter((name) => !rustNames.includes(name)), knownTypeScriptOnly);
+    deepStrictEqual(rustNames, typescriptNames.filter((name) => !knownTypeScriptOnly.includes(name)));
+  }
   const typescriptWorkspace = await workspaceResults(process.execPath, ['dist/index.js', '--config', configuration, '--allow-write']);
   const rustWorkspace = await workspaceResults(`${target}/debug/carve-mcp-rs`, ['--config', configuration, '--allow-write']);
   ok(!typescriptWorkspace.output.find(({ name }) => name === 'carve_list_files').value.files.includes('archive/old.crv'));

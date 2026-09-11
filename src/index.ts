@@ -14,7 +14,7 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(2);
 }
-const { roots: cliRoots, allowWrite, http, host, port } = parsed;
+const { roots: cliRoots, allowWrite, http, host, port, toolProfile } = parsed;
 const roots = [...new Set([...(project.roots ?? []), ...cliRoots])];
 if (allowWrite && roots.length === 0) {
   console.error('--allow-write requires at least one configured root.');
@@ -27,7 +27,7 @@ const observe = process.env.CARVE_MCP_LOG_LEVEL === 'info'
 if (http) {
   const token = process.env.CARVE_MCP_TOKEN;
   const allowedHosts = process.env.CARVE_MCP_ALLOWED_HOSTS?.split(',').map((value) => value.trim()).filter(Boolean);
-  const httpServer = createHttpServer({ host, port, token, allowedHosts, workspace, observe, metrics: process.env.CARVE_MCP_METRICS === '1' });
+  const httpServer = createHttpServer({ host, port, token, allowedHosts, workspace, toolProfile, observe, metrics: process.env.CARVE_MCP_METRICS === '1' });
   httpServer.server.on('error', (error) => {
     console.error(`carve-mcp HTTP server error: ${error.message}`);
     process.exitCode = 1;
@@ -44,7 +44,7 @@ if (http) {
   process.once('SIGINT', close);
   process.once('SIGTERM', close);
 } else {
-const server = await createServer(workspace, observe);
+const server = await createServer(workspace, observe, toolProfile);
 const transport = new StdioServerTransport();
 transport.onerror = (error) => {
   console.error(`carve-mcp transport error: ${error.message}`);
