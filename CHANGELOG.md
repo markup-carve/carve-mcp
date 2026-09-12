@@ -19,6 +19,11 @@ All notable changes to this project are documented in this file.
 - A publishing-target compatibility matrix with target-specific lint warnings,
   rendering losses, and fallback guidance.
 
+### Changed
+
+- Updated the JavaScript engine from 0.1.5 to 0.1.6 and the native Rust engine
+  from 0.1.4 to 0.1.5.
+
 ## 0.1.4 - 2026-09-09
 
 ### Added

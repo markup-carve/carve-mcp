@@ -277,6 +277,14 @@ localhost.
 
 ## Verify a change
 
+### Engine drift
+
+The daily `Engine drift` workflow compares the JavaScript and Rust versions in
+the lockfiles with the newest npm and crates.io releases. Run the same check
+manually with `npm run check:engine-current`. When either engine moves, update
+both pins as needed and rerun the Node, Rust, and cross-engine conformance tests
+below before accepting the new versions.
+
 ```sh
 npm run check
 npm test

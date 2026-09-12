@@ -19,6 +19,7 @@
     "sync:rust-resources": "node scripts/sync-rust-resources.mjs",
     "check:rust-resources": "node scripts/sync-rust-resources.mjs --check",
     "check:schema-budget": "npm run build && node scripts/check-schema-budget.mjs",
+    "check:engine-current": "node scripts/check-engine-current.mjs",
     "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance.mjs",
     "test:workflow": "npm run build && node scripts/writer-workflow.mjs",
     "test": "vitest run",
@@ -46,7 +47,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.5",
+    "@markup-carve/carve": "^0.1.6",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "diff": "^8.0.4",
