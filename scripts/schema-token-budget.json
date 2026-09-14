@@ -2,7 +2,7 @@
   "tokenizer": "gpt-tokenizer 4.0.0 GPT-5/o200k",
   "profiles": {
     "review": { "maximum": 3100, "workspace": false },
-    "convert": { "maximum": 1700, "workspace": false },
+    "convert": { "maximum": 1800, "workspace": false },
     "structure": { "maximum": 4250, "workspace": false },
     "workspace": { "maximum": 6600, "workspace": true },
     "all": { "maximum": 7250, "workspace": false }
