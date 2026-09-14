@@ -9,9 +9,19 @@ const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url
 const registry = JSON.parse(await readFile(new URL('../server.json', import.meta.url), 'utf8'));
 const cargo = await readFile(new URL('../rust/Cargo.toml', import.meta.url), 'utf8');
 const releaseVersion = process.env.RELEASE_TAG?.replace(/^v/, '');
+const releaseRun = process.env.REQUIRE_RELEASE_TAG === '1';
 
-if (process.env.REQUIRE_RELEASE_TAG === '1' && !releaseVersion) {
-  throw new Error('RELEASE_TAG is required in a release run.');
+if (releaseRun) {
+  if (!releaseVersion) throw new Error('RELEASE_TAG is required in a release run.');
+  const runtimeDependencies = { ...pkg.dependencies, ...pkg.optionalDependencies };
+  const nonRegistryDependencies = Object.entries(runtimeDependencies)
+    .filter(([, spec]) => typeof spec === 'string'
+      && (/^(git(\+|:)|github:|gitlab:|bitbucket:|gist:|file:|link:|https?:)/.test(spec)
+        || /^[^@\s][^\s]*\/[^\s]+/.test(spec) || spec.includes('#')))
+    .map(([name]) => name);
+  if (nonRegistryDependencies.length > 0) {
+    throw new Error(`Release dependencies must use registry versions: ${nonRegistryDependencies.join(', ')}.`);
+  }
 }
 if (releaseVersion && releaseVersion !== pkg.version) {
   throw new Error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${pkg.version}.`);
@@ -34,13 +44,26 @@ const packed = JSON.parse(packOutput);
 const [{ filename }] = Array.isArray(packed) ? packed : Object.values(packed);
 const installDirectory = await mkdtemp(join(tmpdir(), 'carve-mcp-install-'));
 execFileSync('npm', ['init', '--yes'], { cwd: installDirectory, stdio: 'ignore' });
-execFileSync('npm', ['install', '--ignore-scripts', '--omit=dev', join(packDirectory, filename)], {
-  cwd: installDirectory, stdio: 'ignore',
+// The temporary carve-js git pin has no committed dist/ and relies on its
+// prepare script when npm installs it. A registry release will carry dist/,
+// but --ignore-scripts makes the current release candidate unstartable.
+const installEnv = { ...process.env };
+for (const secret of ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_URL', 'GITHUB_TOKEN', 'NODE_AUTH_TOKEN']) {
+  delete installEnv[secret];
+}
+const installArgs = ['install', '--omit=dev'];
+if (releaseRun) installArgs.push('--ignore-scripts');
+installArgs.push(join(packDirectory, filename));
+execFileSync('npm', installArgs, {
+  cwd: installDirectory, env: installEnv, stdio: ['ignore', 'ignore', 'inherit'],
 });
 
 const client = new Client({ name: 'release-check', version: pkg.version });
 const transport = new StdioClientTransport({
-  command: join(installDirectory, 'node_modules', '.bin', 'carve-mcp'), stderr: 'pipe',
+  // Keep startup failures visible in CI. Piping without consuming this stream
+  // hides the server's diagnostic and leaves only the client's generic
+  // "Connection closed" error.
+  command: join(installDirectory, 'node_modules', '.bin', 'carve-mcp'), stderr: 'inherit',
 });
 await client.connect(transport);
 try {
