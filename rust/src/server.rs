@@ -1,9 +1,8 @@
 use carve::extensions::SemanticSpan;
 use carve::{
-    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, LinkPolicy,
-    MigrationConfidence, MigrationFidelity, Mode, Options, Profile, RenderLoss,
-    RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve, migrate_djot,
-    migrate_html, migrate_markdown, with_render_loss_report,
+    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, LinkPolicy, Mode, Options,
+    Profile, RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks,
+    lint_carve, migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
 };
 use regex::Regex;
 use rmcp::{
@@ -799,7 +798,19 @@ struct MigrateOutputSchema {
 struct MigrationReportOutputSchema {
     schema_version: i64,
     source_format: String,
-    diagnostics: Vec<Value>,
+    mode: Option<String>,
+    adapter: Option<String>,
+    diagnostics: Vec<MigrationDiagnosticOutputSchema>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct MigrationDiagnosticOutputSchema {
+    code: String,
+    message: String,
+    severity: String,
+    fidelity: String,
+    confidence: String,
+    path: Option<String>,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1318,6 +1329,7 @@ enum SourceFormat {
     Html,
     Markdown,
     Djot,
+    Bbcode,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1459,33 +1471,38 @@ fn writer_prompts() -> Vec<(&'static str, &'static str, &'static str, &'static s
     ]
 }
 
-fn migration_json(result: carve::MigrationResult, format: SourceFormat) -> Value {
-    let format = match format {
-        SourceFormat::Html => "html",
-        SourceFormat::Markdown => "markdown",
-        SourceFormat::Djot => "djot",
-    };
-    json!({
-        "value": result.value,
-        "report": {
-            "schemaVersion": result.report.schema_version,
-            "sourceFormat": format,
-            "diagnostics": result.report.diagnostics.into_iter().map(|item| json!({
+fn migration_json(result: carve::MigrationResult) -> Value {
+    let diagnostics = result
+        .report
+        .diagnostics
+        .into_iter()
+        .map(|item| {
+            let mut diagnostic = json!({
                 "code": item.code, "message": item.message,
                 "severity": item.severity.as_str(),
-                "fidelity": match item.fidelity {
-                    MigrationFidelity::Carried => "carried",
-                    MigrationFidelity::Degraded => "degraded",
-                    MigrationFidelity::Dropped => "dropped",
-                },
-                "confidence": match item.confidence {
-                    MigrationConfidence::Exact => "exact",
-                    MigrationConfidence::Inferred => "inferred",
-                    MigrationConfidence::Fallback => "fallback",
-                },
-                "path": item.path,
-            })).collect::<Vec<_>>(),
-        }
+                "fidelity": item.fidelity.as_str(),
+                "confidence": item.confidence.as_str(),
+            });
+            if let Some(path) = item.path {
+                diagnostic["path"] = json!(path);
+            }
+            diagnostic
+        })
+        .collect::<Vec<_>>();
+    let mut report = json!({
+        "schemaVersion": result.report.schema_version,
+        "sourceFormat": result.report.source_format.as_str(),
+        "diagnostics": diagnostics,
+    });
+    if let Some(mode) = result.report.mode {
+        report["mode"] = json!(mode.as_str());
+    }
+    if let Some(adapter) = result.report.adapter {
+        report["adapter"] = json!(adapter.as_str());
+    }
+    json!({
+        "value": result.value,
+        "report": report,
     })
 }
 
@@ -3313,7 +3330,7 @@ impl CarveServer {
     #[tool(
         name = "carve_migrate",
         title = "Migrate to Carve",
-        description = "Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.", output_schema = rmcp::handler::server::tool::schema_for_type::<MigrateOutputSchema>(),
+        description = "Migrate HTML, Markdown, Djot, or BBCode source to Carve with version 2 fidelity diagnostics.", output_schema = rmcp::handler::server::tool::schema_for_type::<MigrateOutputSchema>(),
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -3344,8 +3361,12 @@ impl CarveServer {
                 }
                 result
             }
+            SourceFormat::Bbcode => match carve::migrate_bbcode(&input.source) {
+                Ok(result) => result,
+                Err(error) => return Self::error(error.to_string()),
+            },
         };
-        Self::output(migration_json(result, input.format))
+        Self::output(migration_json(result))
     }
 }
 
