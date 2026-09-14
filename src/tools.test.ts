@@ -245,10 +245,23 @@ describe('Carve operations', () => {
   it('migrates each input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({
       value: expect.stringContaining('Hello'),
-      report: { schemaVersion: 1, sourceFormat: 'html', diagnostics: expect.any(Array) },
+      report: { schemaVersion: 2, sourceFormat: 'html', diagnostics: expect.any(Array) },
     });
-    expect(migrate('**Hello**', 'markdown').value).toContain('Hello');
-    expect(migrate('*Hello*', 'djot').value).toContain('Hello');
+    for (const [format, source] of [['markdown', '**Hello**'], ['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']] as const) {
+      expect(migrate(source, format)).toMatchObject({
+        value: expect.stringContaining('Hello'),
+        report: {
+          schemaVersion: 2,
+          sourceFormat: format,
+          diagnostics: [expect.objectContaining({
+            code: 'fidelity-unverified',
+            severity: 'warning',
+            fidelity: 'dropped',
+            confidence: 'fallback',
+          })],
+        },
+      });
+    }
   });
   it('opts into Markdown dialect constructs explicitly', () => {
     expect(migrate('==marked==', 'markdown').value).toBe('==marked==');

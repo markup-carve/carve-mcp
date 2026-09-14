@@ -21,6 +21,10 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Migration tools now expose the shared version 2 report contract and support
+  BBCode in both TypeScript and Rust. Unverified Markdown, Djot, and BBCode
+  imports fail closed as `dropped` / `fallback` instead of claiming clean fidelity.
+
 - Updated the JavaScript engine from 0.1.5 to 0.1.6 and the native Rust engine
   from 0.1.4 to 0.1.5.
 

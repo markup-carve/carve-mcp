@@ -15,6 +15,7 @@ import {
   wikilinks,
   lintCarve,
   migrateDjot,
+  migrateBbcode,
   migrateHtml,
   migrateMarkdown,
   type LintPlatform,
@@ -31,7 +32,7 @@ export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
 export const MAX_AST_SELECTOR_MATCHES = 100;
 export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
-export type SourceFormat = 'html' | 'markdown' | 'djot';
+export type SourceFormat = 'html' | 'markdown' | 'djot' | 'bbcode';
 export type RenderPreset = 'default' | 'portable' | 'static-html';
 export type ExtensionName = 'autolink' | 'semantic-spans' | 'wikilinks';
 type AsciiHeadingIdMode = boolean | 'fold' | 'strict';
@@ -581,5 +582,6 @@ export function migrate(source: string, format: SourceFormat, dialect?: Markdown
     case 'html': return migrateHtml(source);
     case 'markdown': return migrateMarkdown(source, { dialect });
     case 'djot': return migrateDjot(source);
+    case 'bbcode': return migrateBbcode(source);
   }
 }

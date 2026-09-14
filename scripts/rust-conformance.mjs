@@ -84,6 +84,8 @@ const calls = [
   ['carve_apply_ast_patch', { ast: beforeAst, operations: headingPatch }],
   ['carve_apply_ast_patch', { ast: beforeAst, operations: [{ op: 'move', path: '/children/0', value: true }] }],
   ['carve_migrate', { source: '<strong>Hello</strong>', format: 'html' }],
+  ['carve_migrate', { source: '[b]Hello[/b]', format: 'bbcode' }],
+  ['carve_migrate', { source: 'a'.repeat(300_000), format: 'bbcode' }],
   ['carve_migrate', { source: '==marked==', format: 'markdown', markdownDialect: { highlight: true } }],
   ['carve_migrate', { source: '^[note]', format: 'markdown' }],
   ['carve_migrate', { source: '^power^', format: 'markdown', markdownDialect: { superscript: true } }],

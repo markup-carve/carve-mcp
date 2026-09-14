@@ -77,7 +77,15 @@ const semanticEditPlanOutput = z.object({
   editCount: z.number().int(), steps: z.array(semanticEditStepOutput),
   reversiblePatch: reversibleAstPatchOutput, sourcePatch: sourcePatchOutput,
 }).loose();
-const migrateOutput = z.object({ value: z.string(), report: z.object({ schemaVersion: z.number().int(), sourceFormat: z.string(), diagnostics: z.array(z.unknown()) }).loose() }).loose();
+const migrationDiagnostic = z.object({
+  code: z.string().min(1), message: z.string().min(1), severity: z.enum(['info', 'warning', 'error']),
+  fidelity: z.enum(['preserved', 'normalized', 'degraded', 'dropped']), confidence: z.enum(['exact', 'inferred', 'fallback']),
+  path: z.string().optional(), line: z.number().int().positive().optional(), column: z.number().int().positive().optional(),
+}).loose();
+const migrateOutput = z.object({ value: z.string(), report: z.object({
+  schemaVersion: z.literal(2), sourceFormat: z.enum(['html', 'markdown', 'djot', 'bbcode']),
+  mode: z.string().optional(), adapter: z.string().optional(), diagnostics: z.array(migrationDiagnostic),
+}).loose() }).loose();
 const compatibilityOutput = z.object({ compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int() }), targets: z.array(z.unknown()) }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
@@ -388,8 +396,8 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
-    description: 'Migrate HTML, Markdown, or Djot source to Carve with fidelity diagnostics.',
-    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot']), markdownDialect }),
+    description: 'Migrate HTML, Markdown, Djot, or BBCode source to Carve with version 2 fidelity diagnostics.',
+    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot', 'bbcode']), markdownDialect }),
     outputSchema: migrateOutput,
     annotations: readOnly,
   }, safe('carve_migrate', observe, ({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
