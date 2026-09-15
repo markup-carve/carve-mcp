@@ -47,4 +47,25 @@ if (rustLatest !== undefined && (typeof rustLatest !== 'string' || !rustLatest))
   }
 }
 
+// The lock reports the engine's own version whatever the source is, so the
+// comparison above cannot see a git pin left on a squash-merged branch head.
+const gitPin = /^source = "git\+https:\/\/github\.com\/([^/]+\/[^?"]+)\?rev=[^#"]*#([0-9a-f]{40})"$/m
+  .exec(cargoLock.slice(cargoLock.indexOf('name = "carve-lang"')));
+if (gitPin) {
+  const [, repository, revision] = gitPin;
+  console.log(`Rust engine source: ${repository}@${revision.slice(0, 10)}`);
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repository}/compare/main...${revision}`, {
+      headers: { 'user-agent': 'carve-mcp engine drift check', accept: 'application/vnd.github+json' },
+    });
+    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
+    const { status } = await response.json();
+    if (status !== 'identical' && status !== 'behind') {
+      problems.push(`${repository}@${revision.slice(0, 10)} is not reachable from main (${status}); repin to a commit on main.`);
+    }
+  } catch (error) {
+    problems.push(`Could not check whether ${repository}@${revision.slice(0, 10)} is on main: ${error.message}`);
+  }
+}
+
 if (problems.length > 0) throw new Error(problems.join('\n'));

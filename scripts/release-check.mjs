@@ -8,6 +8,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const registry = JSON.parse(await readFile(new URL('../server.json', import.meta.url), 'utf8'));
 const cargo = await readFile(new URL('../rust/Cargo.toml', import.meta.url), 'utf8');
+const cargoLock = await readFile(new URL('../rust/Cargo.lock', import.meta.url), 'utf8');
 const releaseVersion = process.env.RELEASE_TAG?.replace(/^v/, '');
 const releaseRun = process.env.REQUIRE_RELEASE_TAG === '1';
 
@@ -21,6 +22,13 @@ if (releaseRun) {
     .map(([name]) => name);
   if (nonRegistryDependencies.length > 0) {
     throw new Error(`Release dependencies must use registry versions: ${nonRegistryDependencies.join(', ')}.`);
+  }
+  // cargo drops a git source from the packaged manifest, so a crate carrying
+  // one cannot be verified against what crates.io would serve.
+  const cargoPins = [...cargoLock.matchAll(/^name = "([^"]+)"\nversion = "[^"]+"\nsource = "git\+/gm)]
+    .map(([, name]) => name);
+  if (cargoPins.length > 0) {
+    throw new Error(`Rust release dependencies must use registry versions: ${cargoPins.join(', ')}.`);
   }
 }
 if (releaseVersion && releaseVersion !== pkg.version) {
