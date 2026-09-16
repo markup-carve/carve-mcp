@@ -1103,6 +1103,22 @@ struct SourceInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct ParseInput {
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: String,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Configured root for includes; omitted, they stay literal."
+    )]
+    include_root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = "Document path inside that root.")]
+    source_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct AstPatchCreateInput {
     #[schemars(description = "PART 12 AST before the edit (maximum 1000000 JSON bytes)")]
     before: Value,
@@ -1338,6 +1354,15 @@ struct RenderInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
     target: RenderTarget,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Configured root for includes; omitted, they stay literal."
+    )]
+    include_root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = "Document path inside that root.")]
+    source_path: Option<String>,
     #[serde(default)]
     #[schemars(
         default = "default_render_preset",
@@ -1682,6 +1707,75 @@ pub struct CarveServer {
     workspace: Option<Workspace>,
 }
 
+fn prepare_includes(
+    workspace: Option<&Workspace>,
+    root_index: Option<usize>,
+    source_path: Option<&str>,
+    source: &str,
+    options: &Options<'_>,
+    target: CarveRenderTarget,
+) -> Result<Option<(carve::PreparedWithIncludes, std::path::PathBuf)>, String> {
+    let Some(root_index) = root_index else {
+        if source_path.is_some() {
+            return Err(
+                "sourcePath requires includeRootIndex; without a root, includes stay literal."
+                    .into(),
+            );
+        }
+        return Ok(None);
+    };
+    let workspace = workspace.ok_or(
+        "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
+    )?;
+    let (root, source_path) = workspace.include_scope(root_index, source_path)?;
+    let resolver = carve::FileSystemResolver::new(&root)
+        .map_err(|_| "The configured workspace root cannot be used for includes.".to_owned())?;
+    let mut include_options = carve::IncludeOptions::new().with_resolver(&resolver);
+    if let Some(source_path) = source_path {
+        include_options = include_options.with_source_path(source_path);
+    }
+    let prepared = carve::prepare_doc_with_includes(
+        source,
+        options,
+        &include_options,
+        options.mode,
+        matches!(target, CarveRenderTarget::Html),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(Some((prepared, root)))
+}
+
+fn include_report(
+    prepared: &carve::PreparedWithIncludes,
+    root: &std::path::Path,
+    root_index: usize,
+) -> Value {
+    let contained = |value: &str| {
+        let path = std::path::Path::new(value);
+        if !path.is_absolute() {
+            return Some(value.to_owned());
+        }
+        path.strip_prefix(root).ok().and_then(|relative| {
+            if relative.as_os_str().is_empty() {
+                None
+            } else {
+                Some(relative.to_string_lossy().replace('\\', "/"))
+            }
+        })
+    };
+    json!({
+        "rootIndex": root_index,
+        "warnings": prepared.warnings.iter().map(|warning| json!({
+            "rule": warning.rule, "message": warning.message,
+            "file": warning.file.as_deref().and_then(&contained),
+        })).collect::<Vec<_>>(),
+        "dependencies": prepared.dependencies.iter().filter_map(|dependency| contained(&dependency.id).map(|path| json!({
+            "path": path, "resolved": dependency.resolved,
+        }))).collect::<Vec<_>>(),
+        "suppressedWarnings": prepared.suppressed_warnings,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ToolProfile {
     Review,
@@ -1773,6 +1867,16 @@ impl CarveServer {
             }
         }
         if workspace.is_none() {
+            for name in ["carve_render", "carve_parse"] {
+                if let Some(route) = tools.map.get_mut(name) {
+                    if let Some(Value::Object(properties)) =
+                        std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
+                    {
+                        properties.remove("includeRootIndex");
+                        properties.remove("sourcePath");
+                    }
+                }
+            }
             for name in [
                 "carve_workspace_info",
                 "carve_read_file",
@@ -2452,26 +2556,75 @@ impl CarveServer {
                 .unwrap_or(carve::DEFAULT_MAX_RENDER_LOSSES)
                 .min(10_000),
         };
-        let checked = with_render_loss_report(target, checked_options, || match target {
-            CarveRenderTarget::Html => carve::try_to_html_with_options(&input.source, &options),
-            CarveRenderTarget::Markdown => {
-                carve::try_to_markdown_with_options(&input.source, &options)
-            }
-            CarveRenderTarget::Plain => {
-                carve::try_to_plain_text_with_options(&input.source, &options)
-            }
-            CarveRenderTarget::Ansi => carve::try_to_ansi_with_options(&input.source, &options),
-            CarveRenderTarget::Carve => unreachable!(),
-        });
+        let prepared = match prepare_includes(
+            self.workspace.as_ref(),
+            input.include_root_index,
+            input.source_path.as_deref(),
+            &input.source,
+            &options,
+            target,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => return Self::error(error),
+        };
+        let checked =
+            with_render_loss_report(target, checked_options, || -> Result<String, String> {
+                if let Some((prepared, _)) = &prepared {
+                    return match target {
+                        CarveRenderTarget::Html => {
+                            carve::render_html_with_options(&prepared.doc, &options)
+                        }
+                        CarveRenderTarget::Markdown => {
+                            carve::render_markdown_with_options(&prepared.doc, &options)
+                        }
+                        CarveRenderTarget::Plain => {
+                            carve::render_plain_text_with_options(&prepared.doc, &options)
+                        }
+                        CarveRenderTarget::Ansi => {
+                            carve::render_ansi_with_options(&prepared.doc, &options)
+                        }
+                        CarveRenderTarget::Carve => unreachable!(),
+                    }
+                    .map_err(|error| error.to_string());
+                }
+                match target {
+                    CarveRenderTarget::Html => {
+                        carve::try_to_html_with_options(&input.source, &options)
+                    }
+                    CarveRenderTarget::Markdown => {
+                        carve::try_to_markdown_with_options(&input.source, &options)
+                    }
+                    CarveRenderTarget::Plain => {
+                        carve::try_to_plain_text_with_options(&input.source, &options)
+                    }
+                    CarveRenderTarget::Ansi => {
+                        carve::try_to_ansi_with_options(&input.source, &options)
+                    }
+                    CarveRenderTarget::Carve => unreachable!(),
+                }
+                .map_err(|error| error.to_string())
+            });
         match checked {
             Ok(result) => match result.value {
-                Ok(value) => Self::render_result(carve::RenderResult {
-                    value,
-                    losses: result.losses,
-                    total_losses: result.total_losses,
-                    truncated: result.truncated,
-                }),
-                Err(error) => Self::error(error.to_string()),
+                Ok(value) => {
+                    let mut output = json!({
+                        "value": value,
+                        "losses": result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),
+                        "totalLosses": result.total_losses,
+                        "truncated": result.truncated,
+                    });
+                    if let Some((prepared, root)) = &prepared {
+                        output["includes"] = include_report(
+                            prepared,
+                            root,
+                            input
+                                .include_root_index
+                                .expect("prepared includes have a root"),
+                        );
+                    }
+                    Self::output(output)
+                }
+                Err(error) => Self::error(error),
             },
             Err(error) => CallToolResult::error(vec![ContentBlock::text(
                 serde_json::to_string_pretty(&json!({
@@ -2636,16 +2789,39 @@ impl CarveServer {
             open_world_hint = false
         )
     )]
-    fn parse(&self, Parameters(input): Parameters<SourceInput>) -> CallToolResult {
+    fn parse(&self, Parameters(input): Parameters<ParseInput>) -> CallToolResult {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        let value = carve::to_json_with_options(
+        let options = carve::Options::default().with_positions(true);
+        let prepared = match prepare_includes(
+            self.workspace.as_ref(),
+            input.include_root_index,
+            input.source_path.as_deref(),
             &input.source,
-            &carve::Options::default().with_positions(true),
+            &options,
+            CarveRenderTarget::Html,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => return Self::error(error),
+        };
+        let value = prepared.as_ref().map_or_else(
+            || carve::to_json_with_options(&input.source, &options),
+            |(prepared, _)| carve::to_json(&prepared.doc),
         );
-        match serde_json::from_str(&value) {
-            Ok(value) => Self::output(value),
+        match serde_json::from_str::<Value>(&value) {
+            Ok(mut value) => {
+                if let Some((prepared, root)) = &prepared {
+                    value["includes"] = include_report(
+                        prepared,
+                        root,
+                        input
+                            .include_root_index
+                            .expect("prepared includes have a root"),
+                    );
+                }
+                Self::output(value)
+            }
             Err(error) => Self::error(format!("AST serialization failed: {error}")),
         }
     }
@@ -3526,6 +3702,62 @@ impl ServerHandler for CarveServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn include_test_root() -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "carve-mcp-include-test-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn rust_tools_expand_only_under_an_authorized_root() {
+        let root = include_test_root();
+        std::fs::write(root.join("book.crv"), "{{ chapter.crv }}").unwrap();
+        std::fs::write(root.join("chapter.crv"), "Included text.").unwrap();
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            false,
+            crate::workspace::ReviewConfiguration::default(),
+        )
+        .unwrap();
+        let options = Options::default().with_positions(true);
+        let (prepared, canonical_root) = prepare_includes(
+            Some(&workspace),
+            Some(0),
+            Some("book.crv"),
+            "{{ chapter.crv }}",
+            &options,
+            CarveRenderTarget::Html,
+        )
+        .unwrap()
+        .unwrap();
+        let html = carve::render_html_with_options(&prepared.doc, &options).unwrap();
+        assert!(html.contains("Included text."));
+        assert_eq!(
+            include_report(&prepared, &canonical_root, 0)["dependencies"],
+            json!([{"path":"chapter.crv","resolved":true}])
+        );
+
+        let without_root = CarveServer::new();
+        let properties = without_root.tools.get("carve_render").unwrap().input_schema["properties"]
+            .as_object()
+            .unwrap();
+        assert!(!properties.contains_key("includeRootIndex"));
+        let with_root = CarveServer::with_workspace(Some(workspace));
+        let properties = with_root.tools.get("carve_render").unwrap().input_schema["properties"]
+            .as_object()
+            .unwrap();
+        assert!(properties.contains_key("includeRootIndex"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn markdown_dialect_is_explicit() {
