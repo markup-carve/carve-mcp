@@ -10,6 +10,8 @@ import {
   createAstPatch,
   fromAstJson,
   renderCarve,
+  renderDocumentWithReport,
+  resolve as resolveDocument,
   toAstJson,
   semanticSpan,
   wikilinks,
@@ -27,6 +29,7 @@ import {
   type AstPatchOperation,
 } from '@markup-carve/carve';
 import { createSourcePatch } from './source-patch.js';
+import { expandDocument, type IncludeReport, type IncludeScope } from './includes.js';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
@@ -90,7 +93,7 @@ export function format(source: string): RenderResult {
   return carveToCarveWithReport(source);
 }
 
-export function render(source: string, target: RenderTarget, settings: RenderSettings = {}): RenderResult {
+export function render(source: string, target: RenderTarget, settings: RenderSettings = {}, scope?: IncludeScope): RenderResult & { includes?: IncludeReport } {
   validateSource(source);
   if (settings.preset === 'static-html' && target !== 'html') {
     throw new Error('The static-html preset is only valid for the HTML target.');
@@ -99,17 +102,29 @@ export function render(source: string, target: RenderTarget, settings: RenderSet
     throw new Error('The semantic-spans extension is only valid for the HTML target.');
   }
   const options = renderOptions(settings);
+  const html = settings.preset === 'static-html' ? { ...options, mode: 'static' as const } : options;
+  if (scope) {
+    // The document seam rather than a second parse of flattened source: the
+    // expanded tree is rendered as it stands, so an include cannot change
+    // meaning on the way back through the source form.
+    const { doc, includes } = expandDocument(source, options.extensions, scope);
+    return { ...renderDocumentWithReport(doc, { ...(target === 'html' ? html : options), target }), includes };
+  }
   switch (target) {
-    case 'html': return carveToHtmlWithReport(source, settings.preset === 'static-html' ? { ...options, mode: 'static' } : options);
+    case 'html': return carveToHtmlWithReport(source, html);
     case 'markdown': return carveToMarkdownWithReport(source, options);
     case 'plain': return carveToPlainTextWithReport(source, options);
     case 'ansi': return carveToAnsiWithReport(source, options);
   }
 }
 
-export function parse(source: string) {
+export function parse(source: string, scope?: IncludeScope): AstJsonDocument & { includes?: IncludeReport } {
   validateSource(source);
-  return carveToAstJson(source);
+  if (!scope) return carveToAstJson(source);
+  // Reproduces the composition `carveToAstJson` runs with no extensions and no
+  // profile, over the expanded document instead of a fresh parse.
+  const { doc, includes } = expandDocument(source, [], scope);
+  return { ...toAstJson(resolveDocument(doc, { asciiHeadingIds: false })), includes };
 }
 
 function validateStructuredPayload(value: unknown, label: string): number {

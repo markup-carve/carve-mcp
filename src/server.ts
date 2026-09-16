@@ -5,7 +5,8 @@ import * as z from 'zod/v4';
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
-import { prepareWorkspace, type WorkspaceOptions } from './workspace.js';
+import { prepareWorkspace, type Workspace, type WorkspaceOptions } from './workspace.js';
+import { includeScope } from './includes.js';
 import { reviewWorkspace } from './project.js';
 import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
@@ -149,8 +150,22 @@ function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefin
 
 export async function createServer(workspaceOptions?: WorkspaceOptions, observe?: ToolObserver, toolProfile: ToolProfile = 'all'): Promise<McpServer> {
   const server = new McpServer({ name: 'carve-mcp', version: packageVersion });
-  if (workspaceOptions?.roots.length) {
-    const workspace = await prepareWorkspace(workspaceOptions);
+  const workspace: Workspace | undefined = workspaceOptions?.roots.length ? await prepareWorkspace(workspaceOptions) : undefined;
+  // Offered only where a root exists to authorize. A server started without
+  // --root can expand nothing, so advertising the options would cost every
+  // session tokens for a pair of fields that can only ever be refused.
+  // Terse on purpose: scripts/check-schema-budget.mjs bounds what the tool
+  // schemas cost, and the `includes` report is documented in the README.
+  const includeFields = {
+    includeRootIndex: z.number().int().min(0).optional().describe('Configured root for includes; omitted, they stay literal.'),
+    sourcePath: z.string().min(1).optional().describe('Document path inside that root.'),
+  };
+  // Cast so the handlers keep one argument type either way. Dropping the
+  // fields only stops them being ADVERTISED; zod strips an unadvertised key,
+  // the handler sees undefined, and `includeScope` returns undefined, which is
+  // the same literal-directive outcome as omitting them.
+  const includeSettings = (workspace ? includeFields : {}) as typeof includeFields;
+  if (workspace) {
     if (toolEnabled(toolProfile, 'carve_read_file')) server.registerTool('carve_read_file', {
       title: 'Read Carve workspace file',
       description: 'Read a UTF-8 text file inside an explicitly configured workspace root.',
@@ -223,7 +238,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       outputSchema: workspaceInfoOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     }, safe('carve_workspace_info', observe, () => ({ roots: workspace.roots.map((_, rootIndex) => ({ rootIndex })), allowWrite: workspace.allowWrite })));
-    if (workspaceOptions.allowWrite && toolEnabled(toolProfile, 'carve_write_file')) {
+    if (workspace.allowWrite && toolEnabled(toolProfile, 'carve_write_file')) {
       server.registerTool('carve_write_file', {
         title: 'Write Carve workspace file',
         description: 'Dry-run by default; atomically write UTF-8 text only when dryRun is false. Overwrites require the hash returned by carve_read_file.',
@@ -313,12 +328,12 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   if (toolEnabled(toolProfile, 'carve_render')) server.registerTool('carve_render', {
     title: 'Render Carve',
     description: 'Render Carve to HTML, Markdown, plain text, or ANSI terminal text, with loss reporting.',
-    inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings }),
+    inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings, ...includeSettings }),
     outputSchema: renderOutput,
     annotations: readOnly,
-  }, safe('carve_render', observe, ({ source: document, target, asciiHeadingIds, ...settings }) => render(document, target, {
+  }, safe('carve_render', observe, ({ source: document, target, asciiHeadingIds, includeRootIndex, sourcePath, ...settings }) => render(document, target, {
     ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
-  })));
+  }, includeScope(workspace, { includeRootIndex, sourcePath }))));
 
   if (toolEnabled(toolProfile, 'carve_check_targets')) server.registerTool('carve_check_targets', {
     title: 'Check Carve publishing targets',
@@ -331,10 +346,10 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   if (toolEnabled(toolProfile, 'carve_parse')) server.registerTool('carve_parse', {
     title: 'Parse Carve',
     description: 'Parse and resolve Carve into its position-aware interchange AST.',
-    inputSchema: z.object({ source: sourceSchema }),
+    inputSchema: z.object({ source: sourceSchema, ...includeSettings }),
     outputSchema: parseOutput,
     annotations: readOnly,
-  }, safe('carve_parse', observe, ({ source: document }) => parse(document)));
+  }, safe('carve_parse', observe, ({ source: document, includeRootIndex, sourcePath }) => parse(document, includeScope(workspace, { includeRootIndex, sourcePath }))));
 
   if (toolEnabled(toolProfile, 'carve_create_ast_patch')) server.registerTool('carve_create_ast_patch', {
     title: 'Create structured AST patch',
