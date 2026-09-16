@@ -131,6 +131,33 @@ impl Workspace {
         Ok((root, root.0.join(relative)))
     }
 
+    pub fn include_scope(
+        &self,
+        root_index: usize,
+        source_path: Option<&str>,
+    ) -> Result<(PathBuf, Option<String>), String> {
+        let root = self.roots.get(root_index).ok_or_else(|| {
+            format!("Unknown root index {root_index}. Configure a root when starting carve-mcp.")
+        })?;
+        let source_path = source_path
+            .map(|value| {
+                let path = Path::new(value);
+                if path.is_absolute()
+                    || path.components().any(|part| {
+                        matches!(
+                            part,
+                            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                        )
+                    })
+                {
+                    return Err("sourcePath must stay inside the configured root.".to_owned());
+                }
+                Ok(relative_string(path))
+            })
+            .transpose()?;
+        Ok((root.0.clone(), source_path))
+    }
+
     pub fn read(&self, root_index: usize, path: &str) -> Result<Value, String> {
         let (root, requested) = self.requested(root_index, path)?;
         let canonical = fs::canonicalize(&requested)
