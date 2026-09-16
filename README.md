@@ -37,7 +37,8 @@ profile preserves the complete tool surface.
 
 Raw HTML passthrough is disabled by default because MCP inputs are untrusted.
 The server has no filesystem access unless you explicitly give it a workspace
-root.
+root. That also governs `{{ path }}` includes, which stay literal until a call
+names a configured root. See [Include expansion](docs/development.md#include-expansion).
 
 ## Resources
 

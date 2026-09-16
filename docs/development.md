@@ -95,6 +95,29 @@ lossy changes are automatic.
 Formatting-loss groups list their affected paths in the fix plan; they do not
 change lint-oriented `valid` or `warningCount` fields.
 
+### Include expansion
+
+`{{ path }}` directives stay literal unless a call names a root. `carve_render`
+and `carve_parse` take `includeRootIndex`, an index into the roots configured
+with `--root`, and expansion then runs under that root through the engine's
+contained filesystem resolver with its default depth, byte, file-size and
+resolver-call budgets. A containment root can only come from the server's own
+configuration, never from document text and never from the process working
+directory, so the two options are advertised only on a server that was started
+with a root.
+
+`sourcePath` is the calling document's path inside that root. It places the
+document so a bare sibling resolves against its own directory rather than
+against the root.
+
+Results carry an `includes` report: `warnings`, `dependencies`, and
+`suppressedWarnings`. A dependency names a target expansion touched and says
+whether it resolved, so a client can watch an unresolved one and re-render when
+it appears. Every path in the report is relative to the root, and a warning
+never carries the resolver's own error text: a refused target, a missing one and
+one outside the root all report as `include-unresolved`, so the report cannot be
+used to probe the server's filesystem.
+
 Add `--allow-write` to register `carve_write_file`. Writes default to dry runs,
 stay inside canonicalized roots, preserve existing file modes, and require the
 SHA-256 returned by the preceding read when overwriting a file. This detects
