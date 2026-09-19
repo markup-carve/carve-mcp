@@ -86,7 +86,7 @@ dependencies = [
 
 [[package]]
 name = "carve-mcp"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "atomic-write-file",
  "carve-lang",
