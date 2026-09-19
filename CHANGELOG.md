@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.5 - 2026-09-19
+
 ### Added
 
 - Opt-in `review`, `convert`, `structure`, and `workspace` tool profiles that
@@ -18,15 +20,27 @@ All notable changes to this project are documented in this file.
   document links, and images, with broken-edge and orphan reporting.
 - A publishing-target compatibility matrix with target-specific lint warnings,
   rendering losses, and fallback guidance.
+- `includeRootIndex` on `carve_render` and `carve_parse`, an index into the
+  roots the server was started with. Expansion runs under that root through the
+  engine's contained filesystem resolver, at its default depth, byte, file-size
+  and resolver-call budgets, and both servers return the same root-relative
+  `includes` report. Omit it and every directive stays literal; the option is
+  offered only when workspace roots exist, so document text can never choose a
+  file on the server host.
 
 ### Changed
 
 - Migration tools now expose the shared version 2 report contract and support
   BBCode in both TypeScript and Rust. Unverified Markdown, Djot, and BBCode
   imports fail closed as `dropped` / `fallback` instead of claiming clean fidelity.
-
-- Updated the JavaScript engine from 0.1.5 to 0.1.6 and the native Rust engine
-  from 0.1.4 to 0.1.5.
+- Both engines are named by their published version rather than by a commit:
+  the JavaScript engine moves from 0.1.5 to 0.1.7 and the native Rust engine
+  from 0.1.4 to 0.1.6, each taken from npm and crates.io. The Rust crate can be
+  packaged and verified from the registry as a result.
+- **Breaking:** A substitution node in the tree carries `old` and `new` as
+  arrays of inline nodes, where it carried the strings `oldText` and `newText`.
+  A client reading that node walks the halves instead of reading them
+  (markup-carve/carve-rs#1756).
 
 ## 0.1.4 - 2026-09-09
 
