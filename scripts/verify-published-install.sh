@@ -49,7 +49,8 @@ while true; do
 
   if ! grep -Eq "$not_served" <<<"$output"; then
     echo "$output" >&2
-    echo "::error::$spec failed with exit $status and npm did not report a missing version, so this is not a propagation delay. Read the output above." >&2
+    # Annotations are only parsed off stdout, so the headline goes there.
+    echo "::error::$spec failed with exit $status and npm did not report a missing version, so this is not a propagation delay. Read the output above."
     exit 1
   fi
 
@@ -69,12 +70,10 @@ while true; do
 done
 
 echo "$output" >&2
-{
-  echo "::error::npm still does not serve $spec after $attempt attempts over $((SECONDS - started))s."
-  echo "The publish itself may well have succeeded. A new version becomes resolvable on the"
-  echo "registry's own schedule, and npm publish says so: your package is being processed and"
-  echo "may take a few minutes to become available. This org has measured gaps of two to three"
-  echo "minutes. Run: npm view $spec version"
-  echo "If that prints the version, the release is fine and only this check timed out."
-} >&2
+echo "::error::npm still does not serve $spec after $attempt attempts over $((SECONDS - started))s."
+echo "The publish itself may well have succeeded. A new version becomes resolvable on the"
+echo "registry's own schedule, and npm publish says so: your package is being processed and"
+echo "may take a few minutes to become available. This org has measured gaps of two to three"
+echo "minutes. Run: npm view $spec version"
+echo "If that prints the version, the release is fine and only this check timed out."
 exit 1
