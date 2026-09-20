@@ -1,6 +1,7 @@
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from './server.js';
+import { DOCUMENT_TOOLS } from './tool-profile.js';
 
 describe('MCP server', () => {
   const closeables: Array<{ close(): Promise<void> }> = [];
@@ -14,11 +15,10 @@ describe('MCP server', () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     const listed = await client.listTools();
-    expect(listed.tools.map((tool) => tool.name)).toEqual([
-      'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets', 'carve_parse',
-      'carve_create_ast_patch', 'carve_apply_ast_patch',
-      'carve_select_ast_nodes', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate',
-    ]);
+    // The release gates read DOCUMENT_TOOLS, and profile 'all' short-circuits
+    // without consulting it, so this is what keeps the declared contract equal
+    // to the registered one.
+    expect(listed.tools.map((tool) => tool.name)).toEqual([...DOCUMENT_TOOLS]);
     expect(listed.tools).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: 'carve_lint',

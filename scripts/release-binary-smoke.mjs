@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { DOCUMENT_TOOLS } from '../dist/tool-profile.js';
+import { describeContractDrift } from './release-contract.mjs';
 
 const binary = process.argv[2];
 if (!binary) throw new Error('Usage: node scripts/release-binary-smoke.mjs <binary>');
@@ -24,11 +26,8 @@ const client = new Client({ name: 'release-binary-smoke', version: '1.0.0' });
 await client.connect(new StdioClientTransport({ command, stderr: 'pipe' }));
 try {
   const tools = await client.listTools();
-  const names = tools.tools.map(({ name }) => name).sort();
-  const expected = ['carve_apply_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_create_ast_patch', 'carve_create_reversible_ast_patch', 'carve_format', 'carve_lint', 'carve_migrate', 'carve_parse', 'carve_plan_ast_edit', 'carve_render', 'carve_select_ast_nodes'];
-  if (JSON.stringify(names) !== JSON.stringify(expected)) {
-    throw new Error(`Unexpected tool contract: ${names.join(', ')}`);
-  }
+  const drift = describeContractDrift(DOCUMENT_TOOLS, tools.tools.map(({ name }) => name));
+  if (drift) throw new Error(`Unexpected tool contract. ${drift}`);
   if (fullContract) {
     const resources = await client.listResources();
     if (!resources.resources.some(({ uri }) => uri === 'carve://guide')) {
