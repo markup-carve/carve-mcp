@@ -128,7 +128,8 @@ jobs:
     if: github.event_name == 'release'
     needs: release-checksums
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Room for the clean-install check to sit out npm's propagation window.
+    timeout-minutes: 35
     environment: release
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -172,20 +173,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Verify clean npm installation
         shell: bash
-        run: |
-          set -euo pipefail
-          version="${RELEASE_TAG#v}"
-          # Must run outside this package's own checkout. npm 12's npx resolves
-          # the bin against the local project, which IS this package but does
-          # not depend on itself, so the bin is not found and the step exits 127.
-          cd "$(mktemp -d)"
-          for attempt in 1 2 3 4 5; do
-            if npx --yes --package "@markup-carve/carve-mcp@$version" carve-mcp </dev/null; then
-              exit 0
-            fi
-            sleep $((attempt * 5))
-          done
-          exit 1
+        run: scripts/verify-published-install.sh @markup-carve/carve-mcp "$RELEASE_TAG" carve-mcp
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
       - name: Publish official MCP Registry entry
