@@ -1,7 +1,10 @@
 export const TOOL_PROFILES = ['review', 'convert', 'structure', 'workspace', 'all'] as const;
 export type ToolProfile = typeof TOOL_PROFILES[number];
 
-const DOCUMENT_TOOLS = [
+// The tool contract a server exposes with no workspace root, in registration
+// order. Release gates compare against this list, so it is the one place a new
+// tool has to be declared.
+export const DOCUMENT_TOOLS = [
   'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render',
   'carve_check_targets', 'carve_parse', 'carve_create_ast_patch',
   'carve_apply_ast_patch', 'carve_select_ast_nodes', 'carve_plan_ast_edit',

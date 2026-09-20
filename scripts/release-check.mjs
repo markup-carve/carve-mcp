@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { DOCUMENT_TOOLS } from '../dist/tool-profile.js';
+import { describeContractDrift } from './release-contract.mjs';
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const registry = JSON.parse(await readFile(new URL('../server.json', import.meta.url), 'utf8'));
@@ -76,10 +78,10 @@ const transport = new StdioClientTransport({
 await client.connect(transport);
 try {
   const tools = await client.listTools();
-  const names = tools.tools.map(({ name }) => name);
-  for (const required of ['carve_lint', 'carve_format', 'carve_render', 'carve_parse', 'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_select_ast_nodes', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate']) {
-    if (!names.includes(required)) throw new Error(`Packed server contract is missing ${required}.`);
-  }
+  // Exact, not a subset: this runs on every pull request, so it is where a tool
+  // added without updating DOCUMENT_TOOLS has to go red.
+  const drift = describeContractDrift(DOCUMENT_TOOLS, tools.tools.map(({ name }) => name));
+  if (drift) throw new Error(`Packed server contract drifted. ${drift}`);
   const result = await client.callTool({ name: 'carve_render', arguments: { source: '# Release check', target: 'html' } });
   if (result.isError || !result.content?.some((item) => item.type === 'text')
       || !result.structuredContent?.value?.includes('Release check')) {

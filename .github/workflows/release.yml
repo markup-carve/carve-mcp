@@ -81,6 +81,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The smoke check reads the tool contract out of dist/, so it cannot drift
+      # from the server it is checking.
+      - run: npm run build
       - name: Verify downloaded Unix release binary
         if: runner.os != 'Windows'
         shell: bash
@@ -266,6 +269,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
+      - run: npm run build
         if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
       - name: Download and verify Unix binary
         if: runner.os != 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
