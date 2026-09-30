@@ -28,6 +28,7 @@ import {
   type AstJsonDocument,
   type AstPatchOperation,
 } from '@markup-carve/carve';
+import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { createSourcePatch } from './source-patch.js';
 import { expandDocument, type IncludeReport, type IncludeScope } from './includes.js';
 
@@ -154,10 +155,6 @@ export type SemanticAstEdit =
   | { kind: 'insert-before' | 'insert-after'; node: unknown };
 export type SemanticAstEditStep = { selector: AstSelector; edit: SemanticAstEdit };
 export const MAX_SEMANTIC_EDIT_STEPS = 100;
-// The engine's own `CHILD_FIELDS` from `dist/ast-json.js`, in its order. A field
-// missing here makes everything under it invisible; `ast-child-fields.test.ts`
-// compares the two, because the engine exports no list to import.
-const AST_CHILD_FIELDS = ['children', 'blocks', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title', 'pairs', 'base', 'annotation'] as const;
 
 function pointer(path: string, part: string): string {
   return `${path}/${part.replaceAll('~', '~0').replaceAll('/', '~1')}`;

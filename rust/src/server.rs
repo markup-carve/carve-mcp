@@ -29,23 +29,31 @@ pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
 const MAX_AST_PATCH_OPERATIONS: usize = 1_000;
 const MAX_AST_SELECTOR_MATCHES: usize = 100;
 const MAX_SEMANTIC_EDIT_STEPS: usize = 100;
-// The engine's own `CHILD_FIELDS` from `dist/ast-json.js`, in its order. A field
-// missing here makes everything under it invisible; `ast-child-fields.test.ts`
-// compares the two, because neither engine exports a list to build this from.
-const AST_CHILD_FIELDS: [&str; 13] = [
+// Every field the AST schema puts nodes in, in the engine's own order (its
+// `CHILD_FIELDS` in `dist/ast-sidecars.js`). Kept identical to
+// `src/ast-fields.ts`, which `src/ast-fields.test.ts` checks against the
+// engine and against the paths its exported walk reports.
+const AST_CHILD_FIELDS: [&str; 20] = [
+    "target",
+    "title",
     "children",
-    "blocks",
     "items",
     "rows",
     "cells",
+    "blocks",
     "inline",
     "content",
-    "caption",
-    "shortCaption",
-    "title",
+    "prefix",
+    "locator",
+    "suffix",
+    "old",
+    "new",
     "pairs",
     "base",
     "annotation",
+    "caption",
+    "shortCaption",
+    "fallback",
 ];
 
 fn ast_patch_path(operation: &carve::AstPatchOperation) -> &str {
