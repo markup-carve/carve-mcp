@@ -42,6 +42,13 @@ const reversibleHeadingPatch = {
 const keyValueBeforeAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '1' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
 const keyValueAfterAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'span', children: [{ type: 'text', value: 'x' }], attrs: { keyValues: { type: 'widget', pos: '2' }, order: ['type', 'pos'] } }] }], srcByteLength: 22 };
 
+// No Carve source spells a ruby or a block-holding table cell, so both reach a
+// port only as a client-supplied AST - which is exactly where the walk used to
+// stop short of them (markup-carve/carve-mcp#60). Three text nodes in the ruby
+// case, two in the table case, each with one outside the nested field.
+const rubyAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'ruby', pairs: [{ base: [{ type: 'text', value: 'base' }], annotation: [{ type: 'text', value: 'anno' }] }] }, { type: 'text', value: 'after' }] }], srcByteLength: 0 };
+const cellBlocksAst = { type: 'document', children: [{ type: 'table', rows: [{ type: 'table_row', cells: [{ type: 'table_cell', header: false, blocks: [{ type: 'paragraph', children: [{ type: 'text', value: 'in cell' }] }] }] }] }, { type: 'paragraph', children: [{ type: 'text', value: 'after' }] }], srcByteLength: 0 };
+
 const calls = [
   ['carve_format', { source: '# Hello' }],
   ['carve_render', { source: '# Héllo', target: 'html', preset: 'portable' }],
@@ -56,6 +63,10 @@ const calls = [
   ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
   ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'heading-id', value: 'Before' } }],
   ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'ast-path', value: '/children/0' } }],
+  ['carve_select_ast_nodes', { ast: rubyAst, selector: { kind: 'node-type', value: 'text' } }],
+  ['carve_select_ast_nodes', { ast: rubyAst, selector: { kind: 'node-type', value: 'ruby' } }],
+  ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'text' } }],
+  ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'paragraph' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'replace-text', text: 'After' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'rename-heading-id', id: 'intro' } }],
   ['carve_plan_ast_edit', { source: '# Title\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'delete-node' } }],

@@ -29,8 +29,12 @@ pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
 const MAX_AST_PATCH_OPERATIONS: usize = 1_000;
 const MAX_AST_SELECTOR_MATCHES: usize = 100;
 const MAX_SEMANTIC_EDIT_STEPS: usize = 100;
-const AST_CHILD_FIELDS: [&str; 9] = [
+// The engine's own `CHILD_FIELDS` from `dist/ast-json.js`, in its order. A field
+// missing here makes everything under it invisible; `ast-child-fields.test.ts`
+// compares the two, because neither engine exports a list to build this from.
+const AST_CHILD_FIELDS: [&str; 13] = [
     "children",
+    "blocks",
     "items",
     "rows",
     "cells",
@@ -39,6 +43,9 @@ const AST_CHILD_FIELDS: [&str; 9] = [
     "caption",
     "shortCaption",
     "title",
+    "pairs",
+    "base",
+    "annotation",
 ];
 
 fn ast_patch_path(operation: &carve::AstPatchOperation) -> &str {

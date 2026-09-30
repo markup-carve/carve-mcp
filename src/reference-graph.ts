@@ -3,7 +3,10 @@ import { parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
 const CARVE_EXTENSIONS = new Set(['.crv', '.carve']);
-const AST_CHILD_FIELDS = ['children', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title'] as const;
+// The engine's own `CHILD_FIELDS` from `dist/ast-json.js`, in its order. A field
+// missing here makes everything under it invisible; `ast-child-fields.test.ts`
+// compares the two, because the engine exports no list to import.
+const AST_CHILD_FIELDS = ['children', 'blocks', 'items', 'rows', 'cells', 'inline', 'content', 'caption', 'shortCaption', 'title', 'pairs', 'base', 'annotation'] as const;
 const MAX_GRAPH_BYTES = 25_000_000;
 
 type GraphKind = 'heading' | 'footnote' | 'abbreviation' | 'link' | 'image';
