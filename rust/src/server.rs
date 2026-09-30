@@ -1591,6 +1591,13 @@ fn migrate_markdown_dialect(
         });
     }
     let mut result = migrate_markdown(&value);
+    if !replacements.is_empty() {
+        // Tokenized dialect constructs read as plain prose, so from carve-lang
+        // 0.1.7 the importer certifies them as literal text preserved exactly.
+        // Report on what the caller sent, which is also what carve-js reports
+        // from its native dialect option.
+        result.report = migrate_markdown(source).report;
+    }
     for (index, replacement) in replacements.into_iter().enumerate() {
         result.value = result
             .value
@@ -1624,6 +1631,10 @@ fn byte_offset_from_utf16(source: &str, offset: usize) -> usize {
 pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
     let mut warnings: Vec<Value> = lint_carve(source)
         .into_iter()
+        // carve-lang 0.1.7 added unclosed-container-fence with wording that
+        // differs from carve-js, so the block below re-emits it in the JS
+        // engine's words to keep both ports byte-identical.
+        .filter(|warning| warning.rule != "unclosed-container-fence")
         .map(|warning| {
             json!({
                 "line": warning.line, "column": warning.column, "rule": warning.rule,
@@ -2628,10 +2639,13 @@ impl CarveServer {
             },
             Err(error) => CallToolResult::error(vec![ContentBlock::text(
                 serde_json::to_string_pretty(&json!({
+                    // carve-rs raises no strict-loss error, so this restates
+                    // carve-js's RenderLossError message to keep both ports
+                    // byte-identical. carve-js 0.1.8 reworded it.
                     "error": format!(
-                        "render would drop {} raw format node{}",
+                        "render would incur {} structural loss{}",
                         error.total_losses,
-                        if error.total_losses == 1 { "" } else { "s" }
+                        if error.total_losses == 1 { "" } else { "es" }
                     ),
                     "losses": error.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),
                     "totalLosses": error.total_losses, "truncated": error.truncated,
@@ -3170,7 +3184,7 @@ impl CarveServer {
             let label = node_identity(matched_node);
             let referenced = ast_nodes(&after).into_iter().any(|(_, node)| {
                 node.get("type").and_then(Value::as_str) == Some("footnote_ref")
-                    && node.get("id").and_then(Value::as_str) == label
+                    && node.get("label").and_then(Value::as_str) == label
             });
             if referenced {
                 return Self::error(format!(
@@ -3760,6 +3774,45 @@ mod tests {
     }
 
     #[test]
+    fn a_rewritten_dialect_construct_is_not_reported_as_literal_text() {
+        let diagnostic = |source, dialect: Option<&MarkdownDialect>| {
+            let report = migrate_markdown_dialect(source, dialect).report;
+            let first = &report.diagnostics[0];
+            (
+                first.code.clone(),
+                first.fidelity.as_str().to_owned(),
+                first.confidence.as_str().to_owned(),
+            )
+        };
+        // The dialect pass swaps each construct for an opaque token, and a
+        // document of plain tokens looks to the importer like literal text it
+        // can certify as preserved. The report has to describe what came in.
+        let highlight = MarkdownDialect {
+            highlight: true,
+            ..Default::default()
+        };
+        for (source, dialect) in [("==marked==", Some(&highlight)), ("^[note]", None)] {
+            assert_eq!(
+                diagnostic(source, dialect),
+                (
+                    "fidelity-unverified".to_owned(),
+                    "dropped".to_owned(),
+                    "fallback".to_owned()
+                ),
+                "{source:?}"
+            );
+        }
+        assert_eq!(
+            diagnostic("Text", None),
+            (
+                "literal-text-verified".to_owned(),
+                "preserved".to_owned(),
+                "exact".to_owned()
+            )
+        );
+    }
+
+    #[test]
     fn markdown_dialect_is_explicit() {
         assert_eq!(
             migrate_markdown_dialect("==marked==", None).value,
@@ -3840,6 +3893,37 @@ mod tests {
         assert!(!truncated);
         assert!(value.starts_with("--- a/docs/übersicht.crv\n+++ b/docs/übersicht.crv\n"));
         assert!(value.contains("-a   \n+a\n keep\n\\ No newline at end of file\n"));
+    }
+
+    #[test]
+    fn a_referenced_footnote_cannot_be_deleted() {
+        let plan = |source: &str| {
+            let input = serde_json::from_value(json!({
+                "source": source,
+                "selector": {"kind": "footnote-label", "value": "a"},
+                "edit": {"kind": "delete-node"},
+            }))
+            .unwrap();
+            serde_json::to_string(
+                &CarveServer::with_workspace_and_profile(None, ToolProfile::All)
+                    .plan_ast_edit(Parameters(input)),
+            )
+            .unwrap()
+        };
+        // The guard compares the footnote's label against `footnote_ref.label`,
+        // which the wire spelled `id` before carve-lang 0.1.7.
+        assert!(plan("Text[^a]\n\n[^a]: Note\n").contains("while references remain"));
+        assert!(!plan("[^a]: Note\n").contains("while references remain"));
+    }
+
+    #[test]
+    fn a_footnote_reference_carries_its_label_on_the_wire() {
+        let json = carve::to_json(&carve::parse("Text[^a]\n\n[^a]: Note\n"));
+        let reference = json
+            .split("\"type\":\"footnote_ref\"")
+            .nth(1)
+            .expect("the document has a footnote reference");
+        assert!(reference.starts_with(",\"label\":\"a\""), "{reference}");
     }
 
     #[test]
