@@ -38,7 +38,7 @@ function collect(path: string, ast: unknown): { definitions: Definition[]; refer
     if (node.type === 'footnote' && typeof node.label === 'string') definitions.push({ ...at, kind: 'footnote', id: node.label });
     if (node.type === 'abbreviation_def' && typeof node.abbr === 'string') definitions.push({ ...at, kind: 'abbreviation', id: node.abbr });
     if (node.type === 'heading_ref' && typeof node.target === 'string') references.push({ ...at, kind: 'heading', id: node.target, targetPath: path, targetId: node.target });
-    if (node.type === 'footnote_ref' && typeof node.id === 'string') references.push({ ...at, kind: 'footnote', id: node.id, targetPath: path, targetId: node.id });
+    if (node.type === 'footnote_ref' && typeof node.label === 'string') references.push({ ...at, kind: 'footnote', id: node.label, targetPath: path, targetId: node.label });
     if ((node.type === 'link' || node.type === 'image') && typeof (node.href ?? node.src) === 'string') {
       const href = String(node.href ?? node.src);
       const target = linkTarget(path, href);

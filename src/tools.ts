@@ -269,7 +269,7 @@ export function planSemanticAstEdit(source: string, selector: AstSelector, edit:
   if (semanticAstEqual(before, after)) throw new Error('The requested semantic edit would not change the document.');
   for (const step of resolved.filter(({ edit, match }) => edit.kind === 'delete-node' && match.node.type === 'footnote')) {
     const label = nodeIdentity(step.match.node);
-    const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.id === label);
+    const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.label === label);
     if (referenced) throw new Error(`Cannot delete footnote “${humanText(label ?? '')}” while references remain.`);
   }
   const semanticAfter = semanticAst(after) as AstJsonDocument;
