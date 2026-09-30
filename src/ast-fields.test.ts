@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { astNodePaths, type AstJsonDocument } from '@markup-carve/carve';
+import { astNodePaths, parse, toAstJson, type AstJsonDocument } from '@markup-carve/carve';
 import { describe, expect, it } from 'vitest';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { selectAstNodes } from './tools.js';
@@ -120,5 +120,35 @@ describe('selection over a document using every node position', () => {
 
   it('finds one text node per position and no others', () => {
     expect(selectAstNodes(covered, { kind: 'node-type', value: 'text' }).matchCount).toBe(positions.length);
+  });
+});
+
+describe('what the walk must not treat as a node', () => {
+  // `attrs.keyValues` holds strings, and an attribute may be named `type`, so
+  // `{type=widget}` puts an object shaped {"type":"widget"} under a node. A walk
+  // that called any object with a string `type` a child would offer it for
+  // selection and for a delete or replace plan. The field list is what keeps it
+  // out, so this pins it rather than leaving it to the list's shape.
+  const attributed = toAstJson(parse('[x]{type=widget}')) as unknown as AstJsonDocument;
+
+  it('leaves an attribute named type out of selection', () => {
+    expect(selectAstNodes(attributed, { kind: 'node-type', value: 'widget' }).matchCount).toBe(0);
+  });
+
+  it('finds no node the engine walk does not report', () => {
+    const engine = astNodePaths(attributed).filter((path) => path !== '');
+    const found = ['document', 'paragraph', 'span', 'text', 'widget']
+      .map((type) => selectAstNodes(attributed, { kind: 'node-type', value: type }).matchCount)
+      .reduce((total, count) => total + count, 0);
+    expect(found).toBe(engine.length + 1);
+  });
+
+  it('reports each node of the covered document once', () => {
+    const engine = astNodePaths(covered as unknown as AstJsonDocument);
+    const types = [...new Set(engine.map((path) => selectAstNodes(covered, { kind: 'ast-path', value: path || '/' }).matches[0]?.type ?? 'document'))];
+    const found = types
+      .map((type) => selectAstNodes(covered, { kind: 'node-type', value: type }).matchCount)
+      .reduce((total, count) => total + count, 0);
+    expect(found).toBe(engine.length);
   });
 });
