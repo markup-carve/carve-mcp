@@ -11,7 +11,7 @@ use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::server::{MAX_SOURCE_BYTES, lint_values};
+use crate::server::{AST_CHILD_FIELDS, MAX_SOURCE_BYTES, lint_values};
 
 const EXTENSIONS: &[&str] = &[
     "crv", "carve", "md", "markdown", "txt", "html", "htm", "djot",
@@ -582,13 +582,22 @@ impl Workspace {
 }
 
 fn collect_heading_ids(value: &Value, ids: &mut BTreeSet<String>) {
-    if value.get("type").and_then(Value::as_str) == Some("heading")
+    if let Some(values) = value.as_array() {
+        for child in values {
+            collect_heading_ids(child, ids);
+        }
+        return;
+    }
+    let Some(record) = value.as_object() else {
+        return;
+    };
+    if record.get("type").and_then(Value::as_str) == Some("heading")
         && let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
     {
         ids.insert(id.to_lowercase());
     }
-    if let Some(children) = value.get("children").and_then(Value::as_array) {
-        for child in children {
+    for field in AST_CHILD_FIELDS {
+        if let Some(child) = record.get(field) {
             collect_heading_ids(child, ids);
         }
     }
@@ -731,6 +740,40 @@ mod tests {
                 .write(0, "../outside.crv", "x", None, false)
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // The heading-id walk is keyed by field name, so a field it does not name
+    // hides every heading under it and the anchor check calls a live link
+    // broken. The caption puts the quote's heading under `figure.target`.
+    #[test]
+    fn finds_heading_anchors_in_every_ast_field() {
+        let root = temporary_root();
+        fs::write(
+            root.join("guide.crv"),
+            "# Top\n\n- # In A List\n\n:::note\n# In A Note\n:::\n\n> # In A Quote\n\n^ Caption\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("index.crv"),
+            "[top](guide.crv#top)\n[list](guide.crv#in-a-list)\n[note](guide.crv#in-a-note)\n[quote](guide.crv#in-a-quote)\n[gone](guide.crv#not-a-heading)\n",
+        )
+        .unwrap();
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            false,
+            ReviewConfiguration::default(),
+        )
+        .unwrap();
+        let review = workspace.review(0, 10, 500, false, true, true).unwrap();
+        let broken: Vec<&str> = review["projectWarnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|warning| warning["rule"] == "broken-local-anchor")
+            .map(|warning| warning["target"].as_str().unwrap())
+            .collect();
+        assert_eq!(broken, vec!["guide.crv#not-a-heading"]);
         fs::remove_dir_all(root).unwrap();
     }
 }

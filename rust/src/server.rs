@@ -33,7 +33,7 @@ const MAX_SEMANTIC_EDIT_STEPS: usize = 100;
 // `CHILD_FIELDS` in `dist/ast-sidecars.js`). Kept identical to
 // `src/ast-fields.ts`, which `src/ast-fields.test.ts` checks against the
 // engine and against the paths its exported walk reports.
-const AST_CHILD_FIELDS: [&str; 20] = [
+pub(crate) const AST_CHILD_FIELDS: [&str; 20] = [
     "target",
     "title",
     "children",

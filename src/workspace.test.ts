@@ -71,6 +71,41 @@ describe('workspace operations', () => {
     expect(review.projectWarnings.map(({ rule }) => rule)).toEqual(['missing-local-file']);
   });
 
+  // The heading-id walk is keyed by field name, so a field it does not name
+  // hides every heading under it and the anchor check calls a live link broken.
+  it('finds heading anchors in every field the AST schema puts nodes in', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'guide.crv'), [
+      '# Top',
+      '',
+      '- # In A List',
+      '',
+      '| x |',
+      '|---|',
+      '| y |',
+      '',
+      ':::note',
+      '# In A Note',
+      ':::',
+      '',
+      '> # In A Quote',
+      '',
+      '^ Caption',
+      '',
+    ].join('\n'));
+    await writeFile(join(root, 'index.crv'), [
+      '[top](guide.crv#top)',
+      '[list](guide.crv#in-a-list)',
+      '[note](guide.crv#in-a-note)',
+      '[quote](guide.crv#in-a-quote)',
+      '[gone](guide.crv#not-a-heading)',
+    ].join('\n'));
+    const workspace = await prepareWorkspace({ roots: [root] });
+    const review = await reviewWorkspace(workspace, 0);
+    const broken = review.projectWarnings.filter(({ rule }) => rule === 'broken-local-anchor');
+    expect(broken.map(({ target }) => target)).toEqual(['guide.crv#not-a-heading']);
+  });
+
   it('builds a cross-document semantic reference graph', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await mkdir(join(root, 'docs'));

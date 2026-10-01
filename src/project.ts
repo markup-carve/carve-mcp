@@ -1,5 +1,6 @@
 import { dirname, extname, posix } from 'node:path';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
+import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { format as formatCarve, lint, parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
@@ -56,13 +57,14 @@ function lineColumn(source: string, offset: number) {
 function headingIds(source: string): Set<string> {
   const ids = new Set<string>();
   const walk = (value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach(walk); return; }
     if (!value || typeof value !== 'object') return;
     const node = value as Record<string, unknown>;
     if (node.type === 'heading' && node.attrs && typeof node.attrs === 'object') {
       const id = (node.attrs as Record<string, unknown>).id;
       if (typeof id === 'string') ids.add(id.toLowerCase());
     }
-    if (Array.isArray(node.children)) node.children.forEach(walk);
+    for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
   };
   walk(parse(source));
   return ids;
