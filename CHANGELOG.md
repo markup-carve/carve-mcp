@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.6 - 2026-10-01
+
+### Fixed
+
+- `carve_select_ast_nodes`, `carve_plan_ast_edit` and the node previews reach
+  content in all twenty fields the AST schema puts nodes in. Seven went
+  unvisited, so a figure's target, a block extension's fallback, a citation's
+  prefix, locator and suffix, a substitution's two halves, a ruby's base and
+  annotation, and a table cell holding blocks each hid everything inside them
+  (#61, #62).
+- A footnote reference is read from `label`, the field the wire carries since
+  the engines moved. The reference graph recorded no footnote reference at all,
+  so every definition was reported as an orphan, and `carve_plan_ast_edit` had
+  stopped refusing `delete-node` on a footnote that is still referenced (#59).
+- `carve_review_workspace` no longer calls a link broken when its destination
+  heading exists outside `children`, such as a heading in a list item or under
+  a figure caption (#63).
+- A Markdown, Djot or BBCode import is no longer certified as `preserved` /
+  `exact` when the dialect pass rewrote the source before the importer saw it.
+  The fidelity report describes the source the caller sent (#59).
+- The Rust server reports an unclosed container once instead of twice (#59).
+
+### Changed
+
+- The servers take the JavaScript engine at 0.1.9, from 0.1.7, and the native
+  Rust engine at 0.1.7, from 0.1.6 (#59).
+
 ## 0.1.5 - 2026-09-19
 
 ### Added
