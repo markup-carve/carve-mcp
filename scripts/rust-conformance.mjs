@@ -320,8 +320,10 @@ const workspaceRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-conformance-'));
 try {
   mkdirSync(join(workspaceRoot, 'docs'));
   mkdirSync(join(workspaceRoot, 'archive'));
-  writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Missing](docs/missing.crv)\n');
-  writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n');
+  // The nested-heading anchor keeps a one-sided fix to either heading-id walk
+  // from passing: it resolves only when the walk reaches `list_item.children`.
+  writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Nested](docs/guide.crv#Nested)\n[Missing](docs/missing.crv)\n');
+  writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n\n- # Nested\n');
   writeFileSync(join(workspaceRoot, 'stale.crv'), Array.from({ length: 100 }, (_, index) => `line ${index}   `).join('\n'));
   writeFileSync(join(workspaceRoot, 'mixed.crv'), '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n');
   writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
