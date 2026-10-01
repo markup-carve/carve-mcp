@@ -19,8 +19,7 @@ const unresolvable = crate.dependencies
   .map(({ name, source }) => `${name} (${source ?? 'path'})`);
 
 if (unresolvable.length > 0) {
-  console.log(`Skipping cargo package; these resolve outside the registry: ${unresolvable.join(', ')}.`);
-  process.exit(0);
+  throw new Error(`Rust package dependencies must use registry versions: ${unresolvable.join(', ')}.`);
 }
 
 run(['package', '--manifest-path', 'rust/Cargo.toml', '--locked'], { stdio: 'inherit' });

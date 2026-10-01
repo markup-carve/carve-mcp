@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { DOCUMENT_TOOLS } from '../dist/tool-profile.js';
 import { describeContractDrift } from './release-contract.mjs';
+import { cargoPackage, assertRegistryRustDependencies } from './rust-release-contract.mjs';
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const registry = JSON.parse(await readFile(new URL('../server.json', import.meta.url), 'utf8'));
@@ -25,14 +26,9 @@ if (releaseRun) {
   if (nonRegistryDependencies.length > 0) {
     throw new Error(`Release dependencies must use registry versions: ${nonRegistryDependencies.join(', ')}.`);
   }
-  // cargo drops a git source from the packaged manifest, so a crate carrying
-  // one cannot be verified against what crates.io would serve.
-  const cargoPins = [...cargoLock.matchAll(/^name = "([^"]+)"\nversion = "[^"]+"\nsource = "git\+/gm)]
-    .map(([, name]) => name);
-  if (cargoPins.length > 0) {
-    throw new Error(`Rust release dependencies must use registry versions: ${cargoPins.join(', ')}.`);
-  }
+
 }
+assertRegistryRustDependencies(cargo, cargoLock);
 if (releaseVersion && releaseVersion !== pkg.version) {
   throw new Error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${pkg.version}.`);
 }
@@ -43,7 +39,7 @@ if (registry.packages?.[0]?.identifier !== pkg.name) {
   throw new Error('package.json and server.json package names must match.');
 }
 if (registry.name !== pkg.mcpName) throw new Error('package.json mcpName and server.json name must match.');
-if (!cargo.includes(`version = "${pkg.version}"`)) throw new Error('Rust and npm package versions must match.');
+if (cargoPackage(cargo).version !== pkg.version) throw new Error('Rust and npm package versions must match.');
 
 const packDirectory = await mkdtemp(join(tmpdir(), 'carve-mcp-pack-'));
 const packOutput = execFileSync('npm', ['pack', '--json', '--pack-destination', packDirectory], { encoding: 'utf8' });
