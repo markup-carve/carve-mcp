@@ -177,4 +177,17 @@ describe('release gate subprocess regressions', () => {
     expect(result.stdout).toContain('"tokens": 1');
   });
 
+  it('keeps profile scenario identity independent of JSON overrides', () => {
+    const directory = schemaFixture();
+    const budgetPath = join(directory, 'scripts', 'schema-token-budget.json');
+    const budget = JSON.parse(readFileSync(budgetPath, 'utf8'));
+    budget.profiles.structure.profile = 'other';
+    budget.profiles.structure.label = 'other';
+    writeFileSync(budgetPath, JSON.stringify(budget));
+    const result = run(directory, 'check-schema-budget.mjs', { GATE_TOOLS: JSON.stringify(['carve_parse', 'carve_select_ast_nodes']) });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"structure"');
+    expect(result.stdout).not.toContain('"other"');
+  });
+
 });

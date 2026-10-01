@@ -16,7 +16,7 @@ if (budgetProfiles.length !== TOOL_PROFILES.length || TOOL_PROFILES.some((profil
   throw new Error(`Schema budget profiles must exactly match: ${TOOL_PROFILES.join(', ')}.`);
 }
 const scenarios = [
-  ...TOOL_PROFILES.map((profile) => ({ label: profile, profile, ...budget.profiles[profile] })),
+  ...TOOL_PROFILES.map((profile) => ({ ...budget.profiles[profile], label: profile, profile })),
   ...Object.entries(budget.scenarios ?? {}).map(([label, scenario]) => ({ label, ...scenario })),
 ];
 
