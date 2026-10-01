@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, symlinkSync, unlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,29 @@ function fixture() {
   `);
   return directory;
 }
+function schemaFixture(maximum = 10) {
+  const directory = fixture();
+  unlinkSync(join(directory, 'node_modules'));
+  for (const packageName of ['@modelcontextprotocol/client', 'gpt-tokenizer']) {
+    const location = join(directory, 'node_modules', packageName);
+    mkdirSync(location, { recursive: true });
+    writeFileSync(join(location, 'package.json'), JSON.stringify({ type: 'module', exports: {
+      '.': './index.js', './stdio': './stdio.js', './model/gpt-5': './index.js',
+    } }));
+  }
+  const client = join(directory, 'node_modules', '@modelcontextprotocol/client');
+  writeFileSync(join(client, 'index.js'), 'export class Client { async connect() {} async close() {} async listTools() { return { tools: JSON.parse(process.env.GATE_TOOLS).map(name => ({ name })) }; } }');
+  writeFileSync(join(client, 'stdio.js'), 'export class StdioClientTransport {}');
+  writeFileSync(join(directory, 'node_modules', 'gpt-tokenizer', 'index.js'), 'export const countTokens = () => 1;');
+  for (const file of ['check-schema-budget.mjs', 'schema-budget-contract.mjs']) {
+    copyFileSync(join(repository, 'scripts', file), join(directory, 'scripts', file));
+  }
+  writeFileSync(join(directory, 'dist', 'tool-profile.js'), 'export const TOOL_PROFILES = ["structure"];');
+  writeFileSync(join(directory, 'scripts', 'schema-token-budget.json'), JSON.stringify({ profiles: {
+    structure: { maximum, workspace: false, tools: ['carve_parse', 'carve_select_ast_nodes'] },
+  } }));
+  return directory;
+}
 function run(directory, script, environment = {}) {
   const env = { ...process.env, ...environment };
   delete env.REQUIRE_RELEASE_TAG;
@@ -59,7 +82,7 @@ describe('release gate subprocess regressions', () => {
   it.each(['git+https://github.com/markup-carve/carve-rs?branch=main#' + sha, null])('fails package verification instead of skipping a non-registry dependency: %s', (source) => {
     const result = run(fixture(), 'check-rust-package.mjs', { GATE_DEPENDENCIES: JSON.stringify([{ name: 'carve-lang', kind: null, source }]) });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('must use registry versions');
+    expect(result.stderr).toContain('must use crates.io registry versions');
     expect(result.stdout).not.toContain('PACKAGE_VERIFIED');
   });
   it('still verifies a registry package', () => {
@@ -102,7 +125,7 @@ describe('release gate subprocess regressions', () => {
     writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', source));
     const result = run(directory, 'release-check.mjs');
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Rust release dependencies must use registry versions');
+    expect(result.stderr).toContain('Rust release dependencies must use crates.io registry versions');
     expect(result.stderr).not.toContain('REACHED_EXTERNAL_COMMAND');
   });
   it('rejects a package-version mismatch even when a dependency matches npm', () => {
@@ -120,4 +143,38 @@ describe('release gate subprocess regressions', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Rust and npm package versions must match');
   });
+  it('rejects a path engine source in the current-engine gate', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', undefined));
+    const result = run(directory, 'check-engine-current.mjs');
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('crates.io release or an immutable Git commit');
+  });
+  it('rejects a non-registry build dependency before packaging', () => {
+    const result = run(fixture(), 'check-rust-package.mjs', { GATE_DEPENDENCIES: JSON.stringify([{ name: 'build-helper', kind: 'build', source: null }]) });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('build-helper (path)');
+    expect(result.stdout).not.toContain('PACKAGE_VERIFIED');
+  });
+  it('the schema script rejects a missing maximum before starting a server', () => {
+    const directory = schemaFixture();
+    const budgetPath = join(directory, 'scripts', 'schema-token-budget.json');
+    const budget = JSON.parse(readFileSync(budgetPath, 'utf8'));
+    delete budget.profiles.structure.maximum;
+    writeFileSync(budgetPath, JSON.stringify(budget));
+    const result = run(directory, 'check-schema-budget.mjs', { GATE_TOOLS: JSON.stringify(['carve_parse', 'carve_select_ast_nodes']) });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('positive numeric maximum');
+  });
+  it.each([['carve_parse'], ['carve_parse', 'carve_select_ast_nodes', 'carve_new_tool']])('the schema script rejects changed tool inventories even below budget: %s', (...tools) => {
+    const result = run(schemaFixture(), 'check-schema-budget.mjs', { GATE_TOOLS: JSON.stringify(tools) });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('tool contract drift');
+  });
+  it('the schema script accepts the expected inventory below its budget', () => {
+    const result = run(schemaFixture(), 'check-schema-budget.mjs', { GATE_TOOLS: JSON.stringify(['carve_parse', 'carve_select_ast_nodes']) });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('"tokens": 1');
+  });
+
 });

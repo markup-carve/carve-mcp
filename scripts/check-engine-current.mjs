@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { cargoLockPackages, immutableGithubPin } from './rust-release-contract.mjs';
+import { cargoLockPackages, immutableGithubPin, CRATES_IO_SOURCE } from './rust-release-contract.mjs';
 
 const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
 const installed = lock.packages?.['node_modules/@markup-carve/carve']?.version;
@@ -41,6 +41,7 @@ try {
     throw new Error('crates.io returned no published carve-lang version.');
   }
 } catch (error) {
+  rustLatest = undefined;
   problems.push(`Could not query crates.io for the newest carve-lang version: ${error.message}`);
 }
 if (rustLatest) {
@@ -69,8 +70,8 @@ if (rustEngine.source?.startsWith('git+')) {
   }
 }
 
-if (!(rustEngine.source ?? '').startsWith('registry+') && !rustEngine.source?.startsWith('git+')) {
-  problems.push('Rust engine must be pinned to a registry release or an immutable Git commit.');
+if (rustEngine.source !== CRATES_IO_SOURCE && !rustEngine.source?.startsWith('git+')) {
+  problems.push('Rust engine must be pinned to a crates.io release or an immutable Git commit.');
 }
 
 if (problems.length > 0) throw new Error(problems.join('\n'));

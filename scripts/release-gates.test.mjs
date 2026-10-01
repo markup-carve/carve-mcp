@@ -19,13 +19,21 @@ describe('Rust release gates', () => {
     expect(packages.find(({ name }) => name === 'carve-lang')?.source).toBe('registry+https://github.com/rust-lang/crates.io-index');
   });
   it.each([undefined, `git+https://github.com/markup-carve/carve-rs?branch=main#${sha}`])('rejects a non-registry lock source: %s', (source) => {
-    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', source))).toThrow('registry versions');
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', source))).toThrow('crates.io registry versions');
   });
   it('allows only the root package to omit a registry source', () => {
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', 'registry+https://github.com/rust-lang/crates.io-index'))).not.toThrow();
   });
   it.each([`?branch=main#${sha}`, `?tag=v0.1.7#${sha}`, `#${sha}`, `?rev=main#${sha}`])('rejects a mutable Git source: %s', (suffix) => {
     expect(() => immutableGithubPin(`git+https://github.com/markup-carve/carve-rs${suffix}`)).toThrow();
+  });
+  it('does not borrow a source from an unused patch table', () => {
+    const lock = root + entry('carve-lang', undefined) + '\n[[patch.unused]]\nname = "other"\nversion = "1"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n';
+    expect(cargoLockPackages(lock).find(({ name }) => name === 'carve-lang')?.source).toBeUndefined();
+    expect(() => assertRegistryRustDependencies(manifest, lock)).toThrow('carve-lang (path)');
+  });
+  it('rejects alternate registries rather than comparing their versions with crates.io', () => {
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', 'registry+https://example.com/index'))).toThrow('alternate registry');
   });
   it('accepts an explicit immutable Git commit for ancestry verification', () => {
     expect(immutableGithubPin(`git+https://github.com/markup-carve/carve-rs.git?rev=${sha}#${sha}`))

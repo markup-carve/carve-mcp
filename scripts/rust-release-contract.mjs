@@ -1,3 +1,5 @@
+export const CRATES_IO_SOURCE = 'registry+https://github.com/rust-lang/crates.io-index';
+
 export function cargoPackage(manifest) {
   const section = /^\[package\][ \t]*(?:#.*)?\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(manifest)?.[1];
   if (!section) throw new Error('Cargo.toml has no [package] section.');
@@ -9,7 +11,8 @@ export function cargoPackage(manifest) {
 }
 
 export function cargoLockPackages(lock) {
-  return lock.split(/^\[\[package\]\][ \t]*\r?$/m).slice(1).map((block) => {
+  return lock.split(/^\[\[package\]\][ \t]*\r?$/m).slice(1).map((section) => {
+    const block = section.split(/^\[/m, 1)[0];
     const field = (name) => new RegExp(`^${name} = "([^"\\r\\n]+)"$`, 'm').exec(block)?.[1];
     const name = field('name');
     const version = field('version');
@@ -21,10 +24,10 @@ export function cargoLockPackages(lock) {
 export function assertRegistryRustDependencies(manifest, lock) {
   const root = cargoPackage(manifest);
   const nonRegistry = cargoLockPackages(lock)
-    .filter(({ name, source }) => name !== root.name && !(source ?? '').startsWith('registry+'))
-    .map(({ name, source }) => `${name} (${source?.startsWith('git+') ? 'git' : 'path'})`);
+    .filter(({ name, source }) => name !== root.name && source !== CRATES_IO_SOURCE)
+    .map(({ name, source }) => `${name} (${source?.startsWith('git+') ? 'git' : source ? 'alternate registry' : 'path'})`);
   if (nonRegistry.length > 0) {
-    throw new Error(`Rust release dependencies must use registry versions: ${nonRegistry.join(', ')}.`);
+    throw new Error(`Rust release dependencies must use crates.io registry versions: ${nonRegistry.join(', ')}.`);
   }
 }
 
