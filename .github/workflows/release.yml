@@ -18,6 +18,8 @@ permissions:
   contents: read
   id-token: write
 
+# Every job below carries a timeout-minutes bound, so a hung step fails in
+# minutes instead of running to GitHub's 360-minute default.
 jobs:
   rust-binaries:
     if: github.event_name == 'release'
@@ -114,6 +116,7 @@ jobs:
     if: github.event_name == 'release'
     needs: rust-binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -182,6 +185,7 @@ jobs:
   release-contract:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       full: ${{ steps.contract.outputs.full }}
     steps:
