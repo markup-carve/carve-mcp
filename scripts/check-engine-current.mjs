@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { cargoLockPackages, immutableGithubPin, CRATES_IO_SOURCE } from './rust-release-contract.mjs';
 
 const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
 const installed = lock.packages?.['node_modules/@markup-carve/carve']?.version;
@@ -25,8 +26,9 @@ if (latest) {
 }
 
 const cargoLock = readFileSync(new URL('../rust/Cargo.lock', import.meta.url), 'utf8');
-const rustInstalled = /^name = "carve-lang"\nversion = "([^"]+)"$/m.exec(cargoLock)?.[1];
-if (!rustInstalled) throw new Error('rust/Cargo.lock does not pin carve-lang.');
+const rustEngine = cargoLockPackages(cargoLock).find(({ name }) => name === 'carve-lang');
+if (!rustEngine) throw new Error('rust/Cargo.lock does not pin carve-lang.');
+const rustInstalled = rustEngine.version;
 
 let rustLatest;
 try {
@@ -35,12 +37,14 @@ try {
   });
   if (!response.ok) throw new Error(`crates.io returned HTTP ${response.status}.`);
   rustLatest = (await response.json()).crate?.default_version;
+  if (typeof rustLatest !== 'string' || !rustLatest.trim()) {
+    throw new Error('crates.io returned no published carve-lang version.');
+  }
 } catch (error) {
+  rustLatest = undefined;
   problems.push(`Could not query crates.io for the newest carve-lang version: ${error.message}`);
 }
-if (rustLatest !== undefined && (typeof rustLatest !== 'string' || !rustLatest)) {
-  problems.push('crates.io returned no published carve-lang version.');
-} else if (rustLatest) {
+if (rustLatest) {
   console.log(`Rust engine: ${rustInstalled}; newest published: ${rustLatest}`);
   if (rustInstalled !== rustLatest) {
     problems.push(`carve-lang ${rustLatest} is published; update and verify the MCP from ${rustInstalled}.`);
@@ -49,10 +53,8 @@ if (rustLatest !== undefined && (typeof rustLatest !== 'string' || !rustLatest))
 
 // The lock reports the engine's own version whatever the source is, so the
 // comparison above cannot see a git pin left on a squash-merged branch head.
-const gitPin = /^source = "git\+https:\/\/github\.com\/([^/]+\/[^?"]+)\?rev=[^#"]*#([0-9a-f]{40})"$/m
-  .exec(cargoLock.slice(cargoLock.indexOf('name = "carve-lang"')));
-if (gitPin) {
-  const [, repository, revision] = gitPin;
+if (rustEngine.source?.startsWith('git+')) {
+  const { repository, revision } = immutableGithubPin(rustEngine.source);
   console.log(`Rust engine source: ${repository}@${revision.slice(0, 10)}`);
   try {
     const response = await fetch(`https://api.github.com/repos/${repository}/compare/main...${revision}`, {
@@ -66,6 +68,10 @@ if (gitPin) {
   } catch (error) {
     problems.push(`Could not check whether ${repository}@${revision.slice(0, 10)} is on main: ${error.message}`);
   }
+}
+
+if (rustEngine.source !== CRATES_IO_SOURCE && !rustEngine.source?.startsWith('git+')) {
+  problems.push('Rust engine must be pinned to a crates.io release or an immutable Git commit.');
 }
 
 if (problems.length > 0) throw new Error(problems.join('\n'));

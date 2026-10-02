@@ -1,8 +1,9 @@
 # Carve MCP for Rust
 
 This package is the native Carve MCP server. It consumes `carve-lang` and
-serves MCP over stdio as the `carve-mcp-rs` binary. CI verifies the package
-archive can be built independently before it is submitted to crates.io.
+serves MCP over stdio as the `carve-mcp-rs` binary. GitHub releases distribute
+the native binaries. The crate is not published to crates.io. CI verifies
+that its package archive builds independently against registry dependencies.
 
 Implemented tool names:
 

@@ -1,13 +1,108 @@
 {
   "tokenizer": "gpt-tokenizer 4.0.0 GPT-5/o200k",
   "profiles": {
-    "review": { "maximum": 3100, "workspace": false },
-    "convert": { "maximum": 1800, "workspace": false },
-    "structure": { "maximum": 4250, "workspace": false },
-    "workspace": { "maximum": 6600, "workspace": true },
-    "all": { "maximum": 7250, "workspace": false }
+    "review": {
+      "maximum": 3100,
+      "workspace": false,
+      "tools": [
+        "carve_lint",
+        "carve_diagnose_and_fix",
+        "carve_format",
+        "carve_render",
+        "carve_check_targets"
+      ]
+    },
+    "convert": {
+      "maximum": 1800,
+      "workspace": false,
+      "tools": [
+        "carve_lint",
+        "carve_render",
+        "carve_check_targets",
+        "carve_migrate"
+      ]
+    },
+    "structure": {
+      "maximum": 4250,
+      "workspace": false,
+      "tools": [
+        "carve_lint",
+        "carve_parse",
+        "carve_create_ast_patch",
+        "carve_apply_ast_patch",
+        "carve_select_ast_nodes",
+        "carve_plan_ast_edit",
+        "carve_create_reversible_ast_patch",
+        "carve_apply_reversible_ast_patch"
+      ]
+    },
+    "workspace": {
+      "maximum": 6600,
+      "workspace": true,
+      "tools": [
+        "carve_lint",
+        "carve_diagnose_and_fix",
+        "carve_format",
+        "carve_render",
+        "carve_check_targets",
+        "carve_read_file",
+        "carve_list_files",
+        "carve_review_workspace",
+        "carve_reference_graph",
+        "carve_prepare_edit",
+        "carve_prepare_workspace_edits",
+        "carve_workspace_info",
+        "carve_write_file"
+      ]
+    },
+    "all": {
+      "maximum": 7250,
+      "workspace": false,
+      "tools": [
+        "carve_lint",
+        "carve_diagnose_and_fix",
+        "carve_format",
+        "carve_render",
+        "carve_check_targets",
+        "carve_parse",
+        "carve_create_ast_patch",
+        "carve_apply_ast_patch",
+        "carve_select_ast_nodes",
+        "carve_plan_ast_edit",
+        "carve_create_reversible_ast_patch",
+        "carve_apply_reversible_ast_patch",
+        "carve_migrate"
+      ]
+    }
   },
   "scenarios": {
-    "all-workspace": { "profile": "all", "maximum": 10750, "workspace": true }
+    "all-workspace": {
+      "profile": "all",
+      "maximum": 10750,
+      "workspace": true,
+      "tools": [
+        "carve_lint",
+        "carve_diagnose_and_fix",
+        "carve_format",
+        "carve_render",
+        "carve_check_targets",
+        "carve_parse",
+        "carve_create_ast_patch",
+        "carve_apply_ast_patch",
+        "carve_select_ast_nodes",
+        "carve_plan_ast_edit",
+        "carve_create_reversible_ast_patch",
+        "carve_apply_reversible_ast_patch",
+        "carve_migrate",
+        "carve_read_file",
+        "carve_list_files",
+        "carve_review_workspace",
+        "carve_reference_graph",
+        "carve_prepare_edit",
+        "carve_prepare_workspace_edits",
+        "carve_workspace_info",
+        "carve_write_file"
+      ]
+    }
   }
 }
