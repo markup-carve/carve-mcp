@@ -4,6 +4,7 @@ use std::process::ExitCode;
 use rmcp::ServiceExt;
 
 mod config;
+mod preservation;
 mod resources;
 mod server;
 mod workspace;

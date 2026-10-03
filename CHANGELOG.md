@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- Assess table preservation in `carve_check_targets`. Non-HTML profiles now report `lossy` when table structure degrades, even if the engine reports zero render losses. Results declare their assessment scope.
+
 ## 0.1.6 - 2026-10-01
 
 ### Fixed

@@ -40,6 +40,24 @@ The server has no filesystem access unless you explicitly give it a workspace
 root. That also governs `{{ path }}` includes, which stay literal until a call
 names a configured root. See [Include expansion](docs/development.md#include-expansion).
 
+### Compatibility assessment scope
+
+`carve_check_targets` reports render losses and table-preservation
+diagnostics separately. A target is `lossy` if either assessment finds a change.
+Merged cells and caption associations can therefore require review even when
+the pinned engine returns zero render losses. Table diagnostics name the AST
+node path and affected field.
+
+Each result includes `assessmentScope` and a `preservation` report with
+`complete: false`, checked fields, and unchecked boundaries. A `compatible`
+result means the declared checks found no issue. It does not certify every
+semantic property, host behavior, or source spelling. The PDF profile assesses
+the HTML stage only; it does not check the final PDF.
+
+The server bundles the `table-structure-v1` assessment so these checks work
+with its published, pinned engine. Keep its contract aligned with the
+JavaScript engine's preservation API when extending the checked fields.
+
 ## Resources
 
 - `carve://guide` is a concise authoring quick start.
@@ -77,3 +95,5 @@ For local builds, workspace access, native binaries, HTTP and container
 deployment, and contributor checks, see [Development and deployment](docs/development.md).
 
 This project is licensed under the MIT License.
+
+Table alignment checks treat an unset alignment as left alignment. Host CSS and default header styling are outside the assessment.
