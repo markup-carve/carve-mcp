@@ -53,6 +53,14 @@ const everyPositionAst = { type: 'document', srcByteLength: 0, children: [{ type
 const cellBlocksAst = { type: 'document', children: [{ type: 'table', rows: [{ type: 'table_row', cells: [{ type: 'table_cell', header: false, blocks: [{ type: 'paragraph', children: [{ type: 'text', value: 'in cell' }] }] }] }] }, { type: 'paragraph', children: [{ type: 'text', value: 'after' }] }], srcByteLength: 0 };
 
 const calls = [
+  ['carve_check_targets', { source: '|> 1 | 2 |\n| 3 | 4 |\n', targets:['markdown'] }],
+  ['carve_check_targets', { source: '|=> A |\n| 1 |\n|=< B |\n', targets:['markdown'] }],
+  ['carve_check_targets', { source: '|= A | B |\n'.repeat(101), targets:['markdown'] }],
+  ['carve_check_targets', { source: '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n', targets:['html','markdown','github','pdf'] }],
+  ['carve_check_targets', { source: '| 1 | 2 |\n|= A |= B |\n', targets:['markdown'] }],
+  ['carve_check_targets', { source: '|=> A |= B |\n|=< C |= D |\n| 1 | 2 |\n', targets:['markdown'] }],
+  ['carve_check_targets', { source: '|= A |= B |\n| 1 | 2 |\n', targets:['ansi'] }],
+
   ['carve_format', { source: '# Hello' }],
   ['carve_render', { source: '# Héllo', target: 'html', preset: 'portable' }],
   ['carve_render', { source: 'Visit https://example.com', target: 'html', extensions: ['autolink'] }],

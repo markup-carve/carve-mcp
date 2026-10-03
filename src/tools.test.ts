@@ -270,3 +270,15 @@ describe('Carve operations', () => {
   });
   it('rejects oversized input', () => expect(() => validateSource('x'.repeat(MAX_SOURCE_BYTES + 1))).toThrow(/limit/));
 });
+
+
+describe('table preservation in compatibility results', () => {
+  it('rejects flattened spans even when the pinned engine reports no render losses', () => {
+    const source = '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n';
+    const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
+    expect(result.compatible).toBe(false);
+    expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
+    expect(result.targets[1]).toMatchObject({ lossCount: 0, preservation: { totalDiagnostics: 3, complete: false } });
+    expect(result.targets[3]?.assessmentScope.finalArtifact).toContain('HTML stage only');
+  });
+});

@@ -1,5 +1,7 @@
+import { carveToAstJson } from '@markup-carve/carve';
+import { assessTablePreservation } from './table-preservation.js';
 import type { LintPlatform } from '@markup-carve/carve';
-import { lint, render, type RenderTarget } from './tools.js';
+import { lint, render, validateSource, type RenderTarget } from './tools.js';
 
 export type CompatibilityTarget = 'html' | 'markdown' | 'plain' | 'ansi' | 'github' | 'wordpress' | 'pdf';
 
@@ -16,16 +18,22 @@ const TARGETS: Record<CompatibilityTarget, { render: RenderTarget; platforms: Li
 export function compatibilityMatrix(source: string, targets: CompatibilityTarget[]) {
   if (targets.length < 1 || targets.length > 7) throw new Error('targets must contain between 1 and 7 items.');
   const selected = [...new Set(targets)];
+  validateSource(source);
+  const ast = carveToAstJson(source);
   const results = selected.map((target) => {
     const profile = TARGETS[target];
     const rendered = render(source, profile.render);
     const diagnosed = lint(source, profile.platforms);
-    const status = rendered.totalLosses > 0 ? 'lossy' : diagnosed.warningCount > 0 ? 'warning' : 'compatible';
+    const preservation = assessTablePreservation(ast, profile.render);
+    const status = rendered.totalLosses > 0 || preservation.totalDiagnostics > 0 ? 'lossy' : diagnosed.warningCount > 0 ? 'warning' : 'compatible';
     const suggestions = [
       ...(rendered.totalLosses > 0 ? ['Inspect the reported render losses and choose a target-specific fallback.'] : []),
+      ...(preservation.totalDiagnostics > 0 ? ['Inspect the table preservation diagnostics before accepting this projection.'] : []),
       ...(diagnosed.warningCount > 0 ? [`Resolve the ${target === 'github' ? 'target-specific' : 'general'} lint warnings before publishing.`] : []),
     ];
     return { target, renderTarget: profile.render, status, note: profile.note,
+      preservation,
+      assessmentScope: { renderLosses: 'Only events in the engine render-loss schema.', tablePreservation: 'Declared table fields only; a clean report is not a general preservation guarantee.', finalArtifact: target === 'pdf' ? 'Not assessed: HTML stage only.' : 'Host behavior is not assessed.' },
       warningCount: diagnosed.warningCount, warnings: diagnosed.warnings,
       lossCount: rendered.totalLosses, losses: rendered.losses, lossesTruncated: rendered.truncated, suggestions };
   });
