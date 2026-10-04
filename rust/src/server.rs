@@ -2689,6 +2689,13 @@ impl CarveServer {
                 selected.push(target);
             }
         }
+        let ast: Value = match serde_json::from_str(&carve::to_json_with_options(
+            &input.source,
+            &Options::default(),
+        )) {
+            Ok(ast) => ast,
+            Err(error) => return Self::error(error.to_string()),
+        };
         let mut results = Vec::new();
         for target in selected {
             let (name, render_target, github, note) = match target {
@@ -2769,17 +2776,24 @@ impl CarveServer {
                 if github { &[LintPlatform::Github] } else { &[] },
             );
             let loss_count = rendered.total_losses;
-            let status = if loss_count > 0 {
-                "lossy"
-            } else if warnings.is_empty() {
-                "compatible"
-            } else {
-                "warning"
-            };
+            let preservation = crate::preservation::assess(&ast, render_target.as_str());
+            let status =
+                if loss_count > 0 || preservation["totalDiagnostics"].as_u64().unwrap_or(0) > 0 {
+                    "lossy"
+                } else if warnings.is_empty() {
+                    "compatible"
+                } else {
+                    "warning"
+                };
             let mut suggestions = Vec::new();
             if loss_count > 0 {
                 suggestions.push(
                     "Inspect the reported render losses and choose a target-specific fallback.",
+                );
+            }
+            if preservation["totalDiagnostics"].as_u64().unwrap_or(0) > 0 {
+                suggestions.push(
+                    "Inspect the table preservation diagnostics before accepting this projection.",
                 );
             }
             if !warnings.is_empty() {
@@ -2789,7 +2803,7 @@ impl CarveServer {
                     "Resolve the general lint warnings before publishing."
                 });
             }
-            results.push(json!({"target":name,"renderTarget":render_target.as_str(),"status":status,"note":note,"warningCount":warnings.len(),"warnings":warnings,"lossCount":loss_count,"losses":rendered.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"lossesTruncated":rendered.truncated,"suggestions":suggestions}));
+            results.push(json!({"target":name,"renderTarget":render_target.as_str(),"status":status,"note":note,"preservation":preservation,"assessmentScope":{"renderLosses":"Only events in the engine render-loss schema.","tablePreservation":"Declared table fields only; a clean report is not a general preservation guarantee.","finalArtifact":if name == "pdf" { "Not assessed: HTML stage only." } else { "Host behavior is not assessed." }},"warningCount":warnings.len(),"warnings":warnings,"lossCount":loss_count,"losses":rendered.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),"lossesTruncated":rendered.truncated,"suggestions":suggestions}));
         }
         let compatible = results
             .iter()
