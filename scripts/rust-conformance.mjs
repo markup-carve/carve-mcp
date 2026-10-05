@@ -53,6 +53,10 @@ const rubyAst = { type: 'document', children: [{ type: 'paragraph', children: [{
 const everyPositionAst = { type: 'document', srcByteLength: 0, children: [{ type: 'admonition', kind: 'note', title: [{ type: 'text', value: 'TITLE' }], children: [{ type: 'paragraph', children: [{ type: 'text', value: 'CHILDREN' }] }] }, { type: 'list', ordered: false, tight: true, items: [{ type: 'list_item', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'ITEMS' }] }] }] }, { type: 'table', rows: [{ type: 'table_row', cells: [{ type: 'table_cell', header: false, children: [{ type: 'text', value: 'CELLS' }] }, { type: 'table_cell', header: false, blocks: [{ type: 'paragraph', children: [{ type: 'text', value: 'BLOCKS' }] }] }] }] }, { type: 'figure', target: { type: 'paragraph', children: [{ type: 'text', value: 'TARGET' }] }, caption: [{ type: 'text', value: 'CAPTION' }], shortCaption: [{ type: 'text', value: 'SHORTCAPTION' }] }, { type: 'block_extension', name: 'org.example.diagram', fallback: { type: 'paragraph', children: [{ type: 'text', value: 'FALLBACK' }] }, payload: { format: 'text/plain', value: 'x' } }, { type: 'paragraph', children: [{ type: 'inline_footnote', inline: [{ type: 'text', value: 'INLINE' }] }, { type: 'inline_extension', name: 'org.example.badge', content: [{ type: 'text', value: 'CONTENT' }] }, { type: 'citation_group', raw: '[@key]', items: [{ type: 'citation', key: 'key', suppressAuthor: false, prefix: [{ type: 'text', value: 'PREFIX' }], locator: [{ type: 'text', value: 'LOCATOR' }], suffix: [{ type: 'text', value: 'SUFFIX' }] }] }, { type: 'substitution', old: [{ type: 'text', value: 'OLD' }], new: [{ type: 'text', value: 'NEW' }] }, { type: 'ruby', pairs: [{ base: [{ type: 'text', value: 'BASE' }], annotation: [{ type: 'text', value: 'ANNOTATION' }] }] }] }] };
 const cellBlocksAst = { type: 'document', children: [{ type: 'table', rows: [{ type: 'table_row', cells: [{ type: 'table_cell', header: false, blocks: [{ type: 'paragraph', children: [{ type: 'text', value: 'in cell' }] }] }] }] }, { type: 'paragraph', children: [{ type: 'text', value: 'after' }] }], srcByteLength: 0 };
 
+// CRLF, a non-canonical list marker gap, and characters outside the BMP: the
+// engine counts positions in code points, the tool reports UTF-8 bytes.
+const blockSource = '# Héllo 😀\r\n\r\nPära 😀 one\r\n\r\n{#steps}\r\n-   item 😀\r\n-   two\r\n\r\n## Sub\r\n\r\nx\r\n\r\n# Next\r\n\r\ntail';
+
 const calls = [
   ['carve_check_targets', { source: '|> 1 | 2 |\n| 3 | 4 |\n', targets:['markdown'] }],
   ['carve_check_targets', { source: '|=> A |\n| 1 |\n|=< B |\n', targets:['markdown'] }],
@@ -82,6 +86,13 @@ const calls = [
   ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'text' } }],
   ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'paragraph' } }],
   ['carve_select_ast_nodes', { ast: everyPositionAst, selector: { kind: 'node-type', value: 'text' } }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'node-type', value: 'paragraph' } }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'id', value: 'steps' } }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'heading-id', value: 'Héllo-😀' }, scope: 'section' }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'heading-id', value: 'Sub' }, scope: 'section', includeAst: true }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'id', value: 'steps' }, scope: 'section' }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'id', value: 'missing' } }],
+  ['carve_get_block', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1/children/0' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'replace-text', text: 'After' } }],
   ['carve_plan_ast_edit', { source: '{#intro}\nOpening.\n\n{#box}\n::: note\nInside.\n:::\n', selector: { kind: 'id', value: 'intro' }, edit: { kind: 'replace-text', text: 'Rewritten.' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'rename-heading-id', id: 'intro' } }],
@@ -106,6 +117,7 @@ const calls = [
   ['carve_create_reversible_ast_patch', { before: keyValueBeforeAst, after: keyValueAfterAst }],
   ['carve_apply_reversible_ast_patch', { source: '# Before', patch: reversibleHeadingPatch, inverse: false }],
   ['carve_apply_reversible_ast_patch', { source: '# After', patch: reversibleHeadingPatch, inverse: true }],
+  ['carve_apply_reversible_ast_patch', { source: '# Before', patch: reversibleHeadingPatch, inverse: false, includeAst: true }],
   ['carve_apply_reversible_ast_patch', { source: '# Before', patch: { ...reversibleHeadingPatch, forward: [] }, inverse: false }],
   ['carve_apply_reversible_ast_patch', { source: '# Before', patch: { ...reversibleHeadingPatch, inverse: [] }, inverse: false }],
   ['carve_apply_ast_patch', { ast: beforeAst, operations: headingPatch }],
@@ -279,6 +291,8 @@ async function workspaceResults(command, args) {
   await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).filter((name) => name.includes('workspace') || name.includes('file') || name === 'carve_prepare_edit').sort();
+    const schemas = (await client.listTools()).tools.filter(({ name }) => ['carve_get_block', 'carve_plan_ast_edit', 'carve_apply_reversible_ast_patch'].includes(name))
+      .map(({ name, inputSchema }) => ({ name, inputSchema: schemaContract(inputSchema) })).sort((a, b) => a.name.localeCompare(b.name));
     const output = [];
     const calls = [
       ['carve_workspace_info', {}],
@@ -287,13 +301,19 @@ async function workspaceResults(command, args) {
       ['carve_read_file', { rootIndex: 0, path: 'index.crv' }],
       ['carve_prepare_edit', { rootIndex: 0, path: 'index.crv' }],
       ['carve_prepare_workspace_edits', { rootIndex: 0, maxDiffBytes: 1000 }],
+      ['carve_get_block', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'node-type', value: 'list' } }],
+      ['carve_get_block', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'heading-id', value: 'Mixed' }, scope: 'section' }],
+      ['carve_get_block', { rootIndex: 0, path: 'mixed.crv', source: '# x', selector: { kind: 'node-type', value: 'list' } }],
+      ['carve_get_block', { rootIndex: 0, path: 'notes.md', selector: { kind: 'node-type', value: 'list' } }],
+      ['carve_plan_ast_edit', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'heading-id', value: 'Mixed' }, edit: { kind: 'replace-text', text: 'Renamed' } }],
+      ['carve_apply_reversible_ast_patch', { rootIndex: 0, path: 'index.crv', patch: { version: 1, forward: [], inverse: [], beforeFingerprint: 'fnv1a64:0000000000000000', afterFingerprint: 'fnv1a64:0000000000000000' } }],
     ];
     if (names.includes('carve_write_file')) calls.push(['carve_write_file', { rootIndex: 0, path: 'new.crv', content: '# New', dryRun: true }]);
     for (const [name, arguments_] of calls) {
       const result = await client.callTool({ name, arguments: arguments_ });
-      output.push({ name, isError: result.isError ?? false, value: result.structuredContent });
+      output.push({ name, isError: result.isError ?? false, value: result.structuredContent ?? JSON.parse(result.content[0].text) });
     }
-    return { names, output };
+    return { names, schemas, output };
   } finally {
     await client.close();
   }

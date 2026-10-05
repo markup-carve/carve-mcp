@@ -193,6 +193,44 @@ document, so prefer it over an AST path when the source has one:
   "edit": { "kind": "replace-text", "text": "Prices include VAT." } }
 ```
 
+### Reading one block
+
+`carve_get_block` takes the same selectors and returns the source text of each
+match instead of an AST. Each block carries its AST path, node type, identity,
+UTF-8 byte range, and line range, and the result carries the sha256 of the
+whole source. The text is the authored bytes: CRLF line endings, tabs, and
+spacing such as `-   item` come back unchanged. A block attribute line such as
+`{#id}` sits outside the node's range. Pass `includeAst: true` to also get each
+matched node's AST.
+
+With `scope: "section"`, a heading's range runs to the end of the last node
+before the next heading of the same or a higher level in the same container.
+Blank lines after the section and the next heading's attribute line stay
+outside it.
+
+```json
+{ "rootIndex": 0, "path": "guide.crv",
+  "selector": { "kind": "id", "value": "pricing-note" } }
+```
+
+The engine reports positions in Unicode code points; the tool converts them to
+UTF-8 bytes, the unit every source patch in this server uses.
+
+### Workspace files instead of inline source
+
+When the server has a `--root`, `carve_get_block`, `carve_plan_ast_edit`, and
+`carve_apply_reversible_ast_patch` accept `rootIndex` and `path` in place of
+`source`. The file must be `.crv` or `.carve`. Passing both forms is an error.
+Path-based results include the file's `sha256`, which `carve_write_file` takes
+as `expectedSha256`. Without a root, these tools advertise only `source`, and it
+stays required.
+
+`carve_apply_reversible_ast_patch` no longer returns the patched AST by
+default. Pass `includeAst: true` when a caller needs it; the canonical source
+and the source patch are always returned.
+
+### Planning an edit
+
 For a review-first edit, `carve_plan_ast_edit` combines the current source, one
 selector, and one intent. It refuses zero or multiple matches and returns a
 reversible AST patch plus the narrowest stale-guarded source replacement. The

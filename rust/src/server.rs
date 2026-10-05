@@ -23,11 +23,15 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{resources, workspace::Workspace};
+use crate::{
+    blocks::{BlockScope, get_blocks, sha256_text},
+    resources,
+    workspace::Workspace,
+};
 
 pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
 const MAX_AST_PATCH_OPERATIONS: usize = 1_000;
-const MAX_AST_SELECTOR_MATCHES: usize = 100;
+pub(crate) const MAX_AST_SELECTOR_MATCHES: usize = 100;
 const MAX_SEMANTIC_EDIT_STEPS: usize = 100;
 // Every field the AST schema puts nodes in, in the engine's own order (its
 // `CHILD_FIELDS` in `dist/ast-sidecars.js`). Kept identical to
@@ -134,7 +138,7 @@ fn attribute_id(record: &serde_json::Map<String, Value>) -> Option<&str> {
     record.get("attrs")?.as_object()?.get("id")?.as_str()
 }
 
-fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, Value>)> {
+pub(crate) fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, Value>)> {
     fn visit<'a>(
         value: &'a Value,
         path: String,
@@ -163,7 +167,7 @@ fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, V
     nodes
 }
 
-fn selector_matches(
+pub(crate) fn selector_matches(
     path: &str,
     node: &serde_json::Map<String, Value>,
     selector: &AstSelectorInput,
@@ -183,6 +187,13 @@ fn selector_matches(
             node.get("type").and_then(Value::as_str) == Some(selector.value.as_str())
         }
     }
+}
+
+pub(crate) fn ast_identity(node: &serde_json::Map<String, Value>) -> Option<String> {
+    node_identity(node)
+        .or_else(|| attribute_id(node))
+        .map(|value| human_text(value, 80))
+        .filter(|value| !value.is_empty())
 }
 
 fn ast_match(path: String, node: &serde_json::Map<String, Value>) -> Value {
@@ -784,6 +795,7 @@ struct SemanticAstEditPlanOutputSchema {
     steps: Vec<SemanticAstEditStepOutputSchema>,
     reversible_patch: ReversibleAstPatchOutputSchema,
     source_patch: SourcePatchOutputSchema,
+    sha256: Option<String>,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -803,9 +815,20 @@ struct SemanticAstEditStepOutputSchema {
 #[serde(rename_all = "camelCase")]
 struct ReversibleAstPatchApplyOutputSchema {
     direction: String,
-    ast: Value,
+    ast: Option<Value>,
     source: String,
     source_patch: SourcePatchOutputSchema,
+    sha256: Option<String>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct BlockOutputSchema {
+    sha256: String,
+    source_bytes: i64,
+    match_count: i64,
+    blocks: Vec<Value>,
+    truncated: bool,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1174,7 +1197,7 @@ struct ReversibleAstPatchInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
-enum AstSelectorKind {
+pub(crate) enum AstSelectorKind {
     Id,
     HeadingId,
     FootnoteLabel,
@@ -1214,10 +1237,10 @@ struct SemanticAstEditStepInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct AstSelectorInput {
-    kind: AstSelectorKind,
+pub(crate) struct AstSelectorInput {
+    pub(crate) kind: AstSelectorKind,
     #[schemars(length(min = 1, max = 4096))]
-    value: String,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1228,9 +1251,20 @@ struct AstSelectInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct SemanticAstEditPlanInput {
+    #[serde(default)]
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
-    source: String,
+    source: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Workspace root holding path; use instead of source."
+    )]
+    root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = ".crv or .carve file inside that root.")]
+    path: Option<String>,
     selector: AstSelectorInput,
     edit: SemanticAstEditInput,
     #[serde(default)]
@@ -1243,9 +1277,20 @@ struct SemanticAstEditPlanInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct ReversibleAstPatchApplyInput {
+    #[serde(default)]
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
-    source: String,
+    source: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Workspace root holding path; use instead of source."
+    )]
+    root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = ".crv or .carve file inside that root.")]
+    path: Option<String>,
     #[schemars(
         description = "Version 1 reversible AST patch (maximum 1000000 JSON bytes and 1000 operations per direction)"
     )]
@@ -1253,6 +1298,53 @@ struct ReversibleAstPatchApplyInput {
     #[serde(default)]
     #[schemars(default, description = "Apply inverse operations to undo the patch.")]
     inverse: bool,
+    #[serde(default)]
+    #[schemars(default, description = "Also return the patched AST.")]
+    include_ast: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GetBlockInput {
+    #[serde(default)]
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Workspace root holding path; use instead of source."
+    )]
+    root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = ".crv or .carve file inside that root.")]
+    path: Option<String>,
+    selector: AstSelectorInput,
+    #[serde(default = "default_block_scope")]
+    #[schemars(
+        default = "default_block_scope",
+        description = "section: a heading through its content, up to the next heading of the same or higher level."
+    )]
+    scope: BlockScope,
+    #[serde(default)]
+    #[schemars(default)]
+    include_ast: bool,
+}
+
+fn default_block_scope() -> BlockScope {
+    BlockScope::Node
+}
+
+/// Fields the document tools accept: inline `source`, or a workspace file.
+struct DocumentRequest<'a> {
+    source: Option<&'a str>,
+    root_index: Option<usize>,
+    path: Option<&'a str>,
+}
+
+struct DocumentSource {
+    source: String,
+    sha256: String,
+    from_file: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1855,6 +1947,7 @@ impl ToolProfile {
                     | "carve_create_ast_patch"
                     | "carve_apply_ast_patch"
                     | "carve_select_ast_nodes"
+                    | "carve_get_block"
                     | "carve_plan_ast_edit"
                     | "carve_create_reversible_ast_patch"
                     | "carve_apply_reversible_ast_patch"
@@ -1868,6 +1961,7 @@ impl ToolProfile {
                     | "carve_prepare_edit"
                     | "carve_prepare_workspace_edits"
                     | "carve_write_file"
+                    | "carve_get_block"
                     | "carve_lint"
                     | "carve_diagnose_and_fix"
                     | "carve_format"
@@ -1911,6 +2005,25 @@ impl CarveServer {
                 }
             }
             for name in [
+                "carve_get_block",
+                "carve_plan_ast_edit",
+                "carve_apply_reversible_ast_patch",
+            ] {
+                if let Some(route) = tools.map.get_mut(name) {
+                    let schema = std::sync::Arc::make_mut(&mut route.attr.input_schema);
+                    if let Some(Value::Object(properties)) = schema.get_mut("properties") {
+                        properties.remove("rootIndex");
+                        properties.remove("path");
+                    }
+                    let required = schema
+                        .entry("required")
+                        .or_insert_with(|| Value::Array(Vec::new()));
+                    if let Value::Array(required) = required {
+                        required.insert(0, json!("source"));
+                    }
+                }
+            }
+            for name in [
                 "carve_workspace_info",
                 "carve_read_file",
                 "carve_list_files",
@@ -1925,6 +2038,40 @@ impl CarveServer {
             tools.remove_route("carve_write_file");
         }
         Self { tools, workspace }
+    }
+
+    fn document_source(&self, request: DocumentRequest<'_>) -> Result<DocumentSource, String> {
+        let named = request.root_index.is_some() || request.path.is_some();
+        if let Some(source) = request.source {
+            if named {
+                return Err("Pass either source or rootIndex and path, not both.".into());
+            }
+            return Ok(DocumentSource {
+                source: source.to_owned(),
+                sha256: sha256_text(source),
+                from_file: false,
+            });
+        }
+        let (Some(workspace), Some(root_index), Some(path)) =
+            (self.workspace.as_ref(), request.root_index, request.path)
+        else {
+            return Err("Pass source, or rootIndex and path.".into());
+        };
+        let lower = path.to_lowercase();
+        if !lower.ends_with(".crv") && !lower.ends_with(".carve") {
+            return Err("Workspace document tools require a .crv or .carve file.".into());
+        }
+        let file = workspace.read(root_index, path)?;
+        let source = file["content"].as_str().unwrap_or_default().to_owned();
+        let sha256 = file["sha256"].as_str().unwrap_or_default().to_owned();
+        if sha256_text(&source) != sha256 {
+            return Err("Workspace file did not decode to its exact bytes.".into());
+        }
+        Ok(DocumentSource {
+            source,
+            sha256,
+            from_file: true,
+        })
     }
 
     fn checked(source: &str) -> Result<(), String> {
@@ -2012,6 +2159,10 @@ impl CarveServer {
             .or_else(|| {
                 (value.get("type").and_then(Value::as_str) == Some("document"))
                     .then(|| "Parsed the document successfully.".into())
+            })
+            .or_else(|| {
+                value.get("blocks").and_then(Value::as_array)?;
+                value.get("matchCount").and_then(Value::as_u64).map(|count| format!("Found {count} matching block{}.", if count == 1 { "" } else { "s" }))
             })
             .or_else(|| {
                 value.get("matchCount").and_then(Value::as_u64).map(|count| format!("Found {count} matching AST node{}.", if count == 1 { "" } else { "s" }))
@@ -3094,6 +3245,36 @@ impl CarveServer {
     }
 
     #[tool(
+        name = "carve_get_block",
+        title = "Get Carve source blocks",
+        description = "Return the exact source text of the nodes a selector matches, or a heading's section, with UTF-8 byte offsets and the source sha256. No AST unless includeAst.", output_schema = rmcp::handler::server::tool::schema_for_type::<BlockOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn get_block(&self, Parameters(input): Parameters<GetBlockInput>) -> CallToolResult {
+        let document = match self.document_source(DocumentRequest {
+            source: input.source.as_deref(),
+            root_index: input.root_index,
+            path: input.path.as_deref(),
+        }) {
+            Ok(document) => document,
+            Err(error) => return Self::error(error),
+        };
+        if let Err(error) = Self::checked(&document.source) {
+            return Self::error(error);
+        }
+        match get_blocks(
+            &document.source,
+            &input.selector,
+            input.scope,
+            input.include_ast,
+            Some(&document.sha256),
+        ) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(
         name = "carve_plan_ast_edit",
         title = "Plan a semantic AST edit",
         description = "Plan one or more atomic semantic AST edits and return a human-readable, reversible, stale-guarded source patch without writing the document.", output_schema = rmcp::handler::server::tool::schema_for_type::<SemanticAstEditPlanOutputSchema>(),
@@ -3103,7 +3284,16 @@ impl CarveServer {
         &self,
         Parameters(input): Parameters<SemanticAstEditPlanInput>,
     ) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) {
+        let document = match self.document_source(DocumentRequest {
+            source: input.source.as_deref(),
+            root_index: input.root_index,
+            path: input.path.as_deref(),
+        }) {
+            Ok(document) => document,
+            Err(error) => return Self::error(error),
+        };
+        let source = document.source.as_str();
+        if let Err(error) = Self::checked(source) {
             return Self::error(error);
         }
         if input.then.len() > MAX_SEMANTIC_EDIT_STEPS - 1 {
@@ -3111,7 +3301,7 @@ impl CarveServer {
                 "Semantic edit plan may contain at most {MAX_SEMANTIC_EDIT_STEPS} steps."
             ));
         }
-        let before_document = carve::parse(&input.source);
+        let before_document = carve::parse(source);
         let before_json = match carve::try_to_json(&before_document) {
             Ok(value) => value,
             Err(error) => return Self::error(error.to_string()),
@@ -3343,12 +3533,16 @@ impl CarveServer {
             "steps": steps,
             "reversiblePatch": reversible_patch,
             "sourcePatch": source_patch_with_kind(
-                &input.source,
+                source,
                 &rendered,
                 SourceEditKindOutputSchema::Refactor,
                 "semantic-ast-edit",
             ),
         });
+        let mut value = value;
+        if document.from_file {
+            value["sha256"] = json!(document.sha256);
+        }
         match serde_json::to_vec(&value) {
             Ok(bytes) if bytes.len() <= MAX_SOURCE_BYTES => Self::output(value),
             Ok(bytes) => Self::error(format!(
@@ -3436,7 +3630,16 @@ impl CarveServer {
         &self,
         Parameters(input): Parameters<ReversibleAstPatchApplyInput>,
     ) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) {
+        let document = match self.document_source(DocumentRequest {
+            source: input.source.as_deref(),
+            root_index: input.root_index,
+            path: input.path.as_deref(),
+        }) {
+            Ok(document) => document,
+            Err(error) => return Self::error(error),
+        };
+        let source = document.source.as_str();
+        if let Err(error) = Self::checked(source) {
             return Self::error(error);
         }
         if input.patch.version != 1 {
@@ -3494,7 +3697,7 @@ impl CarveServer {
             patch.after_fingerprint.clone()
         };
         let result =
-            carve::apply_reversible_ast_patch(&carve::parse(&input.source), &patch, input.inverse)
+            carve::apply_reversible_ast_patch(&carve::parse(source), &patch, input.inverse)
                 .map_err(|error| error.to_string())
                 .and_then(|document| {
                     let actual = carve::create_reversible_ast_patch(&document, &document)
@@ -3530,7 +3733,7 @@ impl CarveServer {
                     Ok((ast, source))
                 });
         match result {
-            Ok((ast, source)) => match serde_json::from_str::<Value>(&ast) {
+            Ok((ast, output_source)) => match serde_json::from_str::<Value>(&ast) {
                 Ok(ast) => {
                     let direction = if input.inverse { "inverse" } else { "forward" };
                     let code = if input.inverse {
@@ -3539,14 +3742,19 @@ impl CarveServer {
                         "apply-structured-ast-patch"
                     };
                     let source_patch = source_patch_with_kind(
-                        &input.source,
-                        &source,
+                        document.source.as_str(),
+                        &output_source,
                         SourceEditKindOutputSchema::Refactor,
                         code,
                     );
-                    Self::output(
-                        json!({"direction": direction, "ast": ast, "source": source, "sourcePatch": source_patch}),
-                    )
+                    let mut value = json!({"direction": direction, "source": output_source, "sourcePatch": source_patch});
+                    if input.include_ast {
+                        value["ast"] = ast;
+                    }
+                    if document.from_file {
+                        value["sha256"] = json!(document.sha256);
+                    }
+                    Self::output(value)
                 }
                 Err(error) => Self::error(format!("AST serialization failed: {error}")),
             },
@@ -3975,6 +4183,7 @@ mod tests {
         };
         assert_eq!(names(ToolProfile::Convert).len(), 4);
         assert!(names(ToolProfile::Structure).contains(&"carve_plan_ast_edit".into()));
-        assert_eq!(names(ToolProfile::All).len(), 13);
+        assert!(names(ToolProfile::Structure).contains(&"carve_get_block".into()));
+        assert_eq!(names(ToolProfile::All).len(), 14);
     }
 }

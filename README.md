@@ -19,12 +19,16 @@ default and can be enabled for explicitly configured document roots.
 - `carve_select_ast_nodes` finds any block or inline node by its `{#id}`,
   headings, footnotes, node types, or a current AST path without making an
   ambiguous selection for the caller.
+- `carve_get_block` returns the exact source text of the nodes a selector
+  matches, or a heading's whole section, with UTF-8 byte offsets and the
+  source sha256. It reads a workspace file by path when a root is configured.
 - `carve_plan_ast_edit` turns one or more exact semantic matches and small edit
   intents into one explained, reversible source patch for approval.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic
   stale-edit fingerprints.
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations
-  as a guarded UTF-8 source edit.
+  as a guarded UTF-8 source edit. The patched AST is returned only with
+  `includeAst: true`.
 - `carve_migrate` converts HTML, Markdown, Djot, or BBCode and reports version 2 migration fidelity.
 - `carve_reference_graph` indexes cross-document headings, footnotes, abbreviations, links, and images, including broken edges and orphaned definitions (when workspace access is enabled).
 

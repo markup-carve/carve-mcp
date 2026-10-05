@@ -12,6 +12,7 @@ import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
 import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
+import { getBlocks, sha256Text } from './blocks.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { buildReferenceGraph } from './reference-graph.js';
 import { compatibilityMatrix } from './compatibility.js';
@@ -63,7 +64,7 @@ const reversiblePatchSchema = z.object({ version: z.number().int().min(0).max(25
   beforeFingerprint: z.string(), afterFingerprint: z.string(), changes: z.array(patchChangeOutput).optional() }).strict();
 const reversibleAstPatchOutput = z.object({ version: z.number().int(), forward: z.array(z.unknown()), inverse: z.array(z.unknown()),
   beforeFingerprint: z.string(), afterFingerprint: z.string(), changes: z.array(patchChangeOutput) }).loose();
-const reversibleAstPatchApplyOutput = z.object({ direction: z.enum(['forward', 'inverse']), ast: z.unknown(), source: z.string(), sourcePatch: sourcePatchOutput }).loose();
+const reversibleAstPatchApplyOutput = z.object({ direction: z.enum(['forward', 'inverse']), ast: z.unknown().optional(), source: z.string(), sourcePatch: sourcePatchOutput, sha256: z.string().optional() }).loose();
 const astSelector = z.object({ kind: z.enum(['id', 'heading-id', 'footnote-label', 'node-type', 'ast-path']), value: z.string().min(1).max(4096) }).strict();
 const astSelectionOutput = z.object({ selector: astSelector, matchCount: z.number().int(), matches: z.array(z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose()), truncated: z.boolean() }).loose();
 const semanticEditKind = z.enum(['replace-text', 'rename-heading-id', 'delete-node', 'replace-node', 'insert-before', 'insert-after']);
@@ -76,8 +77,11 @@ const semanticEditPlanOutput = z.object({
   match: z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose(),
   notices: z.array(z.string()),
   editCount: z.number().int(), steps: z.array(semanticEditStepOutput),
-  reversiblePatch: reversibleAstPatchOutput, sourcePatch: sourcePatchOutput,
+  reversiblePatch: reversibleAstPatchOutput, sourcePatch: sourcePatchOutput, sha256: z.string().optional(),
 }).loose();
+const blockOutput = z.object({ sha256: z.string(), sourceBytes: z.number().int(), matchCount: z.number().int(),
+  blocks: z.array(z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), start: z.number().int(), end: z.number().int(),
+    startLine: z.number().int(), endLine: z.number().int(), source: z.string(), node: z.unknown().optional() }).loose()), truncated: z.boolean() }).loose();
 const migrationDiagnostic = z.object({
   code: z.string().min(1), message: z.string().min(1), severity: z.enum(['info', 'warning', 'error']),
   fidelity: z.enum(['preserved', 'normalized', 'degraded', 'dropped']), confidence: z.enum(['exact', 'inferred', 'fallback']),
@@ -107,6 +111,7 @@ function summary(value: unknown): string {
     if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
+    if (Array.isArray(record.blocks) && typeof record.matchCount === 'number') return `Found ${record.matchCount} matching block${record.matchCount === 1 ? '' : 's'}.`;
     if (typeof record.matchCount === 'number') return `Found ${record.matchCount} matching AST node${record.matchCount === 1 ? '' : 's'}.`;
     if (record.sourcePatch && record.match && record.edit) return typeof record.editCount === 'number' && record.editCount > 1
       ? `Planned ${record.editCount} atomic semantic edits; no file was changed.`
@@ -165,6 +170,27 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   // the handler sees undefined, and `includeScope` returns undefined, which is
   // the same literal-directive outcome as omitting them.
   const includeSettings = (workspace ? includeFields : {}) as typeof includeFields;
+  // With a root configured, a document tool may name a workspace file instead
+  // of carrying its text. Without one, `source` stays required.
+  const documentFields = (workspace ? {
+    source: sourceSchema.optional(),
+    rootIndex: z.number().int().min(0).optional().describe('Workspace root holding path; use instead of source.'),
+    path: z.string().min(1).optional().describe('.crv or .carve file inside that root.'),
+  } : { source: sourceSchema }) as { source: z.ZodOptional<typeof sourceSchema>; rootIndex: z.ZodOptional<z.ZodNumber>; path: z.ZodOptional<z.ZodString> };
+  const documentSource = async (input: { source?: string; rootIndex?: number; path?: string }) => {
+    const named = input.rootIndex !== undefined || input.path !== undefined;
+    if (input.source !== undefined) {
+      if (named) throw new Error('Pass either source or rootIndex and path, not both.');
+      return { source: input.source, sha256: sha256Text(input.source), fromFile: false };
+    }
+    if (!workspace || input.rootIndex === undefined || input.path === undefined) throw new Error('Pass source, or rootIndex and path.');
+    if (!['.crv', '.carve'].some((extension) => input.path!.toLowerCase().endsWith(extension))) throw new Error('Workspace document tools require a .crv or .carve file.');
+    const file = await workspace.read(input.rootIndex, input.path);
+    // The decoder drops a leading BOM; restore it so offsets and splices match the file bytes.
+    const source = sha256Text(file.content) === file.sha256 ? file.content : `\uFEFF${file.content}`;
+    if (sha256Text(source) !== file.sha256) throw new Error('Workspace file did not decode to its exact bytes.');
+    return { source, sha256: file.sha256, fromFile: true };
+  };
   if (workspace) {
     if (toolEnabled(toolProfile, 'carve_read_file')) server.registerTool('carve_read_file', {
       title: 'Read Carve workspace file',
@@ -381,14 +407,30 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     outputSchema: astSelectionOutput, annotations: readOnly,
   }, safe('carve_select_ast_nodes', observe, ({ ast, selector }) => selectAstNodes(ast, selector)));
 
+  if (toolEnabled(toolProfile, 'carve_get_block')) server.registerTool('carve_get_block', {
+    title: 'Get Carve source blocks',
+    description: "Return the exact source text of the nodes a selector matches, or a heading's section, with UTF-8 byte offsets and the source sha256. No AST unless includeAst.",
+    inputSchema: z.object({ ...documentFields, selector: astSelector,
+      scope: z.enum(['node', 'section']).default('node').describe('section: a heading through its content, up to the next heading of the same or higher level.'),
+      includeAst: z.boolean().default(false) }).strict(),
+    outputSchema: blockOutput, annotations: readOnly,
+  }, safe('carve_get_block', observe, async ({ selector, scope, includeAst, ...input }) => {
+    const document = await documentSource(input);
+    return getBlocks(document.source, selector, { scope, includeAst, sha256: document.sha256 });
+  }));
+
   if (toolEnabled(toolProfile, 'carve_plan_ast_edit')) server.registerTool('carve_plan_ast_edit', {
     title: 'Plan a semantic AST edit',
     description: 'Plan one or more atomic semantic AST edits and return a human-readable, reversible, stale-guarded source patch without writing the document.',
-    inputSchema: z.object({ source: sourceSchema, selector: astSelector, edit: semanticEdit,
+    inputSchema: z.object({ ...documentFields, selector: astSelector, edit: semanticEdit,
       then: z.array(semanticEditStep).max(MAX_SEMANTIC_EDIT_STEPS - 1).default([])
         .describe(`Additional atomic edits resolved against the original source (maximum ${MAX_SEMANTIC_EDIT_STEPS} total steps).`) }),
     outputSchema: semanticEditPlanOutput, annotations: readOnly,
-  }, safe('carve_plan_ast_edit', observe, ({ source, selector, edit, then }) => planSemanticAstEdit(source, selector, edit as SemanticAstEdit, then as SemanticAstEditStep[])));
+  }, safe('carve_plan_ast_edit', observe, async ({ selector, edit, then, ...input }) => {
+    const document = await documentSource(input);
+    const plan = planSemanticAstEdit(document.source, selector, edit as SemanticAstEdit, then as SemanticAstEditStep[]);
+    return document.fromFile ? { ...plan, sha256: document.sha256 } : plan;
+  }));
 
   if (toolEnabled(toolProfile, 'carve_create_reversible_ast_patch')) server.registerTool('carve_create_reversible_ast_patch', {
     title: 'Create reversible AST patch',
@@ -403,11 +445,16 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     title: 'Preview reversible AST patch as source edits',
     description: 'Verify a reversible AST patch against source, apply or undo it, and return a minimal stale-guarded UTF-8 source edit without writing files.',
     inputSchema: z.object({
-      source: sourceSchema,
+      ...documentFields,
       patch: reversiblePatchSchema.describe(`Version 1 reversible AST patch (maximum ${MAX_SOURCE_BYTES} JSON bytes and ${MAX_AST_PATCH_OPERATIONS} operations per direction)`),
       inverse: z.boolean().default(false).describe('Apply inverse operations to undo the patch.'),
+      includeAst: z.boolean().default(false).describe('Also return the patched AST.'),
     }), outputSchema: reversibleAstPatchApplyOutput, annotations: readOnly,
-  }, safe('carve_apply_reversible_ast_patch', observe, ({ source, patch, inverse }) => applyReversibleStructuredAstPatch(source, patch, inverse)));
+  }, safe('carve_apply_reversible_ast_patch', observe, async ({ patch, inverse, includeAst, ...input }) => {
+    const document = await documentSource(input);
+    const { ast, ...applied } = applyReversibleStructuredAstPatch(document.source, patch, inverse);
+    return { ...applied, ...(includeAst ? { ast } : {}), ...(document.fromFile ? { sha256: document.sha256 } : {}) };
+  }));
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
