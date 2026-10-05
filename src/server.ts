@@ -13,6 +13,7 @@ import type { ToolObserver } from './telemetry.js';
 import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
 import { getBlocks, sha256Text } from './blocks.js';
+import { replaceSource, SourceEditRefusal } from './splice.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { buildReferenceGraph } from './reference-graph.js';
 import { compatibilityMatrix } from './compatibility.js';
@@ -96,6 +97,10 @@ const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), con
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
 const writeOutput = z.object({ rootIndex: z.number().int(), path: z.string(), dryRun: z.boolean(), created: z.boolean(), currentSha256: z.string().nullable(), sha256: z.string(), bytes: z.number().int() }).loose();
+const sourceReplaceOutput = z.object({ match: z.object({ path: z.string(), type: z.string(), identity: z.string().optional() }).loose(),
+  sha256: z.string(), resultSha256: z.string(), start: z.number().int(), end: z.number().int(),
+  patch: z.object({ edits: z.array(z.unknown()) }).loose(), undoPatch: z.object({ edits: z.array(z.unknown()) }).loose(),
+  lint: z.object({ introduced: z.array(z.unknown()), resolved: z.array(z.unknown()) }), source: z.string().optional(), write: z.unknown().optional() }).loose();
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
@@ -111,6 +116,9 @@ function summary(value: unknown): string {
     if (typeof record.content === 'string' && typeof record.path === 'string') return `Read ${record.path}.`;
     if (typeof record.dryRun === 'boolean' && typeof record.path === 'string') return record.dryRun ? `Previewed the write to ${record.path}; no file changed.` : `Wrote ${record.path}.`;
     if (record.type === 'document') return 'Parsed the document successfully.';
+    if (record.undoPatch && record.lint && record.match) return record.write
+      ? `Replaced the ${String((record.match as Record<string, unknown>).type)} source and wrote the file.`
+      : `Prepared a byte-exact replacement for the ${String((record.match as Record<string, unknown>).type)} source; no file was changed.`;
     if (Array.isArray(record.blocks) && typeof record.matchCount === 'number') return `Found ${record.matchCount} matching block${record.matchCount === 1 ? '' : 's'}.`;
     if (typeof record.matchCount === 'number') return `Found ${record.matchCount} matching AST node${record.matchCount === 1 ? '' : 's'}.`;
     if (record.sourcePatch && record.match && record.edit) return typeof record.editCount === 'number' && record.editCount > 1
@@ -145,6 +153,7 @@ function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefin
     catch (error) {
       observeSafely(observe, { tool, status: 'error', durationMs: Math.round(performance.now() - started) });
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof SourceEditRefusal) return { ...result({ error: message, ...error.details }), isError: true };
       if (error instanceof RenderLossError) {
         return { ...result({ error: message, losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated }), isError: true };
       }
@@ -417,6 +426,29 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   }, safe('carve_get_block', observe, async ({ selector, scope, includeAst, ...input }) => {
     const document = await documentSource(input);
     return getBlocks(document.source, selector, { scope, includeAst, sha256: document.sha256 });
+  }));
+
+  // Only a server that may write offers dryRun and the destructive annotation.
+  const canWrite = workspace?.allowWrite === true;
+  const writeFields = (canWrite ? { dryRun: z.boolean().default(true).describe('With a path, false writes the result through the hash-guarded write.') } : {}) as { dryRun: z.ZodDefault<z.ZodBoolean> };
+  if (toolEnabled(toolProfile, 'carve_replace_source')) server.registerTool('carve_replace_source', {
+    title: 'Replace Carve source of one node',
+    description: 'Splice Carve text over the exact source bytes of one selected node or heading section, leaving every other byte untouched. Refuses if the node kind changes, the rest of the document parses differently, or new lint findings appear. Returns forward and undo patches.',
+    inputSchema: z.object({ ...documentFields, selector: astSelector,
+      scope: z.enum(['node', 'section']).default('node').describe('section: a heading through its content, up to the next heading of the same or higher level.'),
+      text: z.string().describe('Carve source that replaces the selected range.'),
+      expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional().describe('Source sha256 from carve_get_block; a mismatch refuses the edit.'),
+      includeSource: z.boolean().default(false).describe('Also return the whole edited source.'), ...writeFields }).strict(),
+    outputSchema: sourceReplaceOutput,
+    annotations: canWrite ? { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } : readOnly,
+  }, safe('carve_replace_source', observe, async ({ selector, scope, text, expectedSha256, includeSource, dryRun, ...input }) => {
+    const document = await documentSource(input);
+    const write = dryRun === false;
+    if (write && !document.fromFile) throw new Error('dryRun: false requires rootIndex and path.');
+    if (write && !expectedSha256) throw new Error('expectedSha256 is required when dryRun is false.');
+    const { output, result } = replaceSource(document.source, selector, text, { scope, expectedSha256, sha256: document.sha256, includeSource });
+    if (!write) return output;
+    return { ...output, write: await workspace!.write(input.rootIndex!, input.path!, result, document.sha256, false) };
   }));
 
   if (toolEnabled(toolProfile, 'carve_plan_ast_edit')) server.registerTool('carve_plan_ast_edit', {

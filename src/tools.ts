@@ -198,7 +198,7 @@ function attributeId(record: Record<string, unknown>): string | undefined {
   return typeof attrs?.id === 'string' ? attrs.id : undefined;
 }
 
-function astNodes(ast: AstJsonDocument) {
+export function astNodes(ast: AstJsonDocument) {
   const nodes: Array<{ path: string; node: Record<string, unknown> }> = [];
   const visit = (value: unknown, path: string): void => {
     if (!value || typeof value !== 'object') return;

@@ -23,7 +23,7 @@
       ]
     },
     "structure": {
-      "maximum": 4850,
+      "maximum": 5500,
       "workspace": false,
       "tools": [
         "carve_lint",
@@ -32,13 +32,14 @@
         "carve_apply_ast_patch",
         "carve_select_ast_nodes",
         "carve_get_block",
+        "carve_replace_source",
         "carve_plan_ast_edit",
         "carve_create_reversible_ast_patch",
         "carve_apply_reversible_ast_patch"
       ]
     },
     "workspace": {
-      "maximum": 7300,
+      "maximum": 8050,
       "workspace": true,
       "tools": [
         "carve_lint",
@@ -54,11 +55,12 @@
         "carve_prepare_workspace_edits",
         "carve_workspace_info",
         "carve_write_file",
-        "carve_get_block"
+        "carve_get_block",
+        "carve_replace_source"
       ]
     },
     "all": {
-      "maximum": 8050,
+      "maximum": 8700,
       "workspace": false,
       "tools": [
         "carve_lint",
@@ -71,6 +73,7 @@
         "carve_apply_ast_patch",
         "carve_select_ast_nodes",
         "carve_get_block",
+        "carve_replace_source",
         "carve_plan_ast_edit",
         "carve_create_reversible_ast_patch",
         "carve_apply_reversible_ast_patch",
@@ -81,7 +84,7 @@
   "scenarios": {
     "all-workspace": {
       "profile": "all",
-      "maximum": 11850,
+      "maximum": 12600,
       "workspace": true,
       "tools": [
         "carve_lint",
@@ -94,6 +97,7 @@
         "carve_apply_ast_patch",
         "carve_select_ast_nodes",
         "carve_get_block",
+        "carve_replace_source",
         "carve_plan_ast_edit",
         "carve_create_reversible_ast_patch",
         "carve_apply_reversible_ast_patch",

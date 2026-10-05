@@ -22,6 +22,11 @@ default and can be enabled for explicitly configured document roots.
 - `carve_get_block` returns the exact source text of the nodes a selector
   matches, or a heading's whole section, with UTF-8 byte offsets and the
   source sha256. It reads a workspace file by path when a root is configured.
+- `carve_replace_source` splices new Carve text over the exact bytes of one
+  selected node or heading section and leaves every other byte alone. It
+  refuses edits that change the node's kind, change how the rest of the
+  document parses, or add lint findings, returns forward and undo patches, and
+  can write the result through the hash-guarded workspace write.
 - `carve_plan_ast_edit` turns one or more exact semantic matches and small edit
   intents into one explained, reversible source patch for approval.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic
