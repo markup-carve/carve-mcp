@@ -130,6 +130,10 @@ fn node_identity(record: &serde_json::Map<String, Value>) -> Option<&str> {
     }
 }
 
+fn attribute_id(record: &serde_json::Map<String, Value>) -> Option<&str> {
+    record.get("attrs")?.as_object()?.get("id")?.as_str()
+}
+
 fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, Value>)> {
     fn visit<'a>(
         value: &'a Value,
@@ -166,6 +170,7 @@ fn selector_matches(
 ) -> bool {
     match selector.kind {
         AstSelectorKind::AstPath => path == selector.value,
+        AstSelectorKind::Id => attribute_id(node) == Some(selector.value.as_str()),
         AstSelectorKind::HeadingId => {
             node.get("type").and_then(Value::as_str) == Some("heading")
                 && node_identity(node) == Some(selector.value.as_str())
@@ -183,6 +188,7 @@ fn selector_matches(
 fn ast_match(path: String, node: &serde_json::Map<String, Value>) -> Value {
     let full_preview = human_text(&node_text(&Value::Object(node.clone())), 121);
     let identity = node_identity(node)
+        .or_else(|| attribute_id(node))
         .map(|value| human_text(value, 80))
         .filter(|value| !value.is_empty());
     serde_json::to_value(AstSelectorMatchOutputSchema {
@@ -1169,6 +1175,7 @@ struct ReversibleAstPatchInput {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 enum AstSelectorKind {
+    Id,
     HeadingId,
     FootnoteLabel,
     NodeType,
@@ -3017,7 +3024,7 @@ impl CarveServer {
     #[tool(
         name = "carve_select_ast_nodes",
         title = "Find AST nodes by semantic selector",
-        description = "Resolve a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstSelectionOutputSchema>(),
+        description = "Resolve an element ID on any node, a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstSelectionOutputSchema>(),
         annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     fn select_ast_nodes(&self, Parameters(input): Parameters<AstSelectInput>) -> CallToolResult {
@@ -3067,6 +3074,7 @@ impl CarveServer {
                         .unwrap_or_default()
                         .into(),
                     identity: node_identity(node)
+                        .or_else(|| attribute_id(node))
                         .map(|value| human_text(value, 80))
                         .filter(|value| !value.is_empty()),
                     preview,

@@ -80,6 +80,19 @@ describe('Carve operations', () => {
     expect(selectAstNodes(ast, { kind: 'footnote-label', value: 'n' })).toMatchObject({ matchCount: 1, matches: [{ type: 'footnote', identity: 'n' }] });
     expect(selectAstNodes(ast, { kind: 'node-type', value: 'heading' }).matchCount).toBe(2);
   });
+  it('selects any block by its author-written element ID', () => {
+    const source = '{#intro}\nOpening paragraph.\n\n{#box}\n::: note\nInside.\n:::\n\n{#snippet}\n```js\nx = 1\n```\n\n{#steps}\n- a\n- b\n\n{#grid}\n|= a |= b |\n| 1 | 2 |\n';
+    const ast = parse(source);
+    for (const [id, type, path] of [['intro', 'paragraph', '/children/0'], ['box', 'admonition', '/children/1'], ['snippet', 'code_block', '/children/2'], ['steps', 'list', '/children/3'], ['grid', 'table', '/children/4']]) {
+      expect(selectAstNodes(ast, { kind: 'id', value: id })).toMatchObject({ matchCount: 1, matches: [{ path, type, identity: id }] });
+      expect(selectAstNodes(ast, { kind: 'heading-id', value: id }).matchCount).toBe(0);
+    }
+    expect(selectAstNodes(parse('# Title'), { kind: 'id', value: 'Title' })).toMatchObject({ matchCount: 1, matches: [{ type: 'heading' }] });
+    expect(selectAstNodes(ast, { kind: 'id', value: 'missing' }).matchCount).toBe(0);
+    const plan = planSemanticAstEdit(source, { kind: 'id', value: 'intro' }, { kind: 'replace-text', text: 'Rewritten.' });
+    expect(plan.match).toMatchObject({ path: '/children/0', identity: 'intro' });
+    expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toBe(source.replace('Opening paragraph.', 'Rewritten.'));
+  });
   it('bounds selectors and reports empty, missing, and truncated results', () => {
     const source = Array.from({ length: 101 }, (_, index) => `# Heading ${index}`).join('\n\n');
     const selected = selectAstNodes(parse(source), { kind: 'node-type', value: 'heading' });

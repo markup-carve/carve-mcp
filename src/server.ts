@@ -64,7 +64,7 @@ const reversiblePatchSchema = z.object({ version: z.number().int().min(0).max(25
 const reversibleAstPatchOutput = z.object({ version: z.number().int(), forward: z.array(z.unknown()), inverse: z.array(z.unknown()),
   beforeFingerprint: z.string(), afterFingerprint: z.string(), changes: z.array(patchChangeOutput) }).loose();
 const reversibleAstPatchApplyOutput = z.object({ direction: z.enum(['forward', 'inverse']), ast: z.unknown(), source: z.string(), sourcePatch: sourcePatchOutput }).loose();
-const astSelector = z.object({ kind: z.enum(['heading-id', 'footnote-label', 'node-type', 'ast-path']), value: z.string().min(1).max(4096) }).strict();
+const astSelector = z.object({ kind: z.enum(['id', 'heading-id', 'footnote-label', 'node-type', 'ast-path']), value: z.string().min(1).max(4096) }).strict();
 const astSelectionOutput = z.object({ selector: astSelector, matchCount: z.number().int(), matches: z.array(z.object({ path: z.string(), type: z.string(), identity: z.string().optional(), preview: z.string(), previewTruncated: z.boolean() }).loose()), truncated: z.boolean() }).loose();
 const semanticEditKind = z.enum(['replace-text', 'rename-heading-id', 'delete-node', 'replace-node', 'insert-before', 'insert-after']);
 const semanticEdit = z.object({ kind: semanticEditKind, text: z.string().optional(), id: z.string().optional(), node: z.unknown().optional() }).strict();
@@ -376,7 +376,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_select_ast_nodes')) server.registerTool('carve_select_ast_nodes', {
     title: 'Find AST nodes by semantic selector',
-    description: 'Resolve a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.',
+    description: 'Resolve an element ID on any node, a heading ID, footnote label, node type, or current AST path to reviewable PART 12 AST paths without silently choosing among multiple matches.',
     inputSchema: z.object({ ast: z.unknown().describe(`PART 12 AST (maximum ${MAX_SOURCE_BYTES} JSON bytes)`), selector: astSelector }),
     outputSchema: astSelectionOutput, annotations: readOnly,
   }, safe('carve_select_ast_nodes', observe, ({ ast, selector }) => selectAstNodes(ast, selector)));
