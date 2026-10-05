@@ -146,7 +146,7 @@ function validateAst(value: unknown, label: string): AstJsonDocument {
   return value as AstJsonDocument;
 }
 
-export type AstSelector = { kind: 'heading-id' | 'footnote-label' | 'node-type' | 'ast-path'; value: string };
+export type AstSelector = { kind: 'id' | 'heading-id' | 'footnote-label' | 'node-type' | 'ast-path'; value: string };
 export type SemanticAstEdit =
   | { kind: 'replace-text'; text: string }
   | { kind: 'rename-heading-id'; id: string }
@@ -193,6 +193,11 @@ function nodeIdentity(record: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+function attributeId(record: Record<string, unknown>): string | undefined {
+  const attrs = record.attrs as Record<string, unknown> | undefined;
+  return typeof attrs?.id === 'string' ? attrs.id : undefined;
+}
+
 function astNodes(ast: AstJsonDocument) {
   const nodes: Array<{ path: string; node: Record<string, unknown> }> = [];
   const visit = (value: unknown, path: string): void => {
@@ -222,6 +227,7 @@ function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
   if (Array.from(selector.value).length > maximum) throw new Error(`Selector value may contain at most ${maximum} characters.`);
   return astNodes(ast).filter(({ path, node }) => {
     if (selector.kind === 'ast-path') return path === selector.value;
+    if (selector.kind === 'id') return attributeId(node) === selector.value;
     if (selector.kind === 'heading-id') return node.type === 'heading' && nodeIdentity(node) === selector.value;
     if (selector.kind === 'footnote-label') return node.type === 'footnote' && nodeIdentity(node) === selector.value;
     return node.type === selector.value;
@@ -231,7 +237,7 @@ function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
 function astMatch(path: string, node: Record<string, unknown>) {
     const fullPreview = humanText(nodeText(node, 121), 121);
     const preview = Array.from(fullPreview).slice(0, 120).join('');
-    const identity = nodeIdentity(node);
+    const identity = nodeIdentity(node) ?? attributeId(node);
     const displayIdentity = identity === undefined ? '' : humanText(identity);
     return {
       path, type: String(node.type), ...(displayIdentity ? { identity: displayIdentity } : {}),

@@ -182,6 +182,17 @@ silently chooses one when a selector is ambiguous. Treat the returned path as
 a resolved location for the current AST, not as a durable identifier across
 unrelated edits.
 
+The `id` selector matches any node whose attributes carry that ID: a paragraph,
+div, admonition, table, list, or code block marked with `{#id}`, a span, or a
+heading's explicit or generated ID. `heading-id` stays limited to headings.
+An author-written ID is the address that survives edits elsewhere in the
+document, so prefer it over an AST path when the source has one:
+
+```json
+{ "selector": { "kind": "id", "value": "pricing-note" },
+  "edit": { "kind": "replace-text", "text": "Prices include VAT." } }
+```
+
 For a review-first edit, `carve_plan_ast_edit` combines the current source, one
 selector, and one intent. It refuses zero or multiple matches and returns a
 reversible AST patch plus the narrowest stale-guarded source replacement. The

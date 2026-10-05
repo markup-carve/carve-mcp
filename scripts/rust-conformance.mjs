@@ -46,6 +46,7 @@ const keyValueAfterAst = { type: 'document', children: [{ type: 'paragraph', chi
 // port only as a client-supplied AST - which is exactly where the walk used to
 // stop short of them (markup-carve/carve-mcp#60). Three text nodes in the ruby
 // case, two in the table case, each with one outside the nested field.
+const idAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Intro' }], attrs: { id: 'intro' } }, { type: 'code_block', content: 'x\n', attrs: { id: 'snippet' } }], srcByteLength: 0 };
 const rubyAst = { type: 'document', children: [{ type: 'paragraph', children: [{ type: 'ruby', pairs: [{ base: [{ type: 'text', value: 'base' }], annotation: [{ type: 'text', value: 'anno' }] }] }, { type: 'text', value: 'after' }] }], srcByteLength: 0 };
 // One text node in each of the twenty fields the schema puts nodes in, named
 // after the field, so a port that drops a field shows which one.
@@ -74,12 +75,15 @@ const calls = [
   ['carve_create_ast_patch', { before: beforeAst, after: afterAst }],
   ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'heading-id', value: 'Before' } }],
   ['carve_select_ast_nodes', { ast: beforeAst, selector: { kind: 'ast-path', value: '/children/0' } }],
+  ['carve_select_ast_nodes', { ast: idAst, selector: { kind: 'id', value: 'snippet' } }],
+  ['carve_select_ast_nodes', { ast: idAst, selector: { kind: 'node-type', value: 'paragraph' } }],
   ['carve_select_ast_nodes', { ast: rubyAst, selector: { kind: 'node-type', value: 'text' } }],
   ['carve_select_ast_nodes', { ast: rubyAst, selector: { kind: 'node-type', value: 'ruby' } }],
   ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'text' } }],
   ['carve_select_ast_nodes', { ast: cellBlocksAst, selector: { kind: 'node-type', value: 'paragraph' } }],
   ['carve_select_ast_nodes', { ast: everyPositionAst, selector: { kind: 'node-type', value: 'text' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'replace-text', text: 'After' } }],
+  ['carve_plan_ast_edit', { source: '{#intro}\nOpening.\n\n{#box}\n::: note\nInside.\n:::\n', selector: { kind: 'id', value: 'intro' }, edit: { kind: 'replace-text', text: 'Rewritten.' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'rename-heading-id', id: 'intro' } }],
   ['carve_plan_ast_edit', { source: '# Title\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'delete-node' } }],
   ['carve_plan_ast_edit', { source: '# Title\n\nBody', selector: { kind: 'node-type', value: 'paragraph' }, edit: { kind: 'replace-node', node: { type: 'paragraph', children: [{ type: 'text', value: 'New' }] } } }],
