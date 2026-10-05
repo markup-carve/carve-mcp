@@ -128,7 +128,7 @@ export function parse(source: string, scope?: IncludeScope): AstJsonDocument & {
   return { ...toAstJson(resolveDocument(doc, { asciiHeadingIds: false })), includes };
 }
 
-function validateStructuredPayload(value: unknown, label: string): number {
+export function validateStructuredPayload(value: unknown, label: string): number {
   let serialized: string | undefined;
   try { serialized = JSON.stringify(value); }
   catch { throw new Error(`${label} must be JSON-serializable.`); }
@@ -221,7 +221,7 @@ export function selectAstNodes(value: unknown, selector: AstSelector) {
   return output;
 }
 
-function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
+export function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
   if (!selector.value) throw new Error('Selector value must not be empty.');
   const maximum = selector.kind === 'ast-path' ? 4096 : 256;
   if (Array.from(selector.value).length > maximum) throw new Error(`Selector value may contain at most ${maximum} characters.`);
@@ -234,11 +234,15 @@ function matchingAstNodes(ast: AstJsonDocument, selector: AstSelector) {
   });
 }
 
+export function astIdentity(node: Record<string, unknown>): string {
+  const identity = nodeIdentity(node) ?? attributeId(node);
+  return identity === undefined ? '' : humanText(identity);
+}
+
 function astMatch(path: string, node: Record<string, unknown>) {
     const fullPreview = humanText(nodeText(node, 121), 121);
     const preview = Array.from(fullPreview).slice(0, 120).join('');
-    const identity = nodeIdentity(node) ?? attributeId(node);
-    const displayIdentity = identity === undefined ? '' : humanText(identity);
+    const displayIdentity = astIdentity(node);
     return {
       path, type: String(node.type), ...(displayIdentity ? { identity: displayIdentity } : {}),
       preview, previewTruncated: Array.from(fullPreview).length > 120,
@@ -391,7 +395,7 @@ function applySemanticEdit(ast: AstJsonDocument, path: string, edit: SemanticAst
   }
 }
 
-function parentArrayLocation(ast: AstJsonDocument, path: string): { parent: unknown[]; index: number } | undefined {
+export function parentArrayLocation(ast: AstJsonDocument, path: string): { parent: unknown[]; index: number } | undefined {
   const separator = path.lastIndexOf('/');
   if (separator < 0) return undefined;
   const parent = valueAtPointer(ast, path.slice(0, separator));
