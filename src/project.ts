@@ -54,7 +54,13 @@ function lineColumn(source: string, offset: number) {
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 };
 }
 
-function headingIds(source: string): Set<string> {
+// Carve ids compare exactly (carve#2732). Markdown and Djot targets keep the
+// fold: their anchors follow their own renderer's slug rule, not Carve's.
+function foldsAnchors(path: string): boolean {
+  return !CARVE_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+function headingIds(source: string, fold: boolean): Set<string> {
   const ids = new Set<string>();
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) { value.forEach(walk); return; }
@@ -62,7 +68,7 @@ function headingIds(source: string): Set<string> {
     const node = value as Record<string, unknown>;
     if (node.type === 'heading' && node.attrs && typeof node.attrs === 'object') {
       const id = (node.attrs as Record<string, unknown>).id;
-      if (typeof id === 'string') ids.add(id.toLowerCase());
+      if (typeof id === 'string') ids.add(fold ? id.toLowerCase() : id);
     }
     for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
   };
@@ -121,7 +127,7 @@ export async function reviewWorkspace(
   const anchors = new Map<string, Set<string>>();
   if (options.checkLinks !== false && options.checkAnchors !== false) {
     for (const [path, source] of sources) {
-      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, headingIds(source));
+      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, headingIds(source, foldsAnchors(path)));
     }
   }
   for (const [path, source] of sources) {
@@ -137,7 +143,7 @@ export async function reviewWorkspace(
       if (!discovered.has(target.path)) {
         projectWarnings.push(projectWarning('missing-local-file', { path, target: match[1], ...location,
           message: `Local link target does not exist in this workspace review: ${target.path}` }));
-      } else if (options.checkAnchors !== false && target.fragment && anchors.has(target.path) && !anchors.get(target.path)?.has(target.fragment.toLowerCase())) {
+      } else if (options.checkAnchors !== false && target.fragment && anchors.has(target.path) && !anchors.get(target.path)?.has(foldsAnchors(target.path) ? target.fragment.toLowerCase() : target.fragment)) {
         projectWarnings.push(projectWarning('broken-local-anchor', { path, target: match[1], ...location,
           message: `Local link anchor does not exist in ${target.path}: #${target.fragment}` }));
       }

@@ -94,16 +94,18 @@ describe('workspace operations', () => {
       '',
     ].join('\n'));
     await writeFile(join(root, 'index.crv'), [
-      '[top](guide.crv#top)',
-      '[list](guide.crv#in-a-list)',
-      '[note](guide.crv#in-a-note)',
-      '[quote](guide.crv#in-a-quote)',
+      '[top](guide.crv#Top)',
+      '[list](guide.crv#In-A-List)',
+      '[note](guide.crv#In-A-Note)',
+      '[quote](guide.crv#In-A-Quote)',
       '[gone](guide.crv#not-a-heading)',
+      '[case](guide.crv#top)',
     ].join('\n'));
     const workspace = await prepareWorkspace({ roots: [root] });
     const review = await reviewWorkspace(workspace, 0);
     const broken = review.projectWarnings.filter(({ rule }) => rule === 'broken-local-anchor');
-    expect(broken.map(({ target }) => target)).toEqual(['guide.crv#not-a-heading']);
+    // Ids compare exactly: `#top` does not reach the heading `{#Top}`.
+    expect(broken.map(({ target }) => target)).toEqual(['guide.crv#not-a-heading', 'guide.crv#top']);
   });
 
   it('builds a cross-document semantic reference graph', async () => {
@@ -115,5 +117,23 @@ describe('workspace operations', () => {
     expect(graph.counts).toEqual({ definitions: 4, references: 6, broken: 2, orphans: 1 });
     expect(graph.brokenReferences.map(({ id }) => id)).toEqual(['docs/guide.crv#Gone', 'gone.crv']);
     expect(graph.orphans).toEqual([expect.objectContaining({ kind: 'footnote', id: 'orphan' })]);
+  });
+
+  it('keeps the anchor fold for Markdown targets only', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'guide.md'), '# Getting Started\n');
+    await writeFile(join(root, 'guide.crv'), '# Getting Started\n');
+    await writeFile(join(root, 'index.crv'), '[md](guide.md#getting-started)\n[carve](guide.crv#getting-started)\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0);
+    const broken = review.projectWarnings.filter(({ rule }) => rule === 'broken-local-anchor');
+    expect(broken.map(({ target }) => target)).toEqual(['guide.crv#getting-started']);
+  });
+
+  it('compares reference graph keys exactly', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.crv'), '# Home\n\n[home](index.crv#home)\n\n[^Note]: Upper\n\nUsed[^note].');
+    const graph = await buildReferenceGraph(await prepareWorkspace({ roots: [root] }), 0);
+    expect(graph.brokenReferences.map(({ id }) => id)).toEqual(['index.crv#home', 'note']);
+    expect(graph.orphans).toEqual([expect.objectContaining({ kind: 'footnote', id: 'Note' })]);
   });
 });
