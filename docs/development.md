@@ -216,6 +216,58 @@ outside it.
 The engine reports positions in Unicode code points; the tool converts them to
 UTF-8 bytes, the unit every source patch in this server uses.
 
+### Replacing one block's source
+
+`carve_replace_source` takes the same document input, selector, and `scope`
+as `carve_get_block`, plus `text`: the Carve source that replaces the selected
+range. The tool splices `text` over those exact bytes. Everything outside the
+range keeps its bytes, so CRLF line endings, tabs, `-   item` spacing, a
+missing final newline, and a leading BOM survive. Text inside the range is
+exactly what the caller sent; nothing is reformatted.
+
+Before returning, the tool re-parses the edited document and refuses the edit,
+changing nothing, when:
+
+- `expectedSha256` does not match the current source (`reason: "stale-source"`);
+- the node at the selected AST path is no longer the same type starting at the
+  same place (`reason: "node-kind-changed"`), for example a paragraph that now
+  parses as a heading;
+- a node outside the range or enclosing it no longer parses with the same
+  type, properties, and attributes at its shifted position, or untouched text
+  stops being text (`reason: "surroundings-changed"`). Examples: an unclosed
+  code fence that swallows the rest of the document, a blank line that makes a
+  tight list loose, or a trailing `{#id}` line that attaches to the next block;
+- linting the result finds something that linting the original did not
+  (`reason: "new-lint-findings"`, with the findings in `introduced`).
+
+Findings outside the range are matched by rule and shifted position; findings
+inside it are matched by rule. A finding that was already there does not block
+the edit, and `lint.resolved` lists findings the edit removed. The lint wording
+comes from each server's engine, so the TypeScript and Rust servers can phrase
+the same finding differently.
+
+The result carries `start` and `end` (UTF-8 bytes in the original), the
+`sha256` of the original and `resultSha256` of the edited source, and two
+source patches in the same version 1 format as the other tools. `patch` replaces
+`start..end` with `text`; `undoPatch` applies to the edited source and puts the
+original bytes back. `includeSource: true` also returns the whole edited
+source.
+
+When the server runs with `--allow-write`, the tool also accepts `dryRun`.
+With `rootIndex` and `path`, `dryRun: false`, and `expectedSha256`, it writes
+the result through the same atomic, hash-guarded write as `carve_write_file`
+and reports that write under `write`. Without `--allow-write` the tool is
+read-only and does not offer `dryRun`. To undo a written edit, call the tool
+again with the original block text from `carve_get_block` and the new
+`resultSha256`.
+
+```json
+{ "rootIndex": 0, "path": "guide.crv",
+  "selector": { "kind": "id", "value": "pricing-note" },
+  "text": "Prices include VAT and shipping.",
+  "expectedSha256": "<sha256 from carve_get_block>", "dryRun": false }
+```
+
 ### Workspace files instead of inline source
 
 When the server has a `--root`, `carve_get_block`, `carve_plan_ast_edit`, and

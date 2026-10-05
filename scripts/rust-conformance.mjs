@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { deepStrictEqual, ok } from 'node:assert';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -93,6 +94,25 @@ const calls = [
   ['carve_get_block', { source: blockSource, selector: { kind: 'id', value: 'steps' }, scope: 'section' }],
   ['carve_get_block', { source: blockSource, selector: { kind: 'id', value: 'missing' } }],
   ['carve_get_block', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1/children/0' } }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: 'Neü 😀 *text*\r\nsecond line' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/2/items/1/children/0' }, text: 'two 😀 changed', includeSource: true }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'heading-id', value: 'Sub' }, scope: 'section', text: '## Sub\r\n\r\nnew body\r\n\r\nmore' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'id', value: 'steps' }, text: '-   item 😀\r\n-   two\r\n-   three' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: '## Heading now' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: 'Para\n\n:::\nunclosed' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: 'Para\n\n```' }],
+  ['carve_replace_source', { source: '*bold* tail', selector: { kind: 'ast-path', value: '/children/0/children/0' }, text: '*new*\n\n' }],
+  ['carve_replace_source', { source: '*bold* tail', selector: { kind: 'ast-path', value: '/children/0/children/0' }, text: '*new* `' }],
+  ['carve_replace_source', { source: '- a\n- b', selector: { kind: 'ast-path', value: '/children/0/items/0/children/0' }, text: 'a2\n' }],
+  ['carve_replace_source', { source: 'Old\n\n# Next', selector: { kind: 'ast-path', value: '/children/0' }, text: 'New\n\n{#changed}' }],
+  ['carve_replace_source', { source: '*bold*\n\nTail', selector: { kind: 'ast-path', value: '/children/0/children/0' }, text: '*new*\n\nExtra' }],
+  ['carve_replace_source', { source: '*bold* tail', selector: { kind: 'ast-path', value: '/children/0/children/0' }, text: '*new*' }],
+  ['carve_replace_source', { source: '- a\n- b\n\nAfter\n', selector: { kind: 'ast-path', value: '/children/0/items/1/children/0' }, text: 'b2\n' }],
+  ['carve_replace_source', { source: ':::\nBody', selector: { kind: 'node-type', value: 'paragraph' }, text: 'Changed body' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: 'x', expectedSha256: '0'.repeat(64) }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'ast-path', value: '/children/1' }, text: 'Pära 😀 one' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'node-type', value: 'paragraph' }, text: 'x' }],
+  ['carve_replace_source', { source: blockSource, selector: { kind: 'id', value: 'steps' }, scope: 'section', text: 'x' }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'replace-text', text: 'After' } }],
   ['carve_plan_ast_edit', { source: '{#intro}\nOpening.\n\n{#box}\n::: note\nInside.\n:::\n', selector: { kind: 'id', value: 'intro' }, edit: { kind: 'replace-text', text: 'Rewritten.' } }],
   ['carve_plan_ast_edit', { source: '# Before', selector: { kind: 'heading-id', value: 'Before' }, edit: { kind: 'rename-heading-id', id: 'intro' } }],
@@ -286,13 +306,19 @@ try {
   throw new Error('TypeScript and Rust MCP conformance results differ.', { cause: error });
 }
 
+// The write round trip restores mixed.crv, so both servers see the same file.
+const mixedSource = '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n';
+const mixedEdited = '- one\n-  two\n-  three';
+const mixedResult = mixedSource.replace('- one\n-  two', mixedEdited);
+const sha256 = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+
 async function workspaceResults(command, args) {
   const client = new Client({ name: 'rust-workspace-conformance', version: '0.1.0' });
   await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
   try {
     const names = (await client.listTools()).tools.map((tool) => tool.name).filter((name) => name.includes('workspace') || name.includes('file') || name === 'carve_prepare_edit').sort();
-    const schemas = (await client.listTools()).tools.filter(({ name }) => ['carve_get_block', 'carve_plan_ast_edit', 'carve_apply_reversible_ast_patch'].includes(name))
-      .map(({ name, inputSchema }) => ({ name, inputSchema: schemaContract(inputSchema) })).sort((a, b) => a.name.localeCompare(b.name));
+    const schemas = (await client.listTools()).tools.filter(({ name }) => ['carve_get_block', 'carve_replace_source', 'carve_plan_ast_edit', 'carve_apply_reversible_ast_patch'].includes(name))
+      .map(({ name, inputSchema, annotations }) => ({ name, annotations, inputSchema: schemaContract(inputSchema) })).sort((a, b) => a.name.localeCompare(b.name));
     const output = [];
     const calls = [
       ['carve_workspace_info', {}],
@@ -306,6 +332,13 @@ async function workspaceResults(command, args) {
       ['carve_get_block', { rootIndex: 0, path: 'mixed.crv', source: '# x', selector: { kind: 'node-type', value: 'list' } }],
       ['carve_get_block', { rootIndex: 0, path: 'notes.md', selector: { kind: 'node-type', value: 'list' } }],
       ['carve_plan_ast_edit', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'heading-id', value: 'Mixed' }, edit: { kind: 'replace-text', text: 'Renamed' } }],
+      ['carve_replace_source', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'node-type', value: 'list' }, text: '- one\n-  two\n-   three' }],
+      ['carve_replace_source', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'node-type', value: 'list' }, text: '- one', dryRun: false }],
+      ['carve_replace_source', { source: '# x\n\ny', selector: { kind: 'node-type', value: 'paragraph' }, text: 'z', expectedSha256: '0'.repeat(64), dryRun: false }],
+      ...(names.includes('carve_write_file') ? [
+        ['carve_replace_source', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'node-type', value: 'list' }, text: mixedEdited, expectedSha256: sha256(mixedSource), dryRun: false }],
+        ['carve_replace_source', { rootIndex: 0, path: 'mixed.crv', selector: { kind: 'node-type', value: 'list' }, text: '- one\n-  two', expectedSha256: sha256(mixedResult), dryRun: false }],
+      ] : []),
       ['carve_apply_reversible_ast_patch', { rootIndex: 0, path: 'index.crv', patch: { version: 1, forward: [], inverse: [], beforeFingerprint: 'fnv1a64:0000000000000000', afterFingerprint: 'fnv1a64:0000000000000000' } }],
     ];
     if (names.includes('carve_write_file')) calls.push(['carve_write_file', { rootIndex: 0, path: 'new.crv', content: '# New', dryRun: true }]);
@@ -357,7 +390,7 @@ try {
   writeFileSync(join(workspaceRoot, 'index.crv'), '# Home\n\n[Guide](docs/guide.crv#Guide)\n[Nested](docs/guide.crv#Nested)\n[Missing](docs/missing.crv)\n');
   writeFileSync(join(workspaceRoot, 'docs', 'guide.crv'), '# Guide\n\n- # Nested\n');
   writeFileSync(join(workspaceRoot, 'stale.crv'), Array.from({ length: 100 }, (_, index) => `line ${index}   `).join('\n'));
-  writeFileSync(join(workspaceRoot, 'mixed.crv'), '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n');
+  writeFileSync(join(workspaceRoot, 'mixed.crv'), mixedSource);
   writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
   const configuration = join(workspaceRoot, 'carve-mcp.json');
   writeFileSync(configuration, JSON.stringify({ roots: ['.'], review: { exclude: ['archive'], maxDepth: 8, limit: 100 } }));

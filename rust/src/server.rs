@@ -26,6 +26,7 @@ use serde_json::{Value, json};
 use crate::{
     blocks::{BlockScope, get_blocks, sha256_text},
     resources,
+    splice::{EditFailure, ReplaceRequest, replace_source},
     workspace::Workspace,
 };
 
@@ -823,6 +824,35 @@ struct ReversibleAstPatchApplyOutputSchema {
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+struct SourceReplaceMatchOutputSchema {
+    path: String,
+    r#type: String,
+    identity: Option<String>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct LintChangeOutputSchema {
+    introduced: Vec<Value>,
+    resolved: Vec<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct SourceReplaceOutputSchema {
+    r#match: SourceReplaceMatchOutputSchema,
+    sha256: String,
+    result_sha256: String,
+    start: i64,
+    end: i64,
+    patch: SourcePatchOutputSchema,
+    undo_patch: SourcePatchOutputSchema,
+    lint: LintChangeOutputSchema,
+    source: Option<String>,
+    write: Option<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct BlockOutputSchema {
     sha256: String,
     source_bytes: i64,
@@ -1330,6 +1360,44 @@ struct GetBlockInput {
     include_ast: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReplaceSourceInput {
+    #[serde(default)]
+    #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
+    source: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Workspace root holding path; use instead of source."
+    )]
+    root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = ".crv or .carve file inside that root.")]
+    path: Option<String>,
+    selector: AstSelectorInput,
+    #[serde(default = "default_block_scope")]
+    #[schemars(
+        default = "default_block_scope",
+        description = "section: a heading through its content, up to the next heading of the same or higher level."
+    )]
+    scope: BlockScope,
+    #[schemars(description = "Carve source that replaces the selected range.")]
+    text: String,
+    #[serde(default)]
+    #[schemars(description = "Source sha256 from carve_get_block; a mismatch refuses the edit.")]
+    expected_sha256: Option<String>,
+    #[serde(default)]
+    #[schemars(default, description = "Also return the whole edited source.")]
+    include_source: bool,
+    #[serde(default = "default_true")]
+    #[schemars(
+        default = "default_true",
+        description = "With a path, false writes the result through the hash-guarded write."
+    )]
+    dry_run: bool,
+}
+
 fn default_block_scope() -> BlockScope {
     BlockScope::Node
 }
@@ -1723,7 +1791,7 @@ fn migrate_markdown_dialect(
     result
 }
 
-fn utf16_offset(source: &str, byte: usize) -> usize {
+pub(crate) fn utf16_offset(source: &str, byte: usize) -> usize {
     let mut boundary = byte.min(source.len());
     while !source.is_char_boundary(boundary) {
         boundary -= 1;
@@ -1948,6 +2016,7 @@ impl ToolProfile {
                     | "carve_apply_ast_patch"
                     | "carve_select_ast_nodes"
                     | "carve_get_block"
+                    | "carve_replace_source"
                     | "carve_plan_ast_edit"
                     | "carve_create_reversible_ast_patch"
                     | "carve_apply_reversible_ast_patch"
@@ -1962,6 +2031,7 @@ impl ToolProfile {
                     | "carve_prepare_workspace_edits"
                     | "carve_write_file"
                     | "carve_get_block"
+                    | "carve_replace_source"
                     | "carve_lint"
                     | "carve_diagnose_and_fix"
                     | "carve_format"
@@ -2006,6 +2076,7 @@ impl CarveServer {
             }
             for name in [
                 "carve_get_block",
+                "carve_replace_source",
                 "carve_plan_ast_edit",
                 "carve_apply_reversible_ast_patch",
             ] {
@@ -2036,6 +2107,23 @@ impl CarveServer {
             }
         } else if !workspace.as_ref().is_some_and(Workspace::allow_write) {
             tools.remove_route("carve_write_file");
+        }
+        // Only a server that may write offers dryRun and the destructive annotation.
+        if workspace.as_ref().is_some_and(Workspace::allow_write) {
+            if let Some(route) = tools.map.get_mut("carve_replace_source") {
+                route.attr.annotations = Some(
+                    rmcp::model::ToolAnnotations::new()
+                        .read_only(false)
+                        .destructive(true)
+                        .idempotent(false)
+                        .open_world(false),
+                );
+            }
+        } else if let Some(route) = tools.map.get_mut("carve_replace_source")
+            && let Some(Value::Object(properties)) =
+                std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
+        {
+            properties.remove("dryRun");
         }
         Self { tools, workspace }
     }
@@ -2159,6 +2247,19 @@ impl CarveServer {
             .or_else(|| {
                 (value.get("type").and_then(Value::as_str) == Some("document"))
                     .then(|| "Parsed the document successfully.".into())
+            })
+            .or_else(|| {
+                (value.get("undoPatch").is_some()
+                    && value.get("lint").is_some()
+                    && value.get("match").is_some())
+                .then(|| {
+                    let kind = value["match"]["type"].as_str().unwrap_or_default();
+                    if value.get("write").is_some() {
+                        format!("Replaced the {kind} source and wrote the file.")
+                    } else {
+                        format!("Prepared a byte-exact replacement for the {kind} source; no file was changed.")
+                    }
+                })
             })
             .or_else(|| {
                 value.get("blocks").and_then(Value::as_array)?;
@@ -3275,6 +3376,76 @@ impl CarveServer {
     }
 
     #[tool(
+        name = "carve_replace_source",
+        title = "Replace Carve source of one node",
+        description = "Splice Carve text over the exact source bytes of one selected node or heading section, leaving every other byte untouched. Refuses if the node kind changes, the rest of the document parses differently, or new lint findings appear. Returns forward and undo patches.", output_schema = rmcp::handler::server::tool::schema_for_type::<SourceReplaceOutputSchema>(),
+        annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
+    )]
+    fn replace_source(&self, Parameters(input): Parameters<ReplaceSourceInput>) -> CallToolResult {
+        let document = match self.document_source(DocumentRequest {
+            source: input.source.as_deref(),
+            root_index: input.root_index,
+            path: input.path.as_deref(),
+        }) {
+            Ok(document) => document,
+            Err(error) => return Self::error(error),
+        };
+        let write = !input.dry_run;
+        if write && !document.from_file {
+            return Self::error("dryRun: false requires rootIndex and path.");
+        }
+        if write && input.expected_sha256.is_none() {
+            return Self::error("expectedSha256 is required when dryRun is false.");
+        }
+        if let Err(error) = Self::checked(&document.source) {
+            return Self::error(error);
+        }
+        let replacement = match replace_source(
+            &document.source,
+            ReplaceRequest {
+                selector: &input.selector,
+                text: &input.text,
+                scope: input.scope,
+                expected_sha256: input.expected_sha256.as_deref(),
+                sha256: &document.sha256,
+                include_source: input.include_source,
+            },
+        ) {
+            Ok(replacement) => replacement,
+            Err(EditFailure::Error(error)) => return Self::error(error),
+            Err(EditFailure::Refusal(message, details)) => {
+                let mut value = json!({"error": message});
+                if let (Some(target), Value::Object(details)) = (value.as_object_mut(), details) {
+                    target.extend(details);
+                }
+                return CallToolResult::error(vec![ContentBlock::text(
+                    serde_json::to_string_pretty(&value).expect("JSON values always serialize"),
+                )]);
+            }
+        };
+        let mut output = replacement.output;
+        if write {
+            let written = self.workspace.as_ref().map_or_else(
+                || Err("No workspace roots are configured.".to_owned()),
+                |workspace| {
+                    workspace.write(
+                        input.root_index.unwrap_or_default(),
+                        input.path.as_deref().unwrap_or_default(),
+                        &replacement.result,
+                        Some(&document.sha256),
+                        false,
+                    )
+                },
+            );
+            match written {
+                Ok(value) => output["write"] = value,
+                Err(error) => return Self::error(error),
+            }
+        }
+        Self::output(output)
+    }
+
+    #[tool(
         name = "carve_plan_ast_edit",
         title = "Plan a semantic AST edit",
         description = "Plan one or more atomic semantic AST edits and return a human-readable, reversible, stale-guarded source patch without writing the document.", output_schema = rmcp::handler::server::tool::schema_for_type::<SemanticAstEditPlanOutputSchema>(),
@@ -4184,6 +4355,7 @@ mod tests {
         assert_eq!(names(ToolProfile::Convert).len(), 4);
         assert!(names(ToolProfile::Structure).contains(&"carve_plan_ast_edit".into()));
         assert!(names(ToolProfile::Structure).contains(&"carve_get_block".into()));
-        assert_eq!(names(ToolProfile::All).len(), 14);
+        assert!(names(ToolProfile::Structure).contains(&"carve_replace_source".into()));
+        assert_eq!(names(ToolProfile::All).len(), 15);
     }
 }
