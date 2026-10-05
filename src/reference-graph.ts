@@ -74,7 +74,7 @@ export async function buildReferenceGraph(workspace: Workspace, rootIndex: numbe
   const byLocation = (left: Location, right: Location) => left.path.localeCompare(right.path) || left.start - right.start || left.end - right.end;
   definitions.sort(byLocation);
   references.sort(byLocation);
-  const key = (kind: string, path: string, id: string) => `${kind}\0${path}\0${kind === 'heading' ? id : id.toLowerCase()}`;
+  const key = (kind: string, path: string, id: string) => `${kind}\0${path}\0${id}`;
   const definitionKeys = new Set(definitions.map((item) => key(item.kind, item.path, item.id)));
   const listedFiles = new Set(listed.files);
   const edges = references.map((reference) => {

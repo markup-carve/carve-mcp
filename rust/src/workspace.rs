@@ -408,6 +408,9 @@ impl Workspace {
                 let value: Value = serde_json::from_str(&ast).map_err(|error| error.to_string())?;
                 let mut ids = BTreeSet::new();
                 collect_heading_ids(&value, &mut ids);
+                if folds_anchors(path) {
+                    ids = ids.into_iter().map(|id| id.to_lowercase()).collect();
+                }
                 anchors.insert(path.clone(), ids);
             }
         }
@@ -471,9 +474,13 @@ impl Workspace {
                 } else if check_anchors
                     && let Some(fragment) = fragment
                     && anchors.contains_key(&normalized)
-                    && !anchors
-                        .get(&normalized)
-                        .is_some_and(|ids| ids.contains(&fragment.to_lowercase()))
+                    && !anchors.get(&normalized).is_some_and(|ids| {
+                        if folds_anchors(&normalized) {
+                            ids.contains(&fragment.to_lowercase())
+                        } else {
+                            ids.contains(fragment)
+                        }
+                    })
                 {
                     let start = capture.get(1).unwrap().start();
                     let before = &source[..start];
@@ -581,6 +588,15 @@ impl Workspace {
     }
 }
 
+/// Carve ids compare exactly (carve#2732). Markdown and Djot targets keep the
+/// fold: their anchors follow their own renderer's slug rule, not Carve's.
+fn folds_anchors(path: &str) -> bool {
+    !Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "crv" | "carve"))
+}
+
 fn collect_heading_ids(value: &Value, ids: &mut BTreeSet<String>) {
     if let Some(values) = value.as_array() {
         for child in values {
@@ -594,7 +610,7 @@ fn collect_heading_ids(value: &Value, ids: &mut BTreeSet<String>) {
     if record.get("type").and_then(Value::as_str) == Some("heading")
         && let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
     {
-        ids.insert(id.to_lowercase());
+        ids.insert(id.to_owned());
     }
     for field in AST_CHILD_FIELDS {
         if let Some(child) = record.get(field) {
@@ -756,7 +772,7 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("index.crv"),
-            "[top](guide.crv#top)\n[list](guide.crv#in-a-list)\n[note](guide.crv#in-a-note)\n[quote](guide.crv#in-a-quote)\n[gone](guide.crv#not-a-heading)\n",
+"[top](guide.crv#Top)\n[list](guide.crv#In-A-List)\n[note](guide.crv#In-A-Note)\n[quote](guide.crv#In-A-Quote)\n[gone](guide.crv#not-a-heading)\n[case](guide.crv#top)\n",
         )
         .unwrap();
         let workspace = Workspace::new(
@@ -773,7 +789,35 @@ mod tests {
             .filter(|warning| warning["rule"] == "broken-local-anchor")
             .map(|warning| warning["target"].as_str().unwrap())
             .collect();
-        assert_eq!(broken, vec!["guide.crv#not-a-heading"]);
+        assert_eq!(broken, vec!["guide.crv#not-a-heading", "guide.crv#top"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keeps_the_anchor_fold_for_markdown_targets_only() {
+        let root = temporary_root();
+        fs::write(root.join("guide.md"), "# Getting Started\n").unwrap();
+        fs::write(root.join("guide.crv"), "# Getting Started\n").unwrap();
+        fs::write(
+            root.join("index.crv"),
+            "[md](guide.md#getting-started)\n[carve](guide.crv#getting-started)\n",
+        )
+        .unwrap();
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            false,
+            ReviewConfiguration::default(),
+        )
+        .unwrap();
+        let review = workspace.review(0, 10, 500, false, true, true).unwrap();
+        let broken: Vec<&str> = review["projectWarnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|warning| warning["rule"] == "broken-local-anchor")
+            .map(|warning| warning["target"].as_str().unwrap())
+            .collect();
+        assert_eq!(broken, vec!["guide.crv#getting-started"]);
         fs::remove_dir_all(root).unwrap();
     }
 }
