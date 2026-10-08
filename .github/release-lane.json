@@ -1,0 +1,28 @@
+{
+  "workflow": ".github/workflows/release-lane.yml",
+  "publisher": ".github/workflows/release.yml",
+  "publisher_environments": [
+    "release"
+  ],
+  "registries": {
+    "npm": "@markup-carve/carve-mcp",
+    "mcp": "io.github.markup-carve/carve-mcp"
+  },
+  "assets": [
+    "carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz",
+    "carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz",
+    "carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz",
+    "carve-mcp-rs-x86_64-apple-darwin.tar.gz",
+    "carve-mcp-rs-aarch64-apple-darwin.tar.gz",
+    "carve-mcp-rs-x86_64-pc-windows-msvc.zip",
+    "SHA256SUMS"
+  ],
+  "versions": [
+    {
+      "path": "package.json",
+      "field": [
+        "version"
+      ]
+    }
+  ]
+}

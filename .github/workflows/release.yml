@@ -1,33 +1,46 @@
-name: Release
+name: Release packages and assets
 
 on:
-  release:
-    types: [released]
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      release_tag:
-        description: Existing GitHub release to verify and finish
+      publish:
         required: true
-        default: 0.1.0
-
-concurrency:
-  group: production-release
-  cancel-in-progress: false
-
+        type: boolean
+      tag:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      release_id:
+        required: true
+        type: string
+      release_body:
+        required: true
+        type: string
+      notes_digest:
+        required: true
+        type: string
 permissions:
-  contents: read
+  contents: write
+  actions: read
   id-token: write
-
-# Every job below carries a timeout-minutes bound, so a hung step fails in
-# minutes instead of running to GitHub's 360-minute default.
+  packages: write
+  attestations: write
 jobs:
   rust-binaries:
-    if: github.event_name == 'release'
     name: Rust ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
     strategy:
       matrix:
         include:
@@ -59,7 +72,25 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify approval and checked tag before publishing
+        working-directory: ${{ github.workspace }}
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.source_sha }}
+          RELEASE_NOTES_DIGEST: ${{ inputs.notes_digest }}
+        run: python .github/scripts/release-lane.py permit
+      - name: Expose the candidate tag locally
+        if: ${{ !inputs.publish }}
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.tag }}
+        run: |
+          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
@@ -73,11 +104,13 @@ jobs:
       - name: Archive Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
+        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath
+          "${{ matrix.archive }}"
       - name: Upload release binary
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.archive }}" --clobber
+        run: gh release upload "${{ inputs.tag }}" "${{ matrix.archive }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+        if: ${{ inputs.publish }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -87,46 +120,65 @@ jobs:
       # from the server it is checking.
       - run: npm run build
       - name: Verify downloaded Unix release binary
-        if: runner.os != 'Windows'
+        if: ${{ inputs.publish && (runner.os != 'Windows') }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir release-smoke
-          gh release download "${{ github.event.release.tag_name }}" \
+          gh release download "${{ inputs.tag }}" \
             --pattern "${{ matrix.archive }}" --dir release-smoke
           tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
           node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
       - name: Verify downloaded Windows release binary
-        if: runner.os == 'Windows'
+        if: ${{ inputs.publish && (runner.os == 'Windows') }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-smoke
-          gh release download "${{ github.event.release.tag_name }}" `
+          gh release download "${{ inputs.tag }}" `
             --pattern "${{ matrix.archive }}" --dir release-smoke
           Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
           node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
 
   release-checksums:
-    if: github.event_name == 'release'
     needs: rust-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - run: scripts/release-checksums.sh "${{ github.event.release.tag_name }}"
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify approval and checked tag before publishing
+        working-directory: ${{ github.workspace }}
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.source_sha }}
+          RELEASE_NOTES_DIGEST: ${{ inputs.notes_digest }}
+        run: python .github/scripts/release-lane.py permit
+      - name: Expose the candidate tag locally
+        if: ${{ !inputs.publish }}
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.tag }}
+        run: |
+          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
+      - run: scripts/release-checksums.sh "${{ inputs.tag }}"
         env:
           GH_TOKEN: ${{ github.token }}
 
+        if: ${{ inputs.publish }}
   npm-credential:
     name: The npm credential can publish this package
     runs-on: ubuntu-latest
@@ -134,6 +186,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Expose the candidate tag locally
+        if: ${{ !inputs.publish }}
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.tag }}
+        run: |
+          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -233,7 +295,6 @@ jobs:
           fi
 
   publish:
-    if: github.event_name == 'release'
     needs: [release-checksums, npm-credential]
     runs-on: ubuntu-latest
     # Room for the clean-install check to sit out npm's propagation window.
@@ -242,7 +303,25 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify approval and checked tag before publishing
+        working-directory: ${{ github.workspace }}
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.source_sha }}
+          RELEASE_NOTES_DIGEST: ${{ inputs.notes_digest }}
+        run: python .github/scripts/release-lane.py permit
+      - name: Expose the candidate tag locally
+        if: ${{ !inputs.publish }}
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.tag }}
+        run: |
+          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -256,22 +335,27 @@ jobs:
       - name: Verify release candidate
         run: npm run release:check
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
           REQUIRE_RELEASE_TAG: "1"
       # npm cannot issue a package's FIRST publish over OIDC (npm/cli#8544), so
       # 0.1.0 is published by hand and this job would otherwise die on a 403 for
       # an already-published version, taking the Registry step below with it.
       # The skip also makes a re-run after a failed later step harmless.
+        if: ${{ inputs.publish }}
       - name: Publish npm package with provenance
         shell: bash
         run: |
-          set -euo pipefail
-          version="$(node -p 'require("./package.json").version')"
-          if npm view "@markup-carve/carve-mcp@$version" version >/dev/null 2>&1; then
-            echo "npm already serves $version; skipping publish."
-            exit 0
+          if [ "$LANE_PUBLISH" = true ]; then
+            set -euo pipefail
+            version="$(node -p 'require("./package.json").version')"
+            if npm view "@markup-carve/carve-mcp@$version" version >/dev/null 2>&1; then
+              echo "npm already serves $version; skipping publish."
+              exit 0
+            fi
+            npm publish --access public --provenance
+          else
+            npm publish --dry-run --access public
           fi
-          npm publish --access public --provenance
         # setup-node wrote an .npmrc that reads NODE_AUTH_TOKEN. Secrets are not
         # injected automatically, so without this mapping the token expands to
         # empty and the publish fails to authenticate. NPM_TOKEN is inherited
@@ -283,158 +367,106 @@ jobs:
         shell: bash
         run: scripts/verify-published-install.sh @markup-carve/carve-mcp "$RELEASE_TAG" carve-mcp
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        if: ${{ inputs.publish }}
       - name: Publish official MCP Registry entry
         run: scripts/publish-registry.sh
 
-  release-contract:
-    if: github.event_name == 'workflow_dispatch'
+        if: ${{ inputs.publish }}
+  container:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    outputs:
-      full: ${{ steps.contract.outputs.full }}
-    steps:
-      - name: Detect the released native contract
-        id: contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name')"
-          musl=false
-          arm64=false
-          grep -qx 'carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz' <<<"$assets" && musl=true
-          grep -qx 'carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz' <<<"$assets" && arm64=true
-          if [[ "$musl" == true && "$arm64" == true ]]; then
-            echo 'full=true' >> "$GITHUB_OUTPUT"
-          elif [[ "$musl" == false && "$arm64" == false ]]; then
-            echo 'full=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'Release has an incomplete current native artifact set.' >&2
-            exit 1
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-
-  verify-released-binaries:
-    if: github.event_name == 'workflow_dispatch'
-    needs: release-contract
-    name: Verify ${{ matrix.target }} release
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
-            binary: carve-mcp-rs
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            archive: carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz
-            binary: carve-mcp-rs
-            current_only: true
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            archive: carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz
-            binary: carve-mcp-rs
-            current_only: true
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-            archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
-            binary: carve-mcp-rs
-          - os: macos-15
-            target: aarch64-apple-darwin
-            archive: carve-mcp-rs-aarch64-apple-darwin.tar.gz
-            binary: carve-mcp-rs
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
-            binary: carve-mcp-rs.exe
-    steps:
-      - name: Skip current-only artifact for a legacy release
-        if: matrix.current_only && needs.release-contract.outputs.full != 'true'
-        run: echo 'This legacy release predates the expanded Linux artifact set.'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
-        with:
-          ref: main
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
-      - run: npm run build
-        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
-      - name: Download and verify Unix binary
-        if: runner.os != 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir release-smoke
-          gh release download "${{ inputs.release_tag }}" \
-            --pattern "${{ matrix.archive }}" --dir release-smoke
-          tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
-          args=()
-          [[ "$FULL_CONTRACT" == true ]] && args+=(--full)
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" "${args[@]}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-          FULL_CONTRACT: ${{ needs.release-contract.outputs.full }}
-      - name: Download and verify Windows binary
-        if: runner.os == 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path release-smoke
-          gh release download "${{ inputs.release_tag }}" `
-            --pattern "${{ matrix.archive }}" --dir release-smoke
-          Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
-          $args = @()
-          if ("${{ needs.release-contract.outputs.full }}" -eq "true") { $args += "--full" }
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" @args
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
-
-  recover-release:
-    if: github.event_name == 'workflow_dispatch'
-    needs: verify-released-binaries
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
     environment: release
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Verify approval and checked tag before publishing
+        working-directory: ${{ github.workspace }}
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.source_sha }}
+          RELEASE_NOTES_DIGEST: ${{ inputs.notes_digest }}
+        run: python .github/scripts/release-lane.py permit
+      - name: Expose the candidate tag locally
+        if: ${{ !inputs.publish }}
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.tag }}
+        run: |
+          git tag "$CANDIDATE_TAG" "${{ inputs.source_sha }}"
+      - name: Resolve and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-${INPUT_TAG}}"
+          [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${tag#v}"
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          if [ "$LANE_PUBLISH" = true ]; then git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"; fi
+          # A dispatch uses main to pick up packaging fixes for an existing
+          # release. Refuse it if the shipped application differs from its tag.
+          git diff --exit-code "$tag" -- src package.json package-lock.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          INPUT_TAG: ${{ inputs.version }}
+      - name: Build and smoke-test locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag carve-mcp:smoke .
+          container="$(docker run --detach --rm --publish 3000:3000 \
+            --env CARVE_MCP_TOKEN=release-smoke-token carve-mcp:smoke)"
+          trap 'docker stop "$container" >/dev/null' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep "$attempt"
+          done
+          docker logs "$container"
+          exit 1
+      - uses: docker/setup-buildx-action@5ac4a31b15f1c45ec652b8af78c2096c3a08368c # v3
+      - uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: ${{ inputs.publish }}
+      - uses: docker/metadata-action@703896b4f30f62d53f5530a80bcdc589a3f702bc # v5
+        id: meta
+        with:
+          images: ghcr.io/markup-carve/carve-mcp
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+        if: ${{ inputs.publish }}
+      - name: Verify published container manifest
+        if: ${{ inputs.publish }}
+        run: docker buildx imagetools inspect ghcr.io/markup-carve/carve-mcp:${{ inputs.version }}
     permissions:
       contents: write
+      actions: read
+      packages: write
+      attestations: write
       id-token: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - name: Verify repository and published package
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          version="${RELEASE_TAG#v}"
-          test "$(node -p 'require("./package.json").version')" = "$version"
-          test "$(npm view "@markup-carve/carve-mcp@$version" version)" = "$version"
-          git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-          # Recovery runs from main so it can use repaired release tooling.
-          # Only metadata-equivalent application releases may be recovered.
-          git diff --exit-code "$RELEASE_TAG" -- \
-            src package.json package-lock.json server.json rust/Cargo.toml rust/Cargo.lock
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
-      - run: scripts/release-checksums.sh "${{ inputs.release_tag }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Publish official MCP Registry entry
-        run: scripts/publish-registry.sh
+env:
+  LANE_TAG: ${{ inputs.tag }}
+  LANE_REF: ${{ format('refs/tags/{0}', inputs.tag) }}
+  LANE_REF_TYPE: tag
+  LANE_PUBLISH: ${{ inputs.publish }}

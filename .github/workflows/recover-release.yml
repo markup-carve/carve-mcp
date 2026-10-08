@@ -1,0 +1,193 @@
+name: Recover release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release to verify and finish
+        required: true
+        default: 0.1.0
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+# Every job below carries a timeout-minutes bound, so a hung step fails in
+# minutes instead of running to GitHub's 360-minute default.
+jobs:
+  release-contract:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      full: ${{ steps.contract.outputs.full }}
+    steps:
+      - name: Detect the released native contract
+        id: contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')"
+          musl=false
+          arm64=false
+          grep -qx 'carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz' <<<"$assets" && musl=true
+          grep -qx 'carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz' <<<"$assets" && arm64=true
+          if [[ "$musl" == true && "$arm64" == true ]]; then
+            echo 'full=true' >> "$GITHUB_OUTPUT"
+          elif [[ "$musl" == false && "$arm64" == false ]]; then
+            echo 'full=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Release has an incomplete current native artifact set.' >&2
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+  verify-released-binaries:
+    if: github.event_name == 'workflow_dispatch'
+    needs: release-contract
+    name: Verify ${{ matrix.target }} release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: carve-mcp-rs-x86_64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: carve-mcp-rs-x86_64-unknown-linux-musl.tar.gz
+            binary: carve-mcp-rs
+            current_only: true
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: carve-mcp-rs-aarch64-unknown-linux-gnu.tar.gz
+            binary: carve-mcp-rs
+            current_only: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: carve-mcp-rs-x86_64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive: carve-mcp-rs-aarch64-apple-darwin.tar.gz
+            binary: carve-mcp-rs
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
+            binary: carve-mcp-rs.exe
+    steps:
+      - name: Skip current-only artifact for a legacy release
+        if: matrix.current_only && needs.release-contract.outputs.full != 'true'
+        run: |-
+          echo 'This legacy release predates the expanded Linux artifact set.'
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
+        with:
+          ref: main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
+        with:
+          node-version: 24
+          cache: npm
+      - run: |-
+          npm ci
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - run: |-
+          npm run build
+        if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - name: Download and verify Unix binary
+        if: runner.os != 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-smoke
+          gh release download "$RECOVERY_TAG" \
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
+          args=()
+          [[ "$FULL_CONTRACT" == true ]] && args+=(--full)
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" ${args[@]+"${args[@]}"}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          FULL_CONTRACT: ${{ needs.release-contract.outputs.full }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - name: Download and verify Windows binary
+        if: runner.os == 'Windows' && (!matrix.current_only || needs.release-contract.outputs.full == 'true')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-smoke
+          gh release download "$RECOVERY_TAG" `
+            --pattern "${{ matrix.archive }}" --dir release-smoke
+          Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
+          $args = @()
+          if ("${{ needs.release-contract.outputs.full }}" -eq "true") { $args += "--full" }
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" @args
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+  recover-release:
+    if: github.event_name == 'workflow_dispatch'
+    needs: verify-released-binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-approval
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: |-
+          npm ci
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - name: Verify repository and published package
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          test "$(npm view "@markup-carve/carve-mcp@$version" version)" = "$version"
+          git fetch --depth=1 origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          # Recovery runs from main so it can use repaired release tooling.
+          # Only metadata-equivalent application releases may be recovered.
+          git diff --exit-code "$RELEASE_TAG" -- \
+            src package.json package-lock.json server.json rust/Cargo.toml rust/Cargo.lock
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - run: |-
+          scripts/release-checksums.sh "$RECOVERY_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+      - name: Publish official MCP Registry entry
+        run: |-
+          scripts/publish-registry.sh
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
