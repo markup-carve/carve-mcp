@@ -7,9 +7,13 @@ on:
     inputs:
       release_tag:
         description: Existing GitHub release to verify and finish
-        required: true
+        required: false
         default: 0.1.0
 
+      version:
+        description: New version to publish; leave empty to recover an existing release
+        required: false
+        type: string
 concurrency:
   group: production-release
   cancel-in-progress: false
@@ -22,12 +26,12 @@ permissions:
 # minutes instead of running to GitHub's 360-minute default.
 jobs:
   rust-binaries:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
     name: Rust ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
     strategy:
       matrix:
         include:
@@ -59,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
@@ -73,11 +77,8 @@ jobs:
       - name: Archive Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath "${{ matrix.archive }}"
-      - name: Upload release binary
-        run: gh release upload "${{ github.event.release.tag_name }}" "${{ matrix.archive }}" --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
+        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath
+          "${{ matrix.archive }}"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -86,47 +87,31 @@ jobs:
       # The smoke check reads the tool contract out of dist/, so it cannot drift
       # from the server it is checking.
       - run: npm run build
-      - name: Verify downloaded Unix release binary
+      - name: Verify the built Unix release binary
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir release-smoke
-          gh release download "${{ github.event.release.tag_name }}" \
-            --pattern "${{ matrix.archive }}" --dir release-smoke
-          tar xzf "release-smoke/${{ matrix.archive }}" -C release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
+          node scripts/release-binary-smoke.mjs "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-      - name: Verify downloaded Windows release binary
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+      - name: Verify the built Windows release binary
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path release-smoke
-          gh release download "${{ github.event.release.tag_name }}" `
-            --pattern "${{ matrix.archive }}" --dir release-smoke
-          Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
-          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
+          node scripts/release-binary-smoke.mjs "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" --full
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
 
-  release-checksums:
-    if: github.event_name == 'release'
-    needs: rust-binaries
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Save the verified native archive
+        uses: actions/upload-artifact@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - run: scripts/release-checksums.sh "${{ github.event.release.tag_name }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
+          name: native-${{ matrix.target }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
   npm-credential:
     name: The npm credential can publish this package
     runs-on: ubuntu-latest
@@ -233,8 +218,10 @@ jobs:
           fi
 
   publish:
-    if: github.event_name == 'release'
-    needs: [release-checksums, npm-credential]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    needs:
+      - rust-binaries
+      - npm-credential
     runs-on: ubuntu-latest
     # Room for the clean-install check to sit out npm's propagation window.
     timeout-minutes: 35
@@ -242,7 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || github.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -256,12 +243,47 @@ jobs:
       - name: Verify release candidate
         run: npm run release:check
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
           REQUIRE_RELEASE_TAG: "1"
       # npm cannot issue a package's FIRST publish over OIDC (npm/cli#8544), so
       # 0.1.0 is published by hand and this job would otherwise die on a 403 for
       # an already-published version, taking the Registry step below with it.
       # The skip also makes a re-run after a failed later step harmless.
+      - name: Verify prepared release notes before tagging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate | jq -cs --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty')"
+          [ -n "$release" ] || { echo "::error::Prepare the release notes first"; exit 1; }
+          [ -n "$(printf '%s' "$release" | jq -r '.body // ""' | tr -d '[:space:]')" ] || { echo "::error::Release notes are empty"; exit 1; }
+      - name: Create the release tag after approval
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must be X.Y.Z"; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            remote="$(git ls-remote --tags origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}" | tail -1 | cut -f1)"
+            [ "$remote" = "$GITHUB_SHA" ] || { echo "::error::Existing tag points to another commit"; exit 1; }
+          else
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native-archives
+      - name: Upload verified native archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" native-archives/* --clobber
+      - run: scripts/release-checksums.sh "$RELEASE_TAG"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Publish npm package with provenance
         shell: bash
         run: |
@@ -283,12 +305,25 @@ jobs:
         shell: bash
         run: scripts/verify-published-install.sh @markup-carve/carve-mcp "$RELEASE_TAG" carve-mcp
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
       - name: Publish official MCP Registry entry
         run: scripts/publish-registry.sh
 
+      - name: Publish prepared release notes
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate | jq -cs --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first | .id // empty')"
+          [ -n "$id" ]
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" -X PATCH -f tag_name="$RELEASE_TAG" -F draft=false >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/$id" | jq -e --arg tag "$RELEASE_TAG" '(.tag_name == $tag) and (.draft == false)'
+    permissions:
+      contents: write
+      id-token: write
   release-contract:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -318,7 +353,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
 
   verify-released-binaries:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
     needs: release-contract
     name: Verify ${{ matrix.target }} release
     runs-on: ${{ matrix.os }}
@@ -401,7 +436,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
 
   recover-release:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
     needs: verify-released-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -438,3 +473,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       - name: Publish official MCP Registry entry
         run: scripts/publish-registry.sh
+env:
+  RELEASE_TAG: ${{ inputs.version || github.event.release.tag_name || inputs.release_tag }}
+  RELEASE_VERSION: ${{ inputs.version }}
