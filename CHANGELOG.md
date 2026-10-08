@@ -32,14 +32,24 @@ All notable changes to this project are documented in this file.
 
 ### Known issues
 
-- The native Rust server drops a denied URL scheme's element instead of blanking
-  its destination, and reports no render loss for it, so `carve_check_targets`
-  calls such a document `compatible` where the Node server calls it `lossy`
-  (#76). The cross-server conformance harness pins the current difference, so a
-  fix on the Rust side fails that assertion rather than passing quietly.
+- `sanitizeUrls: false` does nothing in the Rust server: it denies either way,
+  where the Node server emits the raw destination the input asks for. Making
+  them agree lets the native server emit a `javascript:` href on request, so it
+  is a decision rather than a cleanup (#78). The conformance harness pins the
+  current difference.
 
 ### Changed
 
+- The Rust server blanks a denied URL scheme's destination and reports the
+  render loss, matching the Node server and PART 9 §25. It removed the element
+  instead and reported nothing, so `carve_check_targets` called a document with
+  three `javascript:` destinations `compatible` through the native binary and
+  `lossy` through the Node one. An explicitly set `LinkPolicy::default()` was
+  the cause: it routes the denial through a branch that drops the element and
+  never reaches the loss collector, where the implicit default blanks and
+  reports. A loss row also no longer carries `format` or `pos` as null; the
+  published render-loss schema types them and forbids `format` on this code, so
+  a consumer validating the wire rejected every row (#76).
 - `carve_check_targets` assesses table preservation separately. Merged cells,
   captions, header roles, grouping and alignment can mark a target lossy even
   when the engine reports zero render losses, in the Node and the Rust server
