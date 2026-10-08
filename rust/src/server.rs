@@ -1,8 +1,8 @@
 use carve::extensions::SemanticSpan;
 use carve::{
-    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, LinkPolicy, Mode, Options,
-    Profile, RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks,
-    lint_carve, migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
+    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, Profile,
+    RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve,
+    migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
 };
 use regex::Regex;
 use rmcp::{
@@ -2335,16 +2335,31 @@ impl CarveServer {
         )])
     }
 
+    /// `format` and `pos` are OMITTED when absent, not sent as null. The
+    /// published render-loss schema types `format` as a string and forbids it
+    /// outright on `destination-denied` and `ruby-flattened` (`"format": false`),
+    /// and types `pos` as an object, so a null on either fails validation for a
+    /// consumer that checks the wire against it (carve-mcp#76).
     fn loss(loss: RenderLoss) -> Value {
-        json!({
-            "code": loss.code, "format": loss.format, "target": loss.target.as_str(),
+        let mut row = json!({
+            "code": loss.code, "target": loss.target.as_str(),
             "nodeType": loss.node_type.as_str(), "message": loss.message,
-            "pos": loss.pos.map(|pos| json!({
-                "startLine": pos.start_line, "endLine": pos.end_line,
-                "startColumn": pos.start_column, "endColumn": pos.end_column,
-                "startOffset": pos.start_offset, "endOffset": pos.end_offset,
-            })),
-        })
+        });
+        let fields = row.as_object_mut().expect("loss row is an object");
+        if let Some(format) = loss.format {
+            fields.insert("format".to_string(), json!(format));
+        }
+        if let Some(pos) = loss.pos {
+            fields.insert(
+                "pos".to_string(),
+                json!({
+                    "startLine": pos.start_line, "endLine": pos.end_line,
+                    "startColumn": pos.start_column, "endColumn": pos.end_column,
+                    "startOffset": pos.start_offset, "endOffset": pos.end_offset,
+                }),
+            );
+        }
+        row
     }
 
     fn render_result(result: carve::RenderResult<String>) -> CallToolResult {
@@ -2802,8 +2817,12 @@ impl CarveServer {
             .with_raw_html(input.allow_raw_html)
             .with_positions(true);
         if input.sanitize_urls {
-            options =
-                options.with_profile(Profile::full().set_link_policy(Some(LinkPolicy::default())));
+            // Not `set_link_policy(Some(LinkPolicy::default()))`: an explicitly
+            // set policy routes the denial through a branch that removes the
+            // element and never reaches the render-loss collector, where the
+            // implicit default blanks the destination and reports it
+            // (carve-mcp#76). The policy is the same either way.
+            options = options.with_profile(Profile::full());
         }
         if input.preset == RenderPreset::StaticHtml {
             options = options.with_mode(Mode::Static);
@@ -3004,7 +3023,7 @@ impl CarveServer {
             let options = Options::default()
                 .with_raw_html(false)
                 .with_positions(true)
-                .with_profile(Profile::full().set_link_policy(Some(LinkPolicy::default())));
+                .with_profile(Profile::full());
             let rendered =
                 with_render_loss_report(render_target, CheckedRenderOptions::default(), || {
                     match render_target {
@@ -4133,6 +4152,56 @@ impl ServerHandler for CarveServer {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// An explicitly set `LinkPolicy::default()` removed the element and never
+    /// reached the render-loss collector, where the implicit default blanks the
+    /// destination and reports it. The two look identical from the policy, so
+    /// this pins the behavior rather than the spelling (carve-mcp#76).
+    #[test]
+    fn a_denied_destination_is_blanked_and_reported() {
+        let options = Options::default()
+            .with_raw_html(false)
+            .with_positions(true)
+            .with_profile(Profile::full());
+        let report = with_render_loss_report(
+            CarveRenderTarget::Html,
+            CheckedRenderOptions::default(),
+            || carve::try_to_html_with_options("[x](javascript:alert(1))\n", &options),
+        )
+        .unwrap();
+
+        assert_eq!(report.value.unwrap(), "<p><a href=\"\">x</a></p>");
+        assert_eq!(report.total_losses, 1);
+        assert_eq!(report.losses[0].code, "destination-denied");
+    }
+
+    /// The published render-loss schema types `format` as a string and forbids
+    /// it on this code outright, and types `pos` as an object, so a null on
+    /// either fails a consumer validating the wire (carve-mcp#76).
+    #[test]
+    fn a_loss_row_omits_the_fields_it_does_not_carry() {
+        let options = Options::default()
+            .with_positions(true)
+            .with_profile(Profile::full());
+        let report = with_render_loss_report(
+            CarveRenderTarget::Html,
+            CheckedRenderOptions::default(),
+            || carve::try_to_html_with_options("[x](javascript:alert(1))\n", &options),
+        )
+        .unwrap();
+        let row = CarveServer::loss(report.losses.into_iter().next().unwrap());
+        let fields = row.as_object().unwrap();
+
+        assert!(
+            !fields.contains_key("format"),
+            "format is null or present: {row}"
+        );
+        assert!(fields.contains_key("pos"));
+        assert!(
+            fields.values().all(|value| !value.is_null()),
+            "a null reached the wire: {row}"
+        );
+    }
 
     fn include_test_root() -> std::path::PathBuf {
         let stamp = SystemTime::now()

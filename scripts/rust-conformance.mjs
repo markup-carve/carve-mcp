@@ -164,6 +164,14 @@ const calls = [
   ['carve_render', { source: '# Hello', target: 'ansi' }],
   ['carve_check_targets', { source: '# Hello', targets: ['html', 'github'] }],
   ['carve_check_targets', { source: '```=latex\nx\n```', targets: ['markdown', 'plain', 'ansi', 'wordpress', 'pdf'] }],
+  // A denied URL scheme is reported, not silently swallowed, and the element
+  // keeps its blanked destination rather than collapsing to its text. An
+  // explicitly set link policy diverged from the implicit default on both
+  // counts and nothing here could see it (carve-mcp#76).
+  ['carve_render', { source: '[x](javascript:alert(1))\n\n<javascript:alert(1)>\n\n![a](javascript:alert(1))\n', target: 'html' }],
+  ['carve_render', { source: '[x](javascript:alert(1))\n', target: 'markdown' }],
+  ['carve_render', { source: '[x](javascript:alert(1))\n', target: 'ansi' }],
+  ['carve_check_targets', { source: '[x](javascript:alert(1))\n\n<javascript:alert(1)>\n\n![a](javascript:alert(1))\n', targets: ['html', 'markdown', 'plain', 'ansi'] }],
   ['carve_render', { source: '# HéLLo', target: 'html', preset: 'portable', lowercaseHeadingIds: false }],
   ['carve_render', { source: '`raw`{=latex}', target: 'plain', maxRenderLosses: 0 }],
   ['carve_render', { source: '`raw`{=latex}', target: 'plain', strictLosses: true }],
@@ -307,56 +315,40 @@ try {
 }
 
 /**
- * A denied URL scheme is the one shape the two servers do NOT agree on
- * (carve-mcp#76), so it cannot go in the parity list above. It is pinned here
- * instead, both sides spelled out, the way `knownTypeScriptOnly` pins the tool
- * inventory: fixing the Rust side fails this assertion rather than passing
- * quietly, and the parity case moves up into `calls` at that point.
+ * `sanitizeUrls: false` is the one shape the two servers still disagree on
+ * (carve-mcp#78), so it cannot go in the parity list. Both sides are pinned
+ * here: a fix fails this assertion and the case moves up into `calls`.
  *
- * PART 9 section 25 blanks the destination and keeps the element, which is what
- * the TypeScript side does. The Rust side drops the link to its text and the
- * image to a placeholder, and reports no loss.
+ * The Node server honors the switch and emits the raw destination. The Rust
+ * server denies either way, so the switch does nothing there. Turning it on
+ * would let the native server emit a `javascript:` href on request, which is a
+ * call for the maintainer rather than a parity cleanup.
  */
-const deniedScheme = '[x](javascript:alert(1))\n\n<javascript:alert(1)>\n\n![a](javascript:alert(1))\n';
-
-async function deniedSchemeRender(command, args) {
-  const client = new Client({ name: 'denied-scheme', version: '0.1.0' });
+async function unsanitizedRender(command, args) {
+  const client = new Client({ name: 'unsanitized', version: '0.1.0' });
   await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
   try {
-    const rendered = {};
-    for (const renderTarget of ['html', 'markdown', 'ansi', 'plain']) {
-      const result = await client.callTool({
-        name: 'carve_render', arguments: { source: deniedScheme, target: renderTarget },
-      });
-      const value = result.structuredContent ?? JSON.parse(result.content[0].text);
-      rendered[renderTarget] = { value: value.value, codes: value.losses.map(({ code }) => code) };
-    }
-    return rendered;
+    const result = await client.callTool({
+      name: 'carve_render',
+      arguments: { source: '[x](javascript:alert(1))\n', target: 'html', sanitizeUrls: false },
+    });
+    const value = result.structuredContent ?? JSON.parse(result.content[0].text);
+    return { value: value.value, codes: value.losses.map(({ code }) => code) };
   } finally {
     await client.close();
   }
 }
 
-const denied = 'destination-denied';
-deepStrictEqual(await deniedSchemeRender(process.execPath, ['dist/index.js']), {
-  html: {
-    value: '<p><a href="">x</a></p>\n<p><a href="">javascript:alert(1)</a></p>\n<img src="" alt="a">',
-    codes: [denied, denied, denied],
-  },
-  markdown: { value: '[x]()\n\n[javascript:alert(1)]()\n\n![a]()\n', codes: [denied, denied, denied] },
-  ansi: {
-    value: '\u001b[4m\u001b[34mx\u001b[0m\u001b[2m ()\u001b[0m\n\n\u001b[4m\u001b[34mjavascript:alert(1)\u001b[0m\n\n\u001b[35m[img:\u001b[0m a\u001b[35m]\u001b[0m\n',
-    codes: [denied],
-  },
-  plain: { value: 'x\n\njavascript:alert(1)\n\na\n', codes: [] },
-}, 'The TypeScript server no longer blanks a denied destination as PART 9 section 25 requires.');
-
-deepStrictEqual(await deniedSchemeRender(`${target}/debug/carve-mcp-rs`, []), {
-  html: { value: '<p>x</p>\n<p>javascript:alert(1)</p>\n<p>[img: a]</p>', codes: [] },
-  markdown: { value: 'x\n\njavascript:alert(1)\n\n[img: a\\]\n', codes: [] },
-  ansi: { value: 'x\n\njavascript:alert(1)\n\n[img: a]\n', codes: [] },
-  plain: { value: 'x\n\njavascript:alert(1)\n\n[img: a]\n', codes: [] },
-}, 'The Rust server changed how it treats a denied destination; see carve-mcp#76 and move this into the parity list if it now matches.');
+deepStrictEqual(
+  await unsanitizedRender(process.execPath, ['dist/index.js']),
+  { value: '<p><a href="javascript:alert(1)">x</a></p>', codes: [] },
+  'The Node server no longer honors sanitizeUrls: false.',
+);
+deepStrictEqual(
+  await unsanitizedRender(`${target}/debug/carve-mcp-rs`, []),
+  { value: '<p><a href="">x</a></p>', codes: ['destination-denied'] },
+  'The Rust server changed how it treats sanitizeUrls: false; see carve-mcp#78.',
+);
 
 // The write round trip restores mixed.crv, so both servers see the same file.
 const mixedSource = '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n';
