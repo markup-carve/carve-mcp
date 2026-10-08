@@ -3,9 +3,11 @@
  * them, so a walk keyed by field name reaches all of them.
  *
  * Spelled once here rather than in each walk. The names and the order are the
- * engine's own `CHILD_FIELDS` from `dist/ast-sidecars.js`, which drives the
- * exported `astNodePaths` and takes its positions from the schema-generated
- * `NODE_POSITION_KIND`. `ast-fields.test.ts` compares both.
+ * engine's own `ALL_OWNED_CHILD_FIELDS`, derived in `dist/owned-child-fields.js`
+ * from the schema-generated `NODE_POSITION_KIND`, less the `terms` and
+ * `definitions` slots that only the engine's internal record shape uses.
+ * `ast-fields.test.ts` compares against both the schema field set and that
+ * order, and reaches into a definition list to keep the exclusion honest.
  */
 export const AST_CHILD_FIELDS = [
   'target',

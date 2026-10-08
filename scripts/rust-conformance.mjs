@@ -306,6 +306,58 @@ try {
   throw new Error('TypeScript and Rust MCP conformance results differ.', { cause: error });
 }
 
+/**
+ * A denied URL scheme is the one shape the two servers do NOT agree on
+ * (carve-mcp#76), so it cannot go in the parity list above. It is pinned here
+ * instead, both sides spelled out, the way `knownTypeScriptOnly` pins the tool
+ * inventory: fixing the Rust side fails this assertion rather than passing
+ * quietly, and the parity case moves up into `calls` at that point.
+ *
+ * PART 9 section 25 blanks the destination and keeps the element, which is what
+ * the TypeScript side does. The Rust side drops the link to its text and the
+ * image to a placeholder, and reports no loss.
+ */
+const deniedScheme = '[x](javascript:alert(1))\n\n<javascript:alert(1)>\n\n![a](javascript:alert(1))\n';
+
+async function deniedSchemeRender(command, args) {
+  const client = new Client({ name: 'denied-scheme', version: '0.1.0' });
+  await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
+  try {
+    const rendered = {};
+    for (const renderTarget of ['html', 'markdown', 'ansi', 'plain']) {
+      const result = await client.callTool({
+        name: 'carve_render', arguments: { source: deniedScheme, target: renderTarget },
+      });
+      const value = result.structuredContent ?? JSON.parse(result.content[0].text);
+      rendered[renderTarget] = { value: value.value, codes: value.losses.map(({ code }) => code) };
+    }
+    return rendered;
+  } finally {
+    await client.close();
+  }
+}
+
+const denied = 'destination-denied';
+deepStrictEqual(await deniedSchemeRender(process.execPath, ['dist/index.js']), {
+  html: {
+    value: '<p><a href="">x</a></p>\n<p><a href="">javascript:alert(1)</a></p>\n<img src="" alt="a">',
+    codes: [denied, denied, denied],
+  },
+  markdown: { value: '[x]()\n\n[javascript:alert(1)]()\n\n![a]()\n', codes: [denied, denied, denied] },
+  ansi: {
+    value: '\u001b[4m\u001b[34mx\u001b[0m\u001b[2m ()\u001b[0m\n\n\u001b[4m\u001b[34mjavascript:alert(1)\u001b[0m\n\n\u001b[35m[img:\u001b[0m a\u001b[35m]\u001b[0m\n',
+    codes: [denied],
+  },
+  plain: { value: 'x\n\njavascript:alert(1)\n\na\n', codes: [] },
+}, 'The TypeScript server no longer blanks a denied destination as PART 9 section 25 requires.');
+
+deepStrictEqual(await deniedSchemeRender(`${target}/debug/carve-mcp-rs`, []), {
+  html: { value: '<p>x</p>\n<p>javascript:alert(1)</p>\n<p>[img: a]</p>', codes: [] },
+  markdown: { value: 'x\n\njavascript:alert(1)\n\n[img: a\\]\n', codes: [] },
+  ansi: { value: 'x\n\njavascript:alert(1)\n\n[img: a]\n', codes: [] },
+  plain: { value: 'x\n\njavascript:alert(1)\n\n[img: a]\n', codes: [] },
+}, 'The Rust server changed how it treats a denied destination; see carve-mcp#76 and move this into the parity list if it now matches.');
+
 // The write round trip restores mixed.crv, so both servers see the same file.
 const mixedSource = '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n';
 const mixedEdited = '- one\n-  two\n-  three';
