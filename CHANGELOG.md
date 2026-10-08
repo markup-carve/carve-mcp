@@ -4,7 +4,55 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- Assess table preservation in `carve_check_targets`. Non-HTML profiles now report `lossy` when table structure degrades, even if the engine reports zero render losses. Results declare their assessment scope.
+### Added
+
+- `carve_get_block` returns the exact source text of each selected block,
+  without an AST. It takes the selector kinds the edit tools already use and a
+  `scope`, so changing one paragraph in a large document no longer means sending
+  the whole source in and taking a full AST back (#73).
+- `carve_replace_source` splices Carve source over exactly the selected byte
+  range and keeps every other byte, so CRLF endings and author spacing such as
+  `-   item` survive an edit that the re-render-and-diff path would have
+  normalized (#74).
+- An `id` selector kind on `carve_select_ast_nodes` and `carve_plan_ast_edit`,
+  matching any node whose attributes carry that id. An author-written `{#id}`
+  on a paragraph, div, admonition, table, list, code block or span is
+  addressable directly; `heading-id` reads headings only (#72).
+
+### Fixed
+
+- Every name lookup compares exactly, in both servers, following
+  markup-carve/carve#2732. The project review's `broken-local-anchor` check
+  compares a fragment against a Carve document's heading ids as written, while
+  Markdown and Djot targets keep the case-insensitive comparison their own
+  renderers' slug rules imply. `carve_reference_graph` keys footnote and
+  link-reference definitions by their written label; every kind except headings
+  was lowercased, so `Used[^note]` resolved against `[^Note]:` and that
+  definition was not reported as an orphan (#75).
+
+### Known issues
+
+- The native Rust server drops a denied URL scheme's element instead of blanking
+  its destination, and reports no render loss for it, so `carve_check_targets`
+  calls such a document `compatible` where the Node server calls it `lossy`
+  (#76). The cross-server conformance harness pins the current difference, so a
+  fix on the Rust side fails that assertion rather than passing quietly.
+
+### Changed
+
+- `carve_check_targets` assesses table preservation separately. Merged cells,
+  captions, header roles, grouping and alignment can mark a target lossy even
+  when the engine reports zero render losses, in the Node and the Rust server
+  alike. A report states its scope and leaves a final PDF artifact unassessed
+  (#71).
+- The servers take the JavaScript engine at 0.1.10, from 0.1.9, and the native
+  Rust engine at 0.1.8, from 0.1.7. Engine 0.1.10 derives its ordered AST walk
+  from the schema rather than holding a `CHILD_FIELDS` literal, so the parity
+  test imports that list instead of scraping it out of `dist/ast-sidecars.js`,
+  where a scrape that no longer matched would have read as a failure. Its two
+  extra slots, `terms` and `definitions`, belong to the engine's internal
+  record shape; the wire AST spells a definition list as `items` and
+  `children`, which the fixture now reaches into.
 
 ## 0.1.6 - 2026-10-01
 

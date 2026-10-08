@@ -26,8 +26,20 @@ import { selectAstNodes } from './tools.js';
  * `nodeText` walks a single node and the reference graph walks a parse result.
  */
 const ENGINE_WIRE_FIELDS = new URL('../node_modules/@markup-carve/carve/dist/wire-fields.js', import.meta.url);
-const ENGINE_SIDECARS = new URL('../node_modules/@markup-carve/carve/dist/ast-sidecars.js', import.meta.url);
 const RUST_SERVER = new URL('../rust/src/server.rs', import.meta.url);
+
+/**
+ * Engine 0.1.10 derives the ordered walk from the schema instead of holding a
+ * `CHILD_FIELDS` literal, so the order is imported now rather than scraped out
+ * of `ast-sidecars.js`.
+ *
+ * Its two extra entries belong to the engine's internal record shape, where a
+ * definition list carries `terms` and `definitions`. The wire AST this server
+ * reads spells the same content as `items` and `children`, which the fixture
+ * below proves by reaching into one. Should the wire shape ever move to the
+ * record spelling, that fixture fails rather than this exclusion hiding it.
+ */
+const RECORD_ONLY_FIELDS = ['terms', 'definitions'];
 
 function literal(url: URL, pattern: RegExp): string[] {
   const found = pattern.exec(readFileSync(url, 'utf8'))?.[1];
@@ -54,6 +66,13 @@ const covered = {
         ],
       }],
     },
+    {
+      type: 'definition_list',
+      items: [
+        { type: 'definition_term', children: [text('TERM')] },
+        { type: 'definition_description', children: [{ type: 'paragraph', children: [text('DESCRIPTION')] }] },
+      ],
+    },
     { type: 'figure', target: { type: 'paragraph', children: [text('TARGET')] }, caption: [text('CAPTION')], shortCaption: [text('SHORTCAPTION')] },
     {
       type: 'block_extension',
@@ -79,8 +98,9 @@ const covered = {
 };
 
 const positions = [
-  'TITLE', 'CHILDREN', 'ITEMS', 'CELLS', 'BLOCKS', 'TARGET', 'CAPTION', 'SHORTCAPTION',
-  'FALLBACK', 'INLINE', 'CONTENT', 'PREFIX', 'LOCATOR', 'SUFFIX', 'OLD', 'NEW', 'BASE', 'ANNOTATION',
+  'TITLE', 'CHILDREN', 'ITEMS', 'CELLS', 'BLOCKS', 'TERM', 'DESCRIPTION', 'TARGET', 'CAPTION',
+  'SHORTCAPTION', 'FALLBACK', 'INLINE', 'CONTENT', 'PREFIX', 'LOCATOR', 'SUFFIX', 'OLD', 'NEW',
+  'BASE', 'ANNOTATION',
 ];
 
 describe('the AST child-field list', () => {
@@ -89,9 +109,24 @@ describe('the AST child-field list', () => {
     expect([...AST_CHILD_FIELDS].sort()).toStrictEqual([...schemaFields].sort());
   });
 
-  it("matches the order of the engine's own walk", () => {
-    const engineOrder = literal(ENGINE_SIDECARS, /CHILD_FIELDS = \[([^\]]+)\]/);
+  it("matches the order of the engine's own walk", async () => {
+    const { ALL_OWNED_CHILD_FIELDS } = await import(
+      '../node_modules/@markup-carve/carve/dist/owned-child-fields.js'
+    );
+
+    expect(ALL_OWNED_CHILD_FIELDS, 'the engine no longer exports its ordered walk').toBeInstanceOf(Array);
+    const engineOrder = ALL_OWNED_CHILD_FIELDS.filter((field) => !RECORD_ONLY_FIELDS.includes(field));
+    expect(engineOrder.length).toBeGreaterThan(0);
     expect([...AST_CHILD_FIELDS]).toStrictEqual(engineOrder);
+  });
+
+  it('excludes only fields the wire AST never spells', async () => {
+    const { ALL_OWNED_CHILD_FIELDS } = await import(
+      '../node_modules/@markup-carve/carve/dist/owned-child-fields.js'
+    );
+
+    expect(ALL_OWNED_CHILD_FIELDS.filter((field) => !AST_CHILD_FIELDS.includes(field as never)))
+      .toStrictEqual(RECORD_ONLY_FIELDS);
   });
 
   it('is spelled the same way in the Rust server', () => {
