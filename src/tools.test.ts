@@ -56,6 +56,15 @@ describe('Carve operations', () => {
     expect(() => render('# Hello', 'markdown', { preset: 'static-html' })).toThrow(/HTML target/);
     expect(() => render('[x]{samp}', 'markdown', { extensions: ['semantic-spans'] })).toThrow(/HTML target/);
   });
+  it('blanks a denied destination at either sanitizeUrls setting', () => {
+    const source = '[x](javascript:alert(1))\n';
+    const reported = render(source, 'html', { sanitizeUrls: true });
+    expect(reported.value).toBe('<p><a href="">x</a></p>');
+    expect(reported.losses.map(({ code }) => code)).toStrictEqual(['destination-denied']);
+    const silent = render(source, 'html', { sanitizeUrls: false });
+    expect(silent.value).toBe(reported.value);
+    expect(silent).toMatchObject({ losses: [], totalLosses: 0, truncated: false });
+  });
   it('keeps untrusted HTML inert unless explicitly enabled', () => {
     const source = '`<script>alert(1)</script>`{=html}';
     expect(render(source, 'html').value).not.toContain('<script>');

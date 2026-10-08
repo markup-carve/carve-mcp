@@ -37,7 +37,7 @@ const renderSettings = {
   smartTypography: z.enum(['glyph', 'source']).optional().describe('Render typographic glyphs or the punctuation the author typed.'),
   extensions: z.array(z.enum(['autolink', 'semantic-spans', 'wikilinks'])).max(3).default([]).describe('Opt-in extensions; semantic-spans is HTML-only.'),
   allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output. Disabled by default.'),
-  sanitizeUrls: z.boolean().default(true).describe('Block dangerous authored URL schemes. Keep enabled for untrusted input.'),
+  sanitizeUrls: z.boolean().default(true).describe('Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one.'),
 };
 const markdownDialect = z.object({
   highlight: z.boolean().optional(), superscript: z.boolean().optional(), math: z.boolean().optional(),

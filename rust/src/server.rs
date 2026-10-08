@@ -1590,7 +1590,7 @@ struct RenderInput {
     #[serde(default = "default_true")]
     #[schemars(
         default = "default_true",
-        description = "Block dangerous authored URL schemes. Keep enabled for untrusted input."
+        description = "Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one."
     )]
     sanitize_urls: bool,
 }
@@ -2362,6 +2362,30 @@ impl CarveServer {
         row
     }
 
+    const DENIED: &'static str = "destination-denied";
+
+    /// `sanitizeUrls: false` leaves the denial in place and only asks not to
+    /// hear about it, so the denied rows are dropped from the report and from
+    /// the totals (carve-mcp#78).
+    fn reported_losses(
+        losses: Vec<RenderLoss>,
+        total_losses: usize,
+        truncated: bool,
+        totals_by_code: &std::collections::BTreeMap<&'static str, usize>,
+        sanitize_urls: bool,
+    ) -> (Vec<RenderLoss>, usize, bool) {
+        if sanitize_urls {
+            return (losses, total_losses, truncated);
+        }
+        let total = total_losses - totals_by_code.get(Self::DENIED).copied().unwrap_or(0);
+        let reported: Vec<RenderLoss> = losses
+            .into_iter()
+            .filter(|loss| loss.code != Self::DENIED)
+            .collect();
+        let truncated = reported.len() < total;
+        (reported, total, truncated)
+    }
+
     fn render_result(result: carve::RenderResult<String>) -> CallToolResult {
         Self::output(json!({
             "value": result.value,
@@ -2816,6 +2840,10 @@ impl CarveServer {
         let mut options = Options::default()
             .with_raw_html(input.allow_raw_html)
             .with_positions(true);
+        // `Options::default()` denies too, so the destination is blanked at
+        // either setting and this server cannot be asked to emit a denied
+        // scheme (carve-mcp#78). What the input selects is whether the denial
+        // is reported, which `reported_losses` applies to the result.
         if input.sanitize_urls {
             // Not `set_link_policy(Some(LinkPolicy::default()))`: an explicitly
             // set policy routes the denial through a branch that removes the
@@ -2911,11 +2939,18 @@ impl CarveServer {
         match checked {
             Ok(result) => match result.value {
                 Ok(value) => {
+                    let (losses, total_losses, truncated) = Self::reported_losses(
+                        result.losses,
+                        result.total_losses,
+                        result.truncated,
+                        &result.totals_by_code,
+                        input.sanitize_urls,
+                    );
                     let mut output = json!({
                         "value": value,
-                        "losses": result.losses.into_iter().map(Self::loss).collect::<Vec<_>>(),
-                        "totalLosses": result.total_losses,
-                        "truncated": result.truncated,
+                        "losses": losses.into_iter().map(Self::loss).collect::<Vec<_>>(),
+                        "totalLosses": total_losses,
+                        "truncated": truncated,
                     });
                     if let Some((prepared, root)) = &prepared {
                         output["includes"] = include_report(
