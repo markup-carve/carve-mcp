@@ -107,7 +107,7 @@ jobs:
       - name: Archive Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath 
+        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath
           "${{ matrix.archive }}"
       - name: Upload release binary
         run: gh release upload "${{ inputs.tag }}" "${{ matrix.archive }}" --clobber
