@@ -315,40 +315,43 @@ try {
 }
 
 /**
- * `sanitizeUrls: false` is the one shape the two servers still disagree on
- * (carve-mcp#78), so it cannot go in the parity list. Both sides are pinned
- * here: a fix fails this assertion and the case moves up into `calls`.
- *
- * The Node server honors the switch and emits the raw destination. The Rust
- * server denies either way, so the switch does nothing there. Turning it on
- * would let the native server emit a `javascript:` href on request, which is a
- * call for the maintainer rather than a parity cleanup.
+ * Neither server may be asked to emit a denied scheme (carve-mcp#78): the
+ * destination is blanked at either setting of `sanitizeUrls`, and the switch
+ * selects only whether the denial is reported as a render loss. Both sides are
+ * pinned to the same answer here rather than compared against each other, so
+ * restoring the pass-through in either server fails this assertion instead of
+ * drifting.
  */
-async function unsanitizedRender(command, args) {
-  const client = new Client({ name: 'unsanitized', version: '0.1.0' });
+async function deniedRender(command, args, sanitizeUrls) {
+  const client = new Client({ name: 'denied', version: '0.1.0' });
   await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
   try {
     const result = await client.callTool({
       name: 'carve_render',
-      arguments: { source: '[x](javascript:alert(1))\n', target: 'html', sanitizeUrls: false },
+      arguments: { source: '[x](javascript:alert(1))\n', target: 'html', sanitizeUrls },
     });
     const value = result.structuredContent ?? JSON.parse(result.content[0].text);
-    return { value: value.value, codes: value.losses.map(({ code }) => code) };
+    return { value: value.value, codes: value.losses.map(({ code }) => code), totalLosses: value.totalLosses };
   } finally {
     await client.close();
   }
 }
 
-deepStrictEqual(
-  await unsanitizedRender(process.execPath, ['dist/index.js']),
-  { value: '<p><a href="javascript:alert(1)">x</a></p>', codes: [] },
-  'The Node server no longer honors sanitizeUrls: false.',
-);
-deepStrictEqual(
-  await unsanitizedRender(`${target}/debug/carve-mcp-rs`, []),
-  { value: '<p><a href="">x</a></p>', codes: ['destination-denied'] },
-  'The Rust server changed how it treats sanitizeUrls: false; see carve-mcp#78.',
-);
+for (const [server, command, args] of [
+  ['Node', process.execPath, ['dist/index.js']],
+  ['Rust', `${target}/debug/carve-mcp-rs`, []],
+]) {
+  deepStrictEqual(
+    await deniedRender(command, args, true),
+    { value: '<p><a href="">x</a></p>', codes: ['destination-denied'], totalLosses: 1 },
+    `The ${server} server stopped blanking and reporting a denied destination.`,
+  );
+  deepStrictEqual(
+    await deniedRender(command, args, false),
+    { value: '<p><a href="">x</a></p>', codes: [], totalLosses: 0 },
+    `The ${server} server treats sanitizeUrls: false as more than a reporting switch; see carve-mcp#78.`,
+  );
+}
 
 // The write round trip restores mixed.crv, so both servers see the same file.
 const mixedSource = '# Mixed   \n\nIntro   \n\n\n- one\n-  two\n';

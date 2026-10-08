@@ -72,8 +72,18 @@ function renderOptions(settings: RenderSettings) {
     smartTypography: settings.smartTypography,
     extensions: extensionInstances(settings.extensions),
     allowRawHtml: settings.allowRawHtml ?? false,
-    sanitizeUrls: settings.sanitizeUrls ?? true,
+    // Never the caller's value: neither server may be asked to emit a denied
+    // scheme (#78). `sanitizeUrls: false` selects whether the denial is
+    // reported, which `reportedLosses` applies to the result.
+    sanitizeUrls: true,
   };
+}
+
+function reportedLosses<T>(result: RenderResult<T>, settings: RenderSettings): RenderResult<T> {
+  if (settings.sanitizeUrls !== false) return result;
+  const losses = result.losses.filter((loss) => loss.code !== 'destination-denied');
+  const denied = result.lossCounts?.['destination-denied'] ?? result.losses.length - losses.length;
+  return { ...result, losses, totalLosses: result.totalLosses - denied, truncated: result.truncated && losses.length < result.totalLosses - denied };
 }
 
 export function validateSource(source: string): void {
@@ -109,13 +119,13 @@ export function render(source: string, target: RenderTarget, settings: RenderSet
     // expanded tree is rendered as it stands, so an include cannot change
     // meaning on the way back through the source form.
     const { doc, includes } = expandDocument(source, options.extensions, scope);
-    return { ...renderDocumentWithReport(doc, { ...(target === 'html' ? html : options), target }), includes };
+    return { ...reportedLosses(renderDocumentWithReport(doc, { ...(target === 'html' ? html : options), target }), settings), includes };
   }
   switch (target) {
-    case 'html': return carveToHtmlWithReport(source, html);
-    case 'markdown': return carveToMarkdownWithReport(source, options);
-    case 'plain': return carveToPlainTextWithReport(source, options);
-    case 'ansi': return carveToAnsiWithReport(source, options);
+    case 'html': return reportedLosses(carveToHtmlWithReport(source, html), settings);
+    case 'markdown': return reportedLosses(carveToMarkdownWithReport(source, options), settings);
+    case 'plain': return reportedLosses(carveToPlainTextWithReport(source, options), settings);
+    case 'ansi': return reportedLosses(carveToAnsiWithReport(source, options), settings);
   }
 }
 
