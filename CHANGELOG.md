@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.7 - 2026-10-08
 
 ### Added
 
@@ -30,16 +30,12 @@ All notable changes to this project are documented in this file.
   was lowercased, so `Used[^note]` resolved against `[^Note]:` and that
   definition was not reported as an orphan (#75).
 
-### Known issues
-
-- `sanitizeUrls: false` does nothing in the Rust server: it denies either way,
-  where the Node server emits the raw destination the input asks for. Making
-  them agree lets the native server emit a `javascript:` href on request, so it
-  is a decision rather than a cleanup (#78). The conformance harness pins the
-  current difference.
-
 ### Changed
 
+- `sanitizeUrls` selects whether a denied URL scheme is reported, not whether
+  it is written. A dangerous destination is blanked in both servers at either
+  setting; the Node server passed `false` through to the engine and emitted the
+  authored `javascript:` href on request (#78, #80).
 - The Rust server blanks a denied URL scheme's destination and reports the
   render loss, matching the Node server and PART 9 §25. It removed the element
   instead and reported nothing, so `carve_check_targets` called a document with
