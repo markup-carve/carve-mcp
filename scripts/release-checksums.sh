@@ -2,10 +2,13 @@
 set -euo pipefail
 
 tag="${1:?Usage: scripts/release-checksums.sh RELEASE_TAG}"
-asset_dir="$(mktemp -d)"
-trap 'rm -rf "$asset_dir"' EXIT
-
-gh release download "$tag" --pattern 'carve-mcp-rs-*' --dir "$asset_dir"
+if [[ -n "${CHECKSUMS_DIRECTORY:-}" ]]; then
+  asset_dir="$CHECKSUMS_DIRECTORY"
+else
+  asset_dir="$(mktemp -d)"
+  trap 'rm -rf "$asset_dir"' EXIT
+  gh release download "$tag" --pattern 'carve-mcp-rs-*' --dir "$asset_dir"
+fi
 mapfile -t assets < <(find "$asset_dir" -maxdepth 1 -type f ! -name '*.sha256' -printf '%f\n' | sort)
 legacy_assets=(
   carve-mcp-rs-aarch64-apple-darwin.tar.gz

@@ -92,7 +92,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/release-binary-smoke.mjs "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" --full
+          mkdir release-smoke
+          tar xzf "${{ matrix.archive }}" -C release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
@@ -100,7 +102,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          node scripts/release-binary-smoke.mjs "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" --full
+          New-Item -ItemType Directory -Path release-smoke
+          Expand-Archive "${{ matrix.archive }}" -DestinationPath release-smoke
+          node scripts/release-binary-smoke.mjs "release-smoke/${{ matrix.binary }}" --full
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         env:
           GH_TOKEN: ${{ github.token }}
@@ -245,10 +249,6 @@ jobs:
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
           REQUIRE_RELEASE_TAG: "1"
-      # npm cannot issue a package's FIRST publish over OIDC (npm/cli#8544), so
-      # 0.1.0 is published by hand and this job would otherwise die on a 403 for
-      # an already-published version, taking the Registry step below with it.
-      # The skip also makes a re-run after a failed later step harmless.
       - name: Verify prepared release notes before tagging
         env:
           GH_TOKEN: ${{ github.token }}
@@ -258,6 +258,16 @@ jobs:
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate | jq -cs --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | first // empty')"
           [ -n "$release" ] || { echo "::error::Prepare the release notes first"; exit 1; }
           [ -n "$(printf '%s' "$release" | jq -r '.body // ""' | tr -d '[:space:]')" ] || { echo "::error::Release notes are empty"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: native-archives
+      - name: Verify the complete native archive set before tagging
+        run: scripts/release-checksums.sh "$RELEASE_TAG"
+        env:
+          CHECKSUMS_DIRECTORY: ${{ github.workspace }}/native-archives
+          CHECKSUMS_DRY_RUN: '1'
       - name: Create the release tag after approval
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
         shell: bash
@@ -271,11 +281,6 @@ jobs:
             git tag "$RELEASE_TAG" "$GITHUB_SHA"
             git push origin "refs/tags/$RELEASE_TAG"
           fi
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: native-*
-          merge-multiple: true
-          path: native-archives
       - name: Upload verified native archives
         env:
           GH_TOKEN: ${{ github.token }}
@@ -284,6 +289,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # npm cannot issue a package's FIRST publish over OIDC (npm/cli#8544), so
+      # 0.1.0 is published by hand and this job would otherwise die on a 403 for
+      # an already-published version, taking the Registry step below with it.
+      # The skip also makes a re-run after a failed later step harmless.
       - name: Publish npm package with provenance
         shell: bash
         run: |
@@ -309,6 +318,71 @@ jobs:
       - name: Publish official MCP Registry entry
         run: scripts/publish-registry.sh
 
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.sha }}
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - name: Resolve and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-${INPUT_TAG}}"
+          [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${tag#v}"
+          test "$(node -p 'require("./package.json").version')" = "$version"
+          git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+          # A dispatch uses main to pick up packaging fixes for an existing
+          # release. Refuse it if the shipped application differs from its tag.
+          git diff --exit-code "$tag" -- src package.json package-lock.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          INPUT_TAG: ${{ inputs.version }}
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - name: Build and smoke-test locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --tag carve-mcp:smoke .
+          container="$(docker run --detach --rm --publish 3000:3000 \
+            --env CARVE_MCP_TOKEN=release-smoke-token carve-mcp:smoke)"
+          trap 'docker stop "$container" >/dev/null' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --silent http://127.0.0.1:3000/health >/dev/null; then
+              exit 0
+            fi
+            sleep "$attempt"
+          done
+          docker logs "$container"
+          exit 1
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - uses: docker/setup-buildx-action@5ac4a31b15f1c45ec652b8af78c2096c3a08368c # v3
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - uses: docker/metadata-action@703896b4f30f62d53f5530a80bcdc589a3f702bc # v5
+        id: meta
+        with:
+          images: ghcr.io/markup-carve/carve-mcp
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
+      - uses: docker/build-push-action@2ca78c6bec76527009825f31aae0532b4d40d820 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+        if: github.event_name == 'workflow_dispatch' && inputs.version != ''
       - name: Publish prepared release notes
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
         env:
@@ -322,6 +396,8 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      packages: write
+      attestations: write
   release-contract:
     if: github.event_name == 'workflow_dispatch' && inputs.version == ''
     runs-on: ubuntu-latest
