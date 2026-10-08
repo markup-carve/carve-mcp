@@ -350,7 +350,6 @@ jobs:
       # 0.1.0 is published by hand and this job would otherwise die on a 403 for
       # an already-published version, taking the Registry step below with it.
       # The skip also makes a re-run after a failed later step harmless.
-        if: ${{ inputs.publish }}
       - name: Publish npm package with provenance
         shell: bash
         run: |
@@ -444,6 +443,9 @@ jobs:
           done
           docker logs "$container"
           exit 1
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@5ac4a31b15f1c45ec652b8af78c2096c3a08368c # v3
       - uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241 # v3
         with:
