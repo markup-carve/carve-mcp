@@ -133,7 +133,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-smoke
-          gh release download "$RECOVERY_TAG" `
+          gh release download "$env:RECOVERY_TAG" `
             --pattern "${{ matrix.archive }}" --dir release-smoke
           Expand-Archive "release-smoke/${{ matrix.archive }}" -DestinationPath release-smoke
           $args = @()
