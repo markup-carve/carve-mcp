@@ -94,6 +94,9 @@ class WorkflowPolicyTests(unittest.TestCase):
     def test_package_publishing_has_a_nonpublishing_branch(self):
         for job in self.publisher["jobs"].values():
             for step in job.get("steps", []):
+                if "docker/build-push-action" in step.get("uses", ""):
+                    self.assertEqual(step["with"]["push"], "${{ inputs.publish }}")
+                    self.assertNotIn("if", step)
                 run = step.get("run", "")
                 if any(text in run for text in ["npm publish", "cargo publish", "gem push"]):
                     self.assertIn('if [ "$LANE_PUBLISH" = true ]; then', run)

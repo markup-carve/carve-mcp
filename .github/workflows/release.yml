@@ -107,7 +107,7 @@ jobs:
       - name: Archive Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath
+        run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath 
           "${{ matrix.archive }}"
       - name: Upload release binary
         run: gh release upload "${{ inputs.tag }}" "${{ matrix.archive }}" --clobber
@@ -462,12 +462,11 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ inputs.publish }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: mode=max
           sbom: true
-        if: ${{ inputs.publish }}
       - name: Verify published container manifest
         if: ${{ inputs.publish }}
         run: docker buildx imagetools inspect ghcr.io/markup-carve/carve-mcp:${{ inputs.version }}
