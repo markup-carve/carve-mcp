@@ -1,8 +1,8 @@
 use carve::extensions::SemanticSpan;
 use carve::{
-    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options,
-    Profile, RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks,
-    lint_carve, migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
+    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, Profile,
+    RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve,
+    migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
 };
 use regex::Regex;
 use rmcp::{
@@ -2350,11 +2350,14 @@ impl CarveServer {
             fields.insert("format".to_string(), json!(format));
         }
         if let Some(pos) = loss.pos {
-            fields.insert("pos".to_string(), json!({
-                "startLine": pos.start_line, "endLine": pos.end_line,
-                "startColumn": pos.start_column, "endColumn": pos.end_column,
-                "startOffset": pos.start_offset, "endOffset": pos.end_offset,
-            }));
+            fields.insert(
+                "pos".to_string(),
+                json!({
+                    "startLine": pos.start_line, "endLine": pos.end_line,
+                    "startColumn": pos.start_column, "endColumn": pos.end_column,
+                    "startOffset": pos.start_offset, "endOffset": pos.end_offset,
+                }),
+            );
         }
         row
     }
@@ -4177,7 +4180,9 @@ mod tests {
     /// either fails a consumer validating the wire (carve-mcp#76).
     #[test]
     fn a_loss_row_omits_the_fields_it_does_not_carry() {
-        let options = Options::default().with_positions(true).with_profile(Profile::full());
+        let options = Options::default()
+            .with_positions(true)
+            .with_profile(Profile::full());
         let report = with_render_loss_report(
             CarveRenderTarget::Html,
             CheckedRenderOptions::default(),
@@ -4187,9 +4192,15 @@ mod tests {
         let row = CarveServer::loss(report.losses.into_iter().next().unwrap());
         let fields = row.as_object().unwrap();
 
-        assert!(!fields.contains_key("format"), "format is null or present: {row}");
+        assert!(
+            !fields.contains_key("format"),
+            "format is null or present: {row}"
+        );
         assert!(fields.contains_key("pos"));
-        assert!(fields.values().all(|value| !value.is_null()), "a null reached the wire: {row}");
+        assert!(
+            fields.values().all(|value| !value.is_null()),
+            "a null reached the wire: {row}"
+        );
     }
 
     fn include_test_root() -> std::path::PathBuf {
