@@ -1,8 +1,6 @@
 name: Release
 
 on:
-  release:
-    types: [released]
   workflow_dispatch:
     inputs:
       release_tag:
