@@ -221,6 +221,15 @@ jobs:
             echo "  'no such package', so it is not treated as a verdict."
           fi
 
+  # THE ONLY GATED JOB. It pushes the tag, uploads the archives, publishes to
+  # npm, to GHCR and to the MCP registry, so it holds the first irreversible act
+  # and the approval belongs in front of it. Both jobs above are gates, neither
+  # carries `environment:`, and both are named in `needs:` - so the reviewer is
+  # looking at a green gate rather than at a run that has not started working.
+  #
+  # Nothing else in this workflow may carry `environment:`. GitHub prompts once
+  # per gated JOB, so the second one this file used to have on `recover-release`
+  # asked the maintainer to approve twice for one release.
   publish:
     if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
     needs:
@@ -394,8 +403,20 @@ jobs:
       id-token: write
       packages: write
       attestations: write
+  # RECOVERY PATH, and it is placed downstream of `publish` deliberately. These
+  # three jobs only ever run on a dispatch with an empty version, so on a
+  # release run they skip - but a job that is neither a gate nor downstream of
+  # the approval is a job that can reach a release artifact without passing it,
+  # and `needs: [publish]` with `!cancelled()` settles the ordering without
+  # blocking a recovery run, where `publish` is skipped.
+  #
+  # The success of the previous job in the chain is then asserted explicitly:
+  # `!cancelled()` on its own would let a FAILED predecessor through, which is
+  # the shape that turns a check into decoration.
   release-contract:
-    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
+    needs:
+      - publish
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.version == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -425,8 +446,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
 
   verify-released-binaries:
-    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
-    needs: release-contract
+    needs:
+      - publish
+      - release-contract
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.version == ''
+      && needs['release-contract'].result == 'success' }}
     name: Verify ${{ matrix.target }} release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -507,12 +531,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
 
+  # Recovery finishes a release that is ALREADY public: it re-checksums the
+  # existing assets and files the MCP registry entry for a version npm already
+  # serves, which the step below refuses to run unless `npm view` confirms it.
+  # That is maintenance rather than a release decision, and the
+  # `environment: release` it used to carry cost the maintainer a second
+  # approval prompt for one release without being able to withhold anything the
+  # first prompt had not already released.
   recover-release:
-    if: github.event_name == 'workflow_dispatch' && inputs.version == ''
-    needs: verify-released-binaries
+    needs:
+      - publish
+      - verify-released-binaries
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.version == ''
+      && needs['verify-released-binaries'].result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: release
     permissions:
       contents: write
       id-token: write
