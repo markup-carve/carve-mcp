@@ -156,7 +156,10 @@ arguments override configured depth, limit, and platforms for one call.
 `carve_render` supports `default`, `portable`, and HTML-only `static-html`
 presets. The portable preset lowercases heading IDs and transliterates where it
 can. Callers can also choose heading-ID behavior, loss policy, smart typography,
-and the `autolink`, `semantic-spans`, or `wikilinks` extensions.
+and the `autolink`, `semantic-spans`, or `wikilinks` extensions. Smart typography
+is `glyph` (the default), `source` for the punctuation the author typed, or
+`quotes-source`, which keeps typed quotes and apostrophes and still substitutes
+ellipses and dashes.
 
 `carve_migrate` exposes Markdown dialect switches explicitly, so migration does
 not invent constructs the source format did not enable. Raw HTML passthrough is
