@@ -13,8 +13,21 @@ mod workspace;
 
 const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write] [--tool-profile PROFILE]\n       carve-mcp-rs [--help | --version]\n\nProfiles: review, convert, structure, workspace, all (default).\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(server::WORKER_STACK_BYTES)
+        .build()
+    {
+        Ok(runtime) => runtime.block_on(run()),
+        Err(error) => {
+            eprintln!("carve-mcp-rs failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> ExitCode {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     match arguments.as_slice() {
         [argument] if matches!(argument.as_str(), "-h" | "--help") => {

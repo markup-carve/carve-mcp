@@ -1,7 +1,8 @@
-import { isAbsolute, relative, sep } from 'node:path';
-import { expandIncludes, parse, type CarveExtension, type Document } from '@markup-carve/carve';
+import { realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { expandIncludes, parse, type CarveExtension, type Document, type IncludeResolver } from '@markup-carve/carve';
 import { fileSystemResolver } from '@markup-carve/carve/node';
-import type { Workspace } from './workspace.js';
+import { documentPathRefusal, type Workspace } from './workspace.js';
 
 export interface IncludeRequest { includeRootIndex?: number; sourcePath?: string }
 
@@ -55,13 +56,61 @@ function contained(root: string, id: string): string | undefined {
   return path.split(sep).join('/');
 }
 
+/**
+ * The engine resolver behind the same document policy `carve_read_file` applies.
+ *
+ * The policy is checked on the path as written and on the canonical target, so
+ * neither `{{ .env }}` nor a `docs/env.md -> ../.env` symlink is read, and only
+ * a regular file is opened: reading a FIFO would block the process. Anything
+ * the engine resolver would refuse anyway (missing, outside the root,
+ * absolute) is left to it so its denial classes stay intact.
+ */
+export function policyResolver(root: string): IncludeResolver {
+  const inner = fileSystemResolver(root);
+  return (includePath, ctx) => {
+    if (isAbsolute(includePath)) return inner(includePath, ctx);
+    const parent = ctx.stack[ctx.stack.length - 1];
+    const base = parent ? dirname(resolve(root, parent)) : root;
+    const requested = resolve(base, includePath);
+    let real: string;
+    try { real = realpathSync(requested); }
+    catch { return inner(includePath, ctx); }
+    const lexical = contained(root, requested);
+    const canonical = contained(root, real);
+    if (lexical === undefined || canonical === undefined) return inner(includePath, ctx);
+    if (documentPathRefusal(lexical) || documentPathRefusal(canonical)) return { source: null, id: includePath, denial: 'denied' };
+    try { if (!statSync(real).isFile()) return { source: null, id: includePath, denial: 'denied' }; }
+    catch { return { source: null, id: includePath, denial: 'denied' }; }
+    return inner(includePath, ctx);
+  };
+}
+
+/** Rewrite every `pos.file` to its root-relative path, dropping one outside the root. */
+function relativizePositions(doc: Document, root: string): void {
+  const pending: unknown[] = [doc];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (!value || typeof value !== 'object') continue;
+    if (Array.isArray(value)) { pending.push(...value); continue; }
+    const record = value as Record<string, unknown>;
+    const pos = record.pos as Record<string, unknown> | undefined;
+    if (pos && typeof pos === 'object' && typeof pos.file === 'string') {
+      const file = contained(root, pos.file);
+      if (file === undefined) delete pos.file;
+      else pos.file = file;
+    }
+    for (const [key, child] of Object.entries(record)) if (key !== 'pos' && child && typeof child === 'object') pending.push(child);
+  }
+}
+
 export function expandDocument(source: string, extensions: CarveExtension[], scope: IncludeScope): { doc: Document; includes: IncludeReport } {
   const doc = parse(source, { extensions, positions: true });
   const expanded = expandIncludes(doc, source, {
-    resolve: fileSystemResolver(scope.root),
+    resolve: policyResolver(scope.root),
     ...(scope.sourcePath ? { sourcePath: scope.sourcePath } : {}),
     extensions,
   });
+  relativizePositions(expanded.doc, scope.root);
   const warnings = expanded.warnings.map((warning) => {
     // `detail` carries the resolver's own error text and is never forwarded.
     const file = warning.file === undefined ? undefined : contained(scope.root, warning.file);

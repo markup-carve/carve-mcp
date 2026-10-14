@@ -58,7 +58,8 @@ schema change exceeds its five-percent headroom.
 
 `carve_workspace_info` lists root indexes without exposing host paths.
 `carve_read_file` accepts common text-document extensions and excludes hidden
-paths and dependency directories.
+paths and dependency directories. The check runs on the requested path and again
+on the resolved one, so a symlink such as `docs/env.md -> ../.env` is refused.
 
 `carve_list_files` discovers eligible documents with bounded depth and result
 limits. `carve_review_workspace` lints Carve documents in one call, groups
@@ -101,7 +102,10 @@ change lint-oriented `valid` or `warningCount` fields.
 and `carve_parse` take `includeRootIndex`, an index into the roots configured
 with `--root`, and expansion then runs under that root through the engine's
 contained filesystem resolver with its default depth, byte, file-size and
-resolver-call budgets. A containment root can only come from the server's own
+resolver-call budgets. Includes follow the same document policy as `carve_read_file`, on
+the written and the resolved path: hidden paths, `node_modules`, `vendor`,
+`target` and unknown extensions are refused, and only regular files are read,
+so a FIFO cannot block the server. A containment root can only come from the server's own
 configuration, never from document text and never from the process working
 directory, so the two options are advertised only on a server that was started
 with a root.
@@ -113,7 +117,8 @@ against the root.
 Results carry an `includes` report: `warnings`, `dependencies`, and
 `suppressedWarnings`. A dependency names a target expansion touched and says
 whether it resolved, so a client can watch an unresolved one and re-render when
-it appears. Every path in the report is relative to the root, and a warning
+it appears. Every path in the report is relative to the root, as is `pos.file` on
+nodes `carve_parse` returns from an included file, and a warning
 never carries the resolver's own error text: a refused target, a missing one and
 one outside the root all report as `include-unresolved`, so the report cannot be
 used to probe the server's filesystem.
@@ -158,7 +163,10 @@ not invent constructs the source format did not enable. Raw HTML passthrough is
 disabled by default, and dangerous URL sanitization remains enabled unless a
 caller explicitly disables it.
 
-Inputs are limited to 1 MB.
+Inputs are limited to 1 MB. Tools that run the Carve writer (`carve_format`,
+`carve_apply_ast_patch`, `carve_apply_reversible_ast_patch`, `carve_plan_ast_edit`, the workspace formatting
+previews) refuse a document nested deeper than 256 AST levels with a tool error
+before writing, because the writer's cost climbs steeply with depth.
 
 ## Structured AST patches
 
