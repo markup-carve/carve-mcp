@@ -118,10 +118,10 @@ pub(crate) fn assess(ast: &Value, target: &str) -> Value {
                             if aligns.len() <= column {
                                 aligns.resize(column + 1, None);
                             }
-                            if let Some(align) = cell.get("align") {
-                                if header || (!saw_header && aligns[column].is_none()) {
-                                    aligns[column] = Some(align);
-                                }
+                            if let Some(align) = cell.get("align")
+                                && (header || (!saw_header && aligns[column].is_none()))
+                            {
+                                aligns[column] = Some(align);
                             }
                         }
                     }
