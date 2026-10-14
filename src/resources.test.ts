@@ -13,8 +13,8 @@ describe('documentation resources', () => {
   });
 
   it('documents every stable lint diagnostic name', () => {
-    expect(lintRuleNames).toHaveLength(24);
-    expect(lintRuleNames).toEqual(expect.arrayContaining(['platform-mention-token', 'platform-issue-reference']));
+    expect(lintRuleNames).toHaveLength(25);
+    expect(lintRuleNames).toEqual(expect.arrayContaining(['platform-mention-token', 'platform-issue-reference', 'table-span-marker-blocked']));
     expect(lintRuleMarkdown('unclosed-container-fence')).toContain('without a closer');
     expect(lintRuleMarkdown('constructor')).toBeUndefined();
     expect(lintRuleMarkdown('__proto__')).toBeUndefined();

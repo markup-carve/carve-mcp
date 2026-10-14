@@ -19,6 +19,7 @@ export const lintRuleDescriptions = {
   'quote-fence-ends-the-quote-above': 'A quote fence closes a preceding quote instead of opening the intended block.',
   'semantic-attribute-outside-span': 'A semantic attribute is attached where it cannot create the intended span.',
   'semantic-attribute-value-ignored': 'The selected semantic span ignores an authored attribute value.',
+  'table-span-marker-blocked': 'A table span marker cannot extend a cell, so it renders as a cell of its own.',
   'unclosed-container-fence': 'A colon-fenced container reaches the end of the document without a closer.',
   'unresolved-footnote': 'A footnote reference has no matching definition.',
   'unresolved-reference-link': 'A reference-style link has no matching definition or heading.',

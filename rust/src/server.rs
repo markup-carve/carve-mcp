@@ -1606,7 +1606,7 @@ struct MigrateInput {
     markdown_dialect: Option<MarkdownDialect>,
 }
 
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MarkdownDialect {
     #[serde(default)]
@@ -1617,7 +1617,8 @@ struct MarkdownDialect {
     math: bool,
     #[serde(default)]
     inline_footnotes: bool,
-    #[serde(default)]
+    // On by default, as in carve-lang 0.1.9 and carve-js 0.1.11 Markdown import.
+    #[serde(default = "default_true")]
     abbreviations: bool,
     #[serde(default)]
     fenced_divs: bool,
@@ -1627,6 +1628,20 @@ struct MarkdownDialect {
 
 fn default_true() -> bool {
     true
+}
+
+impl Default for MarkdownDialect {
+    fn default() -> Self {
+        Self {
+            highlight: false,
+            superscript: false,
+            math: false,
+            inline_footnotes: false,
+            abbreviations: true,
+            fenced_divs: false,
+            attributes: false,
+        }
+    }
 }
 
 fn default_render_preset() -> RenderPreset {
@@ -1725,12 +1740,14 @@ fn migrate_markdown_dialect(
     while source.contains(&token_prefix) {
         token_prefix.push('_');
     }
+    let protected = std::cell::Cell::new(0usize);
     let mut protect = |pattern: &str, replacement: &dyn Fn(&regex::Captures<'_>) -> String| {
         value = Regex::new(pattern)
             .unwrap()
             .replace_all(&value, |caps: &regex::Captures<'_>| {
                 let token = format!("{token_prefix}{}X", replacements.len());
                 replacements.push(replacement(caps));
+                protected.set(protected.get() + 1);
                 token
             })
             .into_owned();
@@ -1741,6 +1758,7 @@ fn migrate_markdown_dialect(
         c[0].to_owned()
     });
     protect(r"`+[^`\n]*`+", &|c| c[0].to_owned());
+    let code_rewrites = protected.get();
     if dialect.highlight {
         protect(r"==([^=\n]+)==", &|c| format!("={}=", &c[1]));
     }
@@ -1760,11 +1778,18 @@ fn migrate_markdown_dialect(
     } else {
         protect(r"(?m)^\*\[([^\]]+)\]:(.*)$", &|c| format!("\\{}", &c[0]));
     }
+    let before_divs = protected.get();
     if dialect.fenced_divs {
         protect(r"(?m)^:::(.*)$", &|c| c[0].to_owned());
     } else {
         protect(r"(?m)^:::(.*)$", &|c| format!("\\{}", &c[0]));
     }
+    // An escaped `:::` line is still a Markdown paragraph the importer can assess.
+    let div_escapes = if dialect.fenced_divs {
+        0
+    } else {
+        protected.get() - before_divs
+    };
     if dialect.attributes {
         protect(r"(\[[^\]\n]+\])\{([^{}\n]+)\}", &|c| c[0].to_owned());
     } else {
@@ -1773,11 +1798,25 @@ fn migrate_markdown_dialect(
         });
     }
     let mut result = migrate_markdown(&value);
-    if !replacements.is_empty() {
-        // Tokenized dialect constructs read as plain prose, so from carve-lang
-        // 0.1.7 the importer certifies them as literal text preserved exactly.
-        // Report on what the caller sent, which is also what carve-js reports
-        // from its native dialect option.
+    let dialect_enabled = dialect.highlight
+        || dialect.superscript
+        || dialect.math
+        || dialect.inline_footnotes
+        || dialect.fenced_divs
+        || dialect.attributes;
+    if dialect_enabled || replacements.len() > code_rewrites + div_escapes {
+        // The importer cannot vouch for dialect constructs; carve-js reports
+        // this same single row from its native dialect option.
+        result.report.diagnostics = vec![carve::MigrationDiagnostic {
+            code: "fidelity-unverified".to_owned(),
+            message: "Markdown construct assessment is incomplete.".to_owned(),
+            severity: carve::HtmlImportSeverity::Warning,
+            fidelity: carve::MigrationFidelity::Dropped,
+            confidence: carve::MigrationConfidence::Fallback,
+            path: None,
+        }];
+    } else if code_rewrites + div_escapes > 0 {
+        // Nothing was rewritten that Markdown reads differently: assess the input.
         result.report = migrate_markdown(source).report;
     }
     for (index, replacement) in replacements.into_iter().enumerate() {
@@ -4329,6 +4368,25 @@ mod tests {
                 "preserved".to_owned(),
                 "exact".to_owned()
             )
+        );
+    }
+
+    #[test]
+    fn abbreviation_definitions_import_by_default() {
+        let source = "*[HTML]: Hyper Text\n\nHTML";
+        assert!(
+            migrate_markdown_dialect(source, None)
+                .value
+                .starts_with("*[HTML]:")
+        );
+        let off = MarkdownDialect {
+            abbreviations: false,
+            ..Default::default()
+        };
+        assert!(
+            migrate_markdown_dialect(source, Some(&off))
+                .value
+                .starts_with("\\*[HTML]:")
         );
     }
 

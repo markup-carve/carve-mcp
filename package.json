@@ -47,7 +47,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "0.1.10",
+    "@markup-carve/carve": "github:markup-carve/carve-js#26ccd5a57b9b88aeac75c6404f67f3fb8945cce5",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "diff": "^8.0.4",
