@@ -4,6 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+# Pull requests share one group per PR so a new push cancels the stale run;
+# every other event gets its own group, since GitHub keeps one pending run per group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -37,9 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # Pull requests restore what main saved; only main writes, so PR caches
+      # never evict it.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: rust
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --manifest-path rust/Cargo.toml --check
       - run: cargo test --manifest-path rust/Cargo.toml --locked
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -51,7 +61,11 @@ jobs:
       - run: npm run check:rust-resources
       - run: npm run test:rust-conformance
 
+  # Release builds of the shipped targets. The `rust` job already compiles and
+  # tests the crate on every pull request, so these run after merge (and on
+  # dispatch); release.yml builds the archives itself.
   rust-release-targets:
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
@@ -67,6 +81,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: rust
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install musl toolchain
         if: matrix.install_musl
         run: sudo apt-get update && sudo apt-get install --yes musl-tools
