@@ -139,7 +139,7 @@ fn attribute_id(record: &serde_json::Map<String, Value>) -> Option<&str> {
     record.get("attrs")?.as_object()?.get("id")?.as_str()
 }
 
-pub(crate) fn ast_nodes<'a>(value: &'a Value) -> Vec<(String, &'a serde_json::Map<String, Value>)> {
+pub(crate) fn ast_nodes(value: &Value) -> Vec<(String, &serde_json::Map<String, Value>)> {
     fn visit<'a>(
         value: &'a Value,
         path: String,
@@ -534,7 +534,7 @@ fn explain_ast_operations(
     operations: &[carve::AstPatchOperation],
 ) -> Vec<PatchChangeOutputSchema> {
     let mut nodes = ast_nodes(ast);
-    nodes.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    nodes.sort_by_key(|right| std::cmp::Reverse(right.0.len()));
     operations
         .iter()
         .map(|operation| {
@@ -1824,8 +1824,18 @@ fn migrate_markdown_dialect(
             .value
             .replace(&format!("{token_prefix}{index}X"), &replacement);
     }
-    if result.value.ends_with('\n') {
+    let trailing_linefeeds = source[source.trim_end_matches(['\r', '\n']).len()..]
+        .bytes()
+        .filter(|&byte| byte == b'\n')
+        .count();
+    if trailing_linefeeds == 0 && result.value.ends_with('\n') {
         result.value.pop();
+    } else if trailing_linefeeds >= 2
+        && result.value != "\n"
+        && result.value.ends_with('\n')
+        && !result.value.ends_with("\n\n")
+    {
+        result.value.push('\n');
     }
     result
 }
@@ -2104,13 +2114,12 @@ impl CarveServer {
         }
         if workspace.is_none() {
             for name in ["carve_render", "carve_parse"] {
-                if let Some(route) = tools.map.get_mut(name) {
-                    if let Some(Value::Object(properties)) =
+                if let Some(route) = tools.map.get_mut(name)
+                    && let Some(Value::Object(properties)) =
                         std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
-                    {
-                        properties.remove("includeRootIndex");
-                        properties.remove("sourcePath");
-                    }
+                {
+                    properties.remove("includeRootIndex");
+                    properties.remove("sourcePath");
                 }
             }
             for name in [
@@ -4419,6 +4428,26 @@ mod tests {
             .value,
             "^[note]"
         );
+    }
+
+    #[test]
+    fn markdown_migration_keeps_input_final_newline() {
+        for (source, expected) in [
+            ("a\n", "a\n"),
+            ("# H\n", "# H\n"),
+            ("- a\n- b\n", "- a\n- b\n"),
+            ("a\n\n", "a\n\n"),
+            ("a\n\n\n", "a\n\n"),
+            ("a\r\n\r\n", "a\n\n"),
+            ("\n\n", "\n"),
+            (
+                "| A | B |\n| --- | --- |\n| a | b |\n",
+                "|= A |= B |\n| a | b |\n",
+            ),
+        ] {
+            assert_eq!(migrate_markdown_dialect(source, None).value, expected);
+        }
+        assert_eq!(migrate_markdown_dialect("a", None).value, "a");
     }
 
     #[test]
