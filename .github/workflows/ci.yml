@@ -21,7 +21,9 @@ jobs:
   test:
     strategy:
       matrix:
-        node-version: [20, 22, 24]
+        # Node 20 is past end of life but still declared (engines); it runs
+        # daily in eol-runtimes.yml instead of on every PR.
+        node-version: [22, 24]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
