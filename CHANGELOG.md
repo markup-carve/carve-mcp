@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Security
+
+- Include expansion in `carve_render` and `carve_parse` follows the `carve_read_file` document policy on both servers: `{{ .env }}`, `{{ .git/config }}`, a path under `node_modules`, `vendor` or `target`, or an unsupported extension stays unresolved, checked on the written and the resolved path.
+- `carve_read_file` and `carve_write_file` check the hidden-path and extension policy on the resolved path too, so a symlink such as `docs/env.md -> ../.env` is refused on both servers.
+- `carve_parse` with includes reports `pos.file` relative to the root instead of as an absolute host path, on both servers.
+- An include naming a FIFO or other non-regular file is refused instead of read, which blocked the Node event loop or pinned a Rust worker.
+- Tools that run the Carve writer refuse a document nested deeper than 256 AST levels with a tool error instead of stalling every other request, on both servers. The Rust server gives its runtime workers a 64 MiB stack, so a deep `carve_render` no longer overflows in an unoptimized build.
+- A workspace write into a missing directory names the requested path instead of the absolute host path; other workspace errors on the Node server have the root path removed.
+
 ## 0.1.8 - 2026-10-14
 
 ### Breaking

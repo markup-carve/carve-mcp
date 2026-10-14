@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { MAX_SOURCE_BYTES } from './tools.js';
 import type { ReviewConfiguration } from './config.js';
 
@@ -26,6 +26,25 @@ function sha256(content: string | Uint8Array): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
+/**
+ * Why a root-relative path is not a workspace document, or undefined when it is.
+ *
+ * Applied to the path as requested AND as resolved: a symlink such as
+ * `docs/env.md -> ../.env` passes the first check and fails the second.
+ */
+export function documentPathRefusal(path: string): string | undefined {
+  const segments = path.split(/[\\/]/);
+  if (segments.some((segment) => segment.startsWith('.') || SKIPPED_DIRECTORIES.has(segment))) {
+    return 'Hidden paths and dependency directories are not readable workspace documents.';
+  }
+  if (!DOCUMENT_EXTENSIONS.has(extname(path).toLowerCase())) return 'Unsupported document extension.';
+  return undefined;
+}
+
+function rootRelative(root: string, candidate: string): string {
+  return relative(root, candidate).split(sep).join('/');
+}
+
 function inside(root: string, candidate: string): boolean {
   const path = relative(root, candidate);
   return path === '' || (!path.startsWith('..') && !isAbsolute(path));
@@ -40,14 +59,15 @@ export class Workspace {
     if (isAbsolute(path)) throw new Error('Workspace paths must be relative.');
     const target = resolve(root.real, path);
     if (!inside(root.real, target)) throw new Error('Path escapes the configured workspace root.');
-    const segments = path.split(/[\\/]/);
-    if (segments.some((segment) => segment.startsWith('.') || SKIPPED_DIRECTORIES.has(segment))) {
-      throw new Error('Hidden paths and dependency directories are not readable workspace documents.');
-    }
-    if (!DOCUMENT_EXTENSIONS.has(extname(path).toLowerCase())) {
-      throw new Error('Unsupported document extension.');
-    }
+    const refusal = documentPathRefusal(path);
+    if (refusal) throw new Error(refusal);
     return { root, target };
+  }
+
+  private resolvedRefusal(root: WorkspaceRoot, canonical: string): void {
+    if (!inside(root.real, canonical)) throw new Error('Resolved path escapes the configured workspace root.');
+    const refusal = documentPathRefusal(rootRelative(root.real, canonical));
+    if (refusal) throw new Error(`Resolved path refused: ${refusal}`);
   }
 
   async list(rootIndex: number, options: ListOptions = {}) {
@@ -81,12 +101,29 @@ export class Workspace {
     return { rootIndex, files, truncated, maxDepth, limit };
   }
 
+  /** Run a filesystem step, keeping the root's host path out of any error it raises. */
+  private async hostless<T>(rootIndex: number, step: () => Promise<T>): Promise<T> {
+    try { return await step(); }
+    catch (error) {
+      const root = this.roots[rootIndex];
+      if (!root || !(error instanceof Error)) throw error;
+      let message = error.message;
+      for (const host of [root.real, root.configured]) message = message.split(`${host}${sep}`).join('').split(host).join('.');
+      if (message === error.message) throw error;
+      throw new Error(message);
+    }
+  }
+
   async read(rootIndex: number, path: string) {
+    return this.hostless(rootIndex, () => this.readDocument(rootIndex, path));
+  }
+
+  private async readDocument(rootIndex: number, path: string) {
     const { root, target } = this.requested(rootIndex, path);
     let canonical: string;
     try { canonical = await realpath(target); }
     catch { throw new Error(`Workspace file not found: ${path}`); }
-    if (!inside(root.real, canonical)) throw new Error('Resolved path escapes the configured workspace root.');
+    this.resolvedRefusal(root, canonical);
     const info = await stat(canonical);
     if (!info.isFile()) throw new Error('Path is not a regular file.');
     if (info.size > MAX_SOURCE_BYTES) throw new Error(`File exceeds the ${MAX_SOURCE_BYTES}-byte limit.`);
@@ -99,18 +136,24 @@ export class Workspace {
   }
 
   async write(rootIndex: number, path: string, content: string, expectedSha256?: string, dryRun = true) {
+    return this.hostless(rootIndex, () => this.writeDocument(rootIndex, path, content, expectedSha256, dryRun));
+  }
+
+  private async writeDocument(rootIndex: number, path: string, content: string, expectedSha256: string | undefined, dryRun: boolean) {
     if (!this.allowWrite) throw new Error('Workspace writes are disabled. Start carve-mcp with --allow-write to enable them.');
     const bytes = Buffer.byteLength(content, 'utf8');
     if (bytes > MAX_SOURCE_BYTES) throw new Error(`Content exceeds the ${MAX_SOURCE_BYTES}-byte limit.`);
     const { root, target } = this.requested(rootIndex, path);
-    const parent = await realpath(dirname(target));
+    let parent: string;
+    try { parent = await realpath(dirname(target)); }
+    catch { throw new Error(`Workspace directory not found for ${path}.`); }
     if (!inside(root.real, parent)) throw new Error('Resolved parent escapes the configured workspace root.');
 
     let currentSha256: string | null = null;
     let currentMode = 0o600;
     try {
       const canonical = await realpath(target);
-      if (!inside(root.real, canonical)) throw new Error('Resolved path escapes the configured workspace root.');
+      this.resolvedRefusal(root, canonical);
       const currentInfo = await stat(canonical);
       if (!currentInfo.isFile()) throw new Error(`Workspace path is not a regular file: ${path}`);
       currentMode = currentInfo.mode & 0o7777;

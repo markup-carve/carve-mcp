@@ -20,6 +20,7 @@ import {
   migrateBbcode,
   migrateHtml,
   migrateMarkdown,
+  parse as parseCarve,
   type LintPlatform,
   type MigrationResult,
   type RenderResult,
@@ -35,6 +36,14 @@ import { expandDocument, type IncludeReport, type IncludeScope } from './include
 export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
 export const MAX_AST_SELECTOR_MATCHES = 100;
+/**
+ * Deepest tree the Carve writer is handed, counted in typed AST nodes.
+ *
+ * The writer's cost grows steeply with nesting (a 230-level loose list took
+ * 18 s and blocked every other request), so depth is refused up front. No
+ * real document comes close; the Rust server enforces the same bound.
+ */
+export const MAX_WRITER_DEPTH = 256;
 export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
 export type SourceFormat = 'html' | 'markdown' | 'djot' | 'bbcode';
 export type RenderPreset = 'default' | 'portable' | 'static-html';
@@ -99,8 +108,32 @@ export function lint(source: string, platforms: LintPlatform[] = []) {
   return { valid: warnings.length === 0, warningCount: warnings.length, warnings };
 }
 
+/** Typed-node nesting depth of a document or AST, stopping once it passes `limit`. */
+export function nestingDepth(value: unknown, limit = MAX_WRITER_DEPTH): number {
+  let deepest = 0;
+  const pending: Array<[unknown, number]> = [[value, 0]];
+  while (pending.length > 0) {
+    const [item, depth] = pending.pop()!;
+    if (!item || typeof item !== 'object') continue;
+    if (Array.isArray(item)) { for (const child of item) pending.push([child, depth]); continue; }
+    const record = item as Record<string, unknown>;
+    const level = typeof record.type === 'string' ? depth + 1 : depth;
+    if (level > deepest) deepest = level;
+    if (deepest > limit) return deepest;
+    for (const [key, child] of Object.entries(record)) if (key !== 'pos' && child && typeof child === 'object') pending.push([child, level]);
+  }
+  return deepest;
+}
+
+export function assertWriterDepth(value: unknown): void {
+  if (nestingDepth(value) > MAX_WRITER_DEPTH) {
+    throw new Error(`Document nests deeper than ${MAX_WRITER_DEPTH} AST levels; the Carve writer limit is ${MAX_WRITER_DEPTH}.`);
+  }
+}
+
 export function format(source: string): RenderResult {
   validateSource(source);
+  assertWriterDepth(parseCarve(source));
   return carveToCarveWithReport(source);
 }
 
@@ -295,6 +328,7 @@ export function planSemanticAstEdit(source: string, selector: AstSelector, edit:
   const semanticAfter = semanticAst(after) as AstJsonDocument;
   semanticAfter.srcByteLength = 0;
   const editedBytes = validateStructuredPayload(semanticAfter, 'Edited AST');
+  assertWriterDepth(semanticAfter);
   const rendered = renderCarve(fromAstJson(semanticAfter, editedBytes));
   const canonicalAfter = parse(rendered);
   const reversiblePatch = createReversibleStructuredAstPatch(before, canonicalAfter);
@@ -558,6 +592,7 @@ export function applyStructuredAstPatch(ast: unknown, operations: unknown[]) {
   const base = validateAst(ast, 'AST');
   const patched = applyAstPatch(base, operations);
   const normalized = fromAstJson(patched, Buffer.byteLength(JSON.stringify(patched), 'utf8'));
+  assertWriterDepth(normalized);
   return { ast: toAstJson(normalized), source: renderCarve(normalized) };
 }
 

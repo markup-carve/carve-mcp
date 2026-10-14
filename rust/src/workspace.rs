@@ -6,7 +6,6 @@ use std::{
 };
 
 use atomic_write_file::OpenOptions as AtomicOpenOptions;
-use carve::CheckedRenderOptions;
 use regex::Regex;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -46,6 +45,25 @@ fn relative_string(path: &Path) -> String {
         .map(|part| part.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Why a root-relative path is not a workspace document, or `None` when it is.
+///
+/// Applied to the path as requested AND as resolved, so a symlink such as
+/// `docs/env.md -> ../.env` is refused by the second check.
+pub fn document_path_refusal(relative: &Path) -> Option<&'static str> {
+    if relative.components().any(|part| {
+        let value = part.as_os_str().to_string_lossy();
+        value.starts_with('.') || matches!(value.as_ref(), "node_modules" | "vendor" | "target")
+    }) {
+        return Some(
+            "Hidden paths and dependency directories are not readable workspace documents.",
+        );
+    }
+    if !supported(relative) {
+        return Some("Unsupported document extension.");
+    }
+    None
 }
 
 fn supported(path: &Path) -> bool {
@@ -116,19 +134,20 @@ impl Workspace {
         {
             return Err("Workspace path escapes the configured root.".into());
         }
-        if relative.components().any(|part| {
-            let value = part.as_os_str().to_string_lossy();
-            value.starts_with('.') || matches!(value.as_ref(), "node_modules" | "vendor" | "target")
-        }) {
-            return Err(
-                "Hidden paths and dependency directories are not readable workspace documents."
-                    .into(),
-            );
-        }
-        if !supported(relative) {
-            return Err("Unsupported document extension.".into());
+        if let Some(refusal) = document_path_refusal(relative) {
+            return Err(refusal.into());
         }
         Ok((root, root.0.join(relative)))
+    }
+
+    fn check_resolved(root: &Root, canonical: &Path) -> Result<(), String> {
+        let relative = canonical
+            .strip_prefix(&root.0)
+            .map_err(|_| "Resolved path escapes the configured workspace root.".to_owned())?;
+        match document_path_refusal(relative) {
+            Some(refusal) => Err(format!("Resolved path refused: {refusal}")),
+            None => Ok(()),
+        }
     }
 
     pub fn include_scope(
@@ -162,9 +181,7 @@ impl Workspace {
         let (root, requested) = self.requested(root_index, path)?;
         let canonical = fs::canonicalize(&requested)
             .map_err(|_| format!("Workspace file not found: {path}"))?;
-        if !canonical.starts_with(&root.0) {
-            return Err("Resolved path escapes the configured workspace root.".into());
-        }
+        Self::check_resolved(root, &canonical)?;
         let metadata = fs::metadata(&canonical).map_err(|error| error.to_string())?;
         if !metadata.is_file() {
             return Err("Path is not a regular file.".into());
@@ -292,9 +309,12 @@ impl Workspace {
         }
         let (root, target) = self.requested(root_index, path)?;
         let parent = fs::canonicalize(target.parent().ok_or("Workspace path has no parent.")?)
-            .map_err(|error| error.to_string())?;
+            .map_err(|_| format!("Workspace directory not found for {path}."))?;
         if !parent.starts_with(&root.0) {
             return Err("Resolved parent escapes the configured workspace root.".into());
+        }
+        if let Ok(canonical) = fs::canonicalize(&target) {
+            Self::check_resolved(root, &canonical)?;
         }
         let existing = fs::read(&target).ok();
         let current = existing.as_deref().map(digest);
@@ -521,8 +541,7 @@ impl Workspace {
             ) {
                 continue;
             }
-            let formatted = carve::to_carve_with_report(source, CheckedRenderOptions::default())
-                .map_err(|error| error.to_string())?;
+            let formatted = crate::server::format_carve_checked(source)?;
             if formatted.value == *source {
                 continue;
             }

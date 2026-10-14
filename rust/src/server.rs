@@ -1961,6 +1961,210 @@ pub struct CarveServer {
     workspace: Option<Workspace>,
 }
 
+/// Deepest tree the Carve writer is handed, counted in typed AST nodes.
+///
+/// The writer's cost grows steeply with nesting (a 230-level loose list took
+/// over 20 s per call), so depth is refused up front. The TypeScript server
+/// enforces the same bound.
+pub const MAX_WRITER_DEPTH: usize = 256;
+
+/// Stack for each runtime worker. Tool handlers run the engine on the worker,
+/// and an unoptimized build recurses deeply enough to overflow the 2 MiB default.
+pub const WORKER_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+/// Whether interchange-AST JSON nests typed nodes deeper than `limit`.
+///
+/// A byte scan, not a `Value`: serde_json's recursion limit and the stack are
+/// both smaller than the trees this has to measure.
+pub fn ast_json_deeper_than(json: &str, limit: usize) -> bool {
+    let bytes = json.as_bytes();
+    // 0 = array, 1 = object, 2 = object carrying a `type` key.
+    let mut stack: Vec<u8> = Vec::new();
+    let mut typed = 0usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'{' => stack.push(1),
+            b'[' => stack.push(0),
+            b'}' | b']' => {
+                if stack.pop() == Some(2) {
+                    typed -= 1;
+                }
+            }
+            b'"' => {
+                let start = index + 1;
+                index += 1;
+                while index < bytes.len() && bytes[index] != b'"' {
+                    index += if bytes[index] == b'\\' { 2 } else { 1 };
+                }
+                let end = index.min(bytes.len());
+                let mut next = index + 1;
+                while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                    next += 1;
+                }
+                if next < bytes.len()
+                    && bytes[next] == b':'
+                    && &bytes[start..end] == b"type"
+                    && stack.last() == Some(&1)
+                {
+                    *stack.last_mut().expect("checked above") = 2;
+                    typed += 1;
+                    if typed > limit {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    false
+}
+
+fn writer_depth_error() -> String {
+    format!(
+        "Document nests deeper than {MAX_WRITER_DEPTH} AST levels; the Carve writer limit is {MAX_WRITER_DEPTH}."
+    )
+}
+
+/// `carve::to_carve_with_report` behind the writer depth guard.
+pub fn format_carve_checked(source: &str) -> Result<carve::RenderResult<String>, String> {
+    if ast_json_deeper_than(
+        &carve::to_json_with_options(source, &Options::default()),
+        MAX_WRITER_DEPTH,
+    ) {
+        return Err(writer_depth_error());
+    }
+    carve::to_carve_with_report(source, CheckedRenderOptions::default())
+        .map_err(|error| error.to_string())
+}
+
+/// `carve::render_carve` behind the writer depth guard.
+fn render_carve_checked(document: &carve::Document) -> Result<String, String> {
+    let json = carve::try_to_json(document).map_err(|error| error.to_string())?;
+    if ast_json_deeper_than(&json, MAX_WRITER_DEPTH) {
+        return Err(writer_depth_error());
+    }
+    carve::render_carve(document).map_err(|error| error.to_string())
+}
+
+/// The engine resolver behind the same document policy `carve_read_file` applies.
+///
+/// The policy is checked on the path as written and on the canonical target,
+/// and only a regular file is read: reading a FIFO would pin the worker. What
+/// the engine resolver refuses anyway (missing, outside the root, absolute) is
+/// left to it so its denial classes stay intact.
+struct PolicyResolver {
+    root: std::path::PathBuf,
+    inner: carve::FileSystemResolver,
+}
+
+impl PolicyResolver {
+    fn new(root: &std::path::Path) -> std::io::Result<Self> {
+        Ok(Self {
+            root: std::fs::canonicalize(root)?,
+            inner: carve::FileSystemResolver::new(root)?,
+        })
+    }
+
+    fn lexical(
+        &self,
+        include_path: &str,
+        ctx: &carve::IncludeContext<'_>,
+    ) -> Option<std::path::PathBuf> {
+        let base = match ctx.stack.last() {
+            Some(parent) => self.root.join(parent).parent()?.to_path_buf(),
+            None => self.root.clone(),
+        };
+        let mut normalized = std::path::PathBuf::new();
+        for component in base.join(include_path).components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                std::path::Component::CurDir => {}
+                other => normalized.push(other.as_os_str()),
+            }
+        }
+        Some(normalized)
+    }
+}
+
+impl carve::IncludeResolver for PolicyResolver {
+    fn resolve(
+        &self,
+        include_path: &str,
+        ctx: &carve::IncludeContext<'_>,
+    ) -> Result<carve::IncludeResolved, carve::IncludeDenial> {
+        if std::path::Path::new(include_path).is_absolute() {
+            return self.inner.resolve(include_path, ctx);
+        }
+        let Some(requested) = self.lexical(include_path, ctx) else {
+            return self.inner.resolve(include_path, ctx);
+        };
+        let Ok(real) = std::fs::canonicalize(&requested) else {
+            return self.inner.resolve(include_path, ctx);
+        };
+        let (Ok(lexical), Ok(canonical)) = (
+            requested.strip_prefix(&self.root),
+            real.strip_prefix(&self.root),
+        ) else {
+            return self.inner.resolve(include_path, ctx);
+        };
+        if crate::workspace::document_path_refusal(lexical).is_some()
+            || crate::workspace::document_path_refusal(canonical).is_some()
+            || !std::fs::metadata(&real).is_ok_and(|metadata| metadata.is_file())
+        {
+            return Err(carve::IncludeDenial::Denied);
+        }
+        self.inner.resolve(include_path, ctx)
+    }
+
+    fn unresolved_id(&self, include_path: &str, ctx: &carve::IncludeContext<'_>) -> Option<String> {
+        self.inner.unresolved_id(include_path, ctx)
+    }
+}
+
+/// Rewrite every `pos.file` to its root-relative path, dropping one outside the root.
+fn relativize_positions(value: &mut Value, root: &std::path::Path) {
+    let mut pending = vec![value];
+    while let Some(item) = pending.pop() {
+        match item {
+            Value::Array(items) => pending.extend(items.iter_mut()),
+            Value::Object(fields) => {
+                if let Some(Value::Object(pos)) = fields.get_mut("pos")
+                    && let Some(Value::String(file)) = pos.get("file")
+                {
+                    let path = std::path::Path::new(file);
+                    let relative = if path.is_absolute() {
+                        path.strip_prefix(root)
+                            .ok()
+                            .filter(|relative| !relative.as_os_str().is_empty())
+                            .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                    } else {
+                        Some(file.clone())
+                    };
+                    match relative {
+                        Some(relative) => {
+                            pos.insert("file".into(), Value::String(relative));
+                        }
+                        None => {
+                            pos.remove("file");
+                        }
+                    }
+                }
+                pending.extend(
+                    fields
+                        .iter_mut()
+                        .filter(|(key, _)| key.as_str() != "pos")
+                        .map(|(_, child)| child),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 fn prepare_includes(
     workspace: Option<&Workspace>,
     root_index: Option<usize>,
@@ -1982,7 +2186,7 @@ fn prepare_includes(
         "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
     )?;
     let (root, source_path) = workspace.include_scope(root_index, source_path)?;
-    let resolver = carve::FileSystemResolver::new(&root)
+    let resolver = PolicyResolver::new(&root)
         .map_err(|_| "The configured workspace root cannot be used for includes.".to_owned())?;
     let mut include_options = carve::IncludeOptions::new().with_resolver(&resolver);
     if let Some(source_path) = source_path {
@@ -2550,7 +2754,7 @@ impl CarveServer {
             Err(error) => return Self::error(error),
         };
         let source = read["content"].as_str().unwrap();
-        match carve::to_carve_with_report(source, CheckedRenderOptions::default()) {
+        match format_carve_checked(source) {
             Ok(result) => {
                 let (diff, diff_truncated) =
                     unified_diff(&input.path, source, &result.value, 100_000);
@@ -2656,7 +2860,7 @@ impl CarveServer {
             }
             total_bytes += bytes;
             let source = read["content"].as_str().unwrap();
-            match carve::to_carve_with_report(source, CheckedRenderOptions::default()) {
+            match format_carve_checked(source) {
                 Ok(result) => {
                     let changed = result.value != source;
                     let (diff, diff_truncated) =
@@ -2866,7 +3070,7 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        match carve::to_carve_with_report(&input.source, CheckedRenderOptions::default()) {
+        match format_carve_checked(&input.source) {
             Ok(result) => Self::render_result(result),
             Err(error) => Self::error(error.to_string()),
         }
@@ -3228,6 +3432,7 @@ impl CarveServer {
         match serde_json::from_str::<Value>(&value) {
             Ok(mut value) => {
                 if let Some((prepared, root)) = &prepared {
+                    relativize_positions(&mut value, root);
                     value["includes"] = include_report(
                         prepared,
                         root,
@@ -3374,7 +3579,7 @@ impl CarveServer {
                 carve::apply_ast_patch(&ast, &operations).map_err(|error| error.to_string())
             })
             .and_then(|patched| {
-                let source = carve::render_carve(&patched).map_err(|error| error.to_string())?;
+                let source = render_carve_checked(&patched)?;
                 let ast = carve::try_to_json(&patched).map_err(|error| error.to_string())?;
                 Ok((ast, source))
             });
@@ -3723,7 +3928,7 @@ impl CarveServer {
             Ok(value) => value,
             Err(error) => return Self::error(error.to_string()),
         };
-        let rendered = match carve::render_carve(&edited_document) {
+        let rendered = match render_carve_checked(&edited_document) {
             Ok(value) => value,
             Err(error) => return Self::error(error.to_string()),
         };
@@ -4012,8 +4217,7 @@ impl CarveServer {
                     if &restored_fingerprint != expected_restored {
                         return Err("patch reverse direction does not restore the document".into());
                     }
-                    let source =
-                        carve::render_carve(&document).map_err(|error| error.to_string())?;
+                    let source = render_carve_checked(&document)?;
                     let ast = carve::try_to_json(&document).map_err(|error| error.to_string())?;
                     Ok((ast, source))
                 });
@@ -4342,6 +4546,217 @@ mod tests {
         ));
         std::fs::create_dir(&root).unwrap();
         root
+    }
+
+    fn call<T: serde::de::DeserializeOwned>(input: Value) -> Parameters<T> {
+        Parameters(serde_json::from_value(input).unwrap())
+    }
+
+    fn structured(result: &CallToolResult) -> Value {
+        result.structured_content.clone().unwrap_or(Value::Null)
+    }
+
+    fn policy_root() -> (std::path::PathBuf, CarveServer, Workspace) {
+        let root = include_test_root();
+        for (path, content) in [
+            (".env", "SECRET=env\n"),
+            (".git/config", "SECRET=git\n"),
+            ("node_modules/pkg/README.md", "SECRET=module\n"),
+            ("vendor/lib/notes.md", "SECRET=vendor\n"),
+            ("target/out.txt", "SECRET=target\n"),
+            ("settings.json", "{\"SECRET\":\"json\"}\n"),
+            ("parts/child.crv", "# Child\n"),
+            ("shared/glossary.crv", "Glossary text.\n"),
+            ("chapters/one.crv", "{{ ../shared/glossary.crv }}\n"),
+        ] {
+            let target = root.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, content).unwrap();
+        }
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../.env", root.join("docs/env.md")).unwrap();
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            true,
+            crate::workspace::ReviewConfiguration::default(),
+        )
+        .unwrap();
+        let server = CarveServer::with_workspace(Some(workspace.clone()));
+        (root, server, workspace)
+    }
+
+    #[test]
+    fn includes_follow_the_workspace_document_policy() {
+        let (root, server, workspace) = policy_root();
+        let mut paths = vec![
+            ".env",
+            ".git/config",
+            "node_modules/pkg/README.md",
+            "vendor/lib/notes.md",
+            "target/out.txt",
+            "settings.json",
+        ];
+        if cfg!(unix) {
+            paths.push("docs/env.md");
+        }
+        for path in paths {
+            let source = format!("{{{{ {path} }}}}\n");
+            let rendered = server.render(call(
+                json!({"source": source, "target": "plain", "includeRootIndex": 0}),
+            ));
+            let value = structured(&rendered);
+            assert!(!value.to_string().contains("SECRET"), "{path}: {value}");
+            assert!(
+                value["includes"]["dependencies"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|dependency| dependency["resolved"] == json!(false)),
+                "{path}: {value}"
+            );
+            let parsed = server.parse(call(json!({"source": source, "includeRootIndex": 0})));
+            assert!(
+                !structured(&parsed).to_string().contains("SECRET"),
+                "{path}"
+            );
+            assert!(workspace.read(0, path).is_err(), "{path} is readable");
+        }
+        let rendered = server.render(call(
+            json!({"source": "{{ chapters/one.crv }}\n", "target": "plain", "includeRootIndex": 0}),
+        ));
+        assert!(
+            structured(&rendered)["value"]
+                .as_str()
+                .unwrap()
+                .contains("Glossary text.")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_include_naming_a_fifo_is_refused_instead_of_blocking() {
+        let (root, server, _) = policy_root();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(root.join("pipe.crv"))
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let rendered = server.render(call(
+                json!({"source": "{{ pipe.crv }}\n", "target": "plain", "includeRootIndex": 0}),
+            ));
+            sender.send(structured(&rendered)).unwrap();
+        });
+        let value = receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("include expansion blocked on a FIFO");
+        assert_eq!(
+            value["includes"]["dependencies"][0]["resolved"],
+            json!(false)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parse_reports_included_positions_relative_to_the_root() {
+        let (root, server, _) = policy_root();
+        let parsed = structured(&server.parse(call(
+            json!({"source": "{{ parts/child.crv }}\n", "includeRootIndex": 0}),
+        )));
+        let text = parsed.to_string();
+        let canonical = std::fs::canonicalize(&root).unwrap();
+        assert!(!text.contains(canonical.to_str().unwrap()), "{text}");
+        assert!(!text.contains(root.to_str().unwrap()), "{text}");
+        assert!(text.contains("\"file\":\"parts/child.crv\""), "{text}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_missing_write_directory_names_the_path_not_the_host() {
+        let (root, _, workspace) = policy_root();
+        let error = workspace
+            .write(0, "nope/doc.crv", "x", None, true)
+            .unwrap_err();
+        assert!(!error.contains(root.to_str().unwrap()), "{error}");
+        assert!(error.contains("nope/doc.crv"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn loose_list(levels: usize) -> String {
+        (0..levels)
+            .map(|index| format!("{}- x\n", " ".repeat(index * 2)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn deep_quote_ast() -> Value {
+        let mut node = json!({"type": "paragraph", "children": [{"type": "text", "value": "x"}]});
+        for _ in 0..MAX_WRITER_DEPTH {
+            node = json!({"type": "block_quote", "children": [node]});
+        }
+        node
+    }
+
+    fn on_worker_stack<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(WORKER_STACK_BYTES)
+            .spawn(work)
+            .unwrap()
+            .join()
+            .expect("the tool overflowed the worker stack")
+    }
+
+    #[test]
+    fn the_writer_refuses_a_tree_past_the_depth_limit_quickly() {
+        on_worker_stack(|| {
+            let server = CarveServer::new();
+            let started = std::time::Instant::now();
+            let formatted =
+                server.format(call(json!({"source": format!("{}x\n", "- ".repeat(140))})));
+            assert_eq!(formatted.is_error, Some(true));
+            assert!(format!("{formatted:?}").contains("deeper than 256 AST levels"));
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            let formatted = server.format(call(json!({"source": loose_list(40)})));
+            assert_ne!(formatted.is_error, Some(true));
+
+            let ast = structured(&server.parse(call(json!({"source": "Para.\n"}))));
+            let patched = server.apply_ast_patch(call(json!({"ast": ast, "operations": [{"op": "replace", "path": "/children/0", "value": deep_quote_ast()}]})));
+            assert_eq!(patched.is_error, Some(true));
+            assert!(
+                format!("{patched:?}").contains("deeper than"),
+                "{patched:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn the_depth_scan_counts_typed_nodes_only() {
+        assert!(!ast_json_deeper_than(
+            r#"{"type":"doc","children":[{"type":"p","attrs":{"k":"{"}}]}"#,
+            2
+        ));
+        assert!(ast_json_deeper_than(
+            r#"{"type":"doc","children":[{"type":"p","children":[{"type":"t"}]}]}"#,
+            2
+        ));
+        assert!(!ast_json_deeper_than(
+            r#"{"type":"a\"type\":","pos":{"file":"x"}}"#,
+            1
+        ));
+    }
+
+    #[test]
+    fn a_worker_sized_stack_renders_the_audited_nesting() {
+        let source = loose_list(230);
+        let result = on_worker_stack(move || {
+            CarveServer::new().render(call(json!({"source": source, "target": "html"})))
+        });
+        assert_ne!(result.is_error, Some(true));
     }
 
     #[test]
