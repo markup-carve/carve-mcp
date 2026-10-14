@@ -11,6 +11,8 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - The Rust server's `carve_migrate` reports `fidelity-unverified` for Markdown dialect options and constructs exactly as the JavaScript server does, instead of certifying them (#87).
+- The Rust server's `carve_migrate` returns a tool error when the Carve writer refuses the imported Markdown, for example past its nesting ceiling, instead of panicking (#90).
+- The Rust server's `carve_migrate` keeps a final newline the Markdown or Djot source ends with, as the JavaScript server does; it used to drop it (#91, #92).
 
 ### Added
 
