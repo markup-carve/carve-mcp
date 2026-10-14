@@ -1,6 +1,6 @@
 [package]
 name = "carve-mcp"
-version = "0.1.7"
+version = "0.1.8"
 publish = false
 edition = "2024"
 rust-version = "1.88"
@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 atomic-write-file = "0.3.1"
-carve-lang = { git = "https://github.com/markup-carve/carve-rs", rev = "204af9cd5a2e144c54bca7efa0146cdd0a882cc6" }
+carve-lang = "=0.1.9"
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

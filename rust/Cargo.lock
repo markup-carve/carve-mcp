@@ -72,7 +72,8 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "carve-lang"
 version = "0.1.9"
-source = "git+https://github.com/markup-carve/carve-rs?rev=204af9cd5a2e144c54bca7efa0146cdd0a882cc6#204af9cd5a2e144c54bca7efa0146cdd0a882cc6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8747e096cacdd7097d884ffb9dd15dc70dd7e636081a31335bb786313924f341"
 dependencies = [
  "html5ever",
  "markup5ever_rcdom",
@@ -87,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "carve-mcp"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "atomic-write-file",
  "carve-lang",
