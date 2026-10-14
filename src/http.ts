@@ -130,7 +130,10 @@ export function createHttpServer(options: HttpOptions): HttpServer {
       else if (error instanceof Error && error.message === 'request-too-large') {
         req.resume();
         send(res, 413, 'Request too large', { connection: 'close' });
-      } else if (error instanceof Error && error.message === 'invalid-body') send(res, 400, 'Invalid JSON request body');
+      } else if (error instanceof Error && error.message === 'invalid-body') {
+        res.writeHead(400, { 'content-type': 'application/json', 'x-content-type-options': 'nosniff' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }));
+      }
       else {
         console.error(JSON.stringify({ level: 'error', event: 'request_error', errorType: error instanceof Error ? error.name : 'UnknownError' }));
         send(res, 500, 'Internal server error');

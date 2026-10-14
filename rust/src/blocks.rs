@@ -160,7 +160,7 @@ pub(crate) fn node_range(
 
 pub(crate) fn positioned_ast(source: &str) -> Result<Value, String> {
     let options = carve::Options::default().with_positions(true);
-    serde_json::from_str(&carve::to_json_with_options(source, &options))
+    crate::server::json_value(&carve::to_json_with_options(source, &options))
         .map_err(|error| format!("AST serialization failed: {error}"))
 }
 

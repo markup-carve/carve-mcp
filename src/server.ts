@@ -2,7 +2,7 @@ import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontex
 import { createRequire } from 'node:module';
 import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, parseForTool, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type Workspace, type WorkspaceOptions } from './workspace.js';
@@ -138,6 +138,10 @@ function result(value: unknown) {
   return { content: [{ type: 'text' as const, text: summary(structuredContent) }], structuredContent };
 }
 
+function failure(message: string, details: Record<string, unknown> = {}) {
+  return { content: [{ type: 'text' as const, text: message }], structuredContent: { error: message, ...details }, isError: true };
+}
+
 function observeSafely(observe: ToolObserver | undefined, event: Parameters<ToolObserver>[0]): void {
   try { observe?.(event); } catch { /* Observability must never change tool behavior. */ }
 }
@@ -153,11 +157,11 @@ function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefin
     catch (error) {
       observeSafely(observe, { tool, status: 'error', durationMs: Math.round(performance.now() - started) });
       const message = error instanceof Error ? error.message : String(error);
-      if (error instanceof SourceEditRefusal) return { ...result({ error: message, ...error.details }), isError: true };
+      if (error instanceof SourceEditRefusal) return failure(message, error.details);
       if (error instanceof RenderLossError) {
-        return { ...result({ error: message, losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated }), isError: true };
+        return failure(message, { losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated });
       }
-      return { ...result({ error: message }), isError: true };
+      return failure(message);
     }
   };
 }
@@ -381,10 +385,10 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   if (toolEnabled(toolProfile, 'carve_parse')) server.registerTool('carve_parse', {
     title: 'Parse Carve',
     description: 'Parse and resolve Carve into its position-aware interchange AST.',
-    inputSchema: z.object({ source: sourceSchema, ...includeSettings }),
+    inputSchema: z.object({ source: sourceSchema, positions: z.boolean().default(true).describe('Include source positions.'), ...includeSettings }),
     outputSchema: parseOutput,
     annotations: readOnly,
-  }, safe('carve_parse', observe, ({ source: document, includeRootIndex, sourcePath }) => parse(document, includeScope(workspace, { includeRootIndex, sourcePath }))));
+  }, safe('carve_parse', observe, ({ source: document, positions, includeRootIndex, sourcePath }) => parseForTool(document, includeScope(workspace, { includeRootIndex, sourcePath }), positions)));
 
   if (toolEnabled(toolProfile, 'carve_create_ast_patch')) server.registerTool('carve_create_ast_patch', {
     title: 'Create structured AST patch',

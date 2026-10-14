@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { parseErrorFilter } from './stdio.js';
 import { createServer } from './server.js';
 import { parseArgs } from './args.js';
 import { createHttpServer } from './http.js';
@@ -45,7 +46,7 @@ if (http) {
   process.once('SIGTERM', close);
 } else {
 const server = await createServer(workspace, observe, toolProfile);
-const transport = new StdioServerTransport();
+const transport = new StdioServerTransport(process.stdin.pipe(parseErrorFilter(process.stdout)), process.stdout);
 transport.onerror = (error) => {
   console.error(`carve-mcp transport error: ${error.message}`);
   process.exitCode = 1;

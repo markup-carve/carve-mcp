@@ -1,8 +1,8 @@
 use carve::extensions::SemanticSpan;
 use carve::{
-    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, Profile,
-    RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve,
-    migrate_djot, migrate_html, with_render_loss_report,
+    AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, RenderLoss,
+    RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve, migrate_djot,
+    migrate_html, with_render_loss_report,
 };
 use regex::Regex;
 use rmcp::{
@@ -589,7 +589,7 @@ fn explain_ast_operations(
                 format!("{verb} {field} on {target}.")
             };
             if let carve::AstPatchOperation::Replace { value, .. } = operation
-                && let Ok(after_value) = serde_json::from_str::<Value>(value)
+                && let Ok(after_value) = crate::server::json_value(value)
                 && let (Some(before), Some(after)) = (
                     value_at_pointer(ast, path).and_then(Value::as_array),
                     after_value.as_array(),
@@ -1181,6 +1181,9 @@ struct SourceInput {
 struct ParseInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
+    #[serde(default = "default_true")]
+    #[schemars(description = "Include source positions.")]
+    positions: bool,
     #[serde(default)]
     #[schemars(
         range(min = 0, max = 9007199254740991_u64),
@@ -1953,6 +1956,21 @@ pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value
     }
     warnings.sort_by_key(|warning| warning["start"].as_u64().unwrap_or(0));
     warnings
+}
+
+/// Largest `carve_parse` result returned, in JSON bytes.
+pub const MAX_PARSE_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Parse JSON the engine produced, without serde_json's recursion limit of
+/// 128: a 31-level nested list already nests deeper than that. The parser
+/// bounds the depth, and `serde_stacker` grows the stack for what it allows.
+pub fn json_value(text: &str) -> Result<Value, serde_json::Error> {
+    use serde::Deserialize;
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    deserializer.disable_recursion_limit();
+    let value = Value::deserialize(serde_stacker::Deserializer::new(&mut deserializer))?;
+    deserializer.end()?;
+    Ok(value)
 }
 
 #[derive(Debug, Clone)]
@@ -3104,18 +3122,11 @@ impl CarveServer {
         let mut options = Options::default()
             .with_raw_html(input.allow_raw_html)
             .with_positions(true);
-        // `Options::default()` denies too, so the destination is blanked at
-        // either setting and this server cannot be asked to emit a denied
-        // scheme (carve-mcp#78). What the input selects is whether the denial
-        // is reported, which `reported_losses` applies to the result.
-        if input.sanitize_urls {
-            // Not `set_link_policy(Some(LinkPolicy::default()))`: an explicitly
-            // set policy routes the denial through a branch that removes the
-            // element and never reaches the render-loss collector, where the
-            // implicit default blanks the destination and reports it
-            // (carve-mcp#76). The policy is the same either way.
-            options = options.with_profile(Profile::full());
-        }
+        // `Options::default()` blanks a denied destination and reports it at
+        // either `sanitizeUrls` setting, so this server cannot be asked to emit
+        // a denied scheme (carve-mcp#78); `reported_losses` applies the
+        // setting to the report only. No profile here: `Profile::full()` also
+        // drops empty elements, which the JavaScript server keeps.
         if input.preset == RenderPreset::StaticHtml {
             options = options.with_mode(Mode::Static);
         }
@@ -3266,7 +3277,7 @@ impl CarveServer {
                 selected.push(target);
             }
         }
-        let ast: Value = match serde_json::from_str(&carve::to_json_with_options(
+        let ast: Value = match crate::server::json_value(&carve::to_json_with_options(
             &input.source,
             &Options::default(),
         )) {
@@ -3319,10 +3330,7 @@ impl CarveServer {
                     "HTML-stage compatibility for a print/PDF pipeline; pagination and fonts remain renderer-dependent.",
                 ),
             };
-            let options = Options::default()
-                .with_raw_html(false)
-                .with_positions(true)
-                .with_profile(Profile::full());
+            let options = Options::default().with_raw_html(false).with_positions(true);
             let rendered =
                 with_render_loss_report(render_target, CheckedRenderOptions::default(), || {
                     match render_target {
@@ -3413,7 +3421,7 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        let options = carve::Options::default().with_positions(true);
+        let options = carve::Options::default().with_positions(input.positions);
         let prepared = match prepare_includes(
             self.workspace.as_ref(),
             input.include_root_index,
@@ -3429,17 +3437,32 @@ impl CarveServer {
             || carve::to_json_with_options(&input.source, &options),
             |(prepared, _)| carve::to_json(&prepared.doc),
         );
-        match serde_json::from_str::<Value>(&value) {
+        let report = prepared.as_ref().map(|(prepared, root)| {
+            include_report(
+                prepared,
+                root,
+                input
+                    .include_root_index
+                    .expect("prepared includes have a root"),
+            )
+        });
+        // `,"includes":` plus the report, spliced into the AST object.
+        let bytes = value.len()
+            + report
+                .as_ref()
+                .map_or(0, |report| report.to_string().len() + 12);
+        if bytes > MAX_PARSE_OUTPUT_BYTES {
+            return Self::error(format!(
+                "carve_parse result is {bytes} bytes; the limit is {MAX_PARSE_OUTPUT_BYTES} bytes. Pass positions: false or parse a smaller document."
+            ));
+        }
+        match crate::server::json_value(&value) {
             Ok(mut value) => {
-                if let Some((prepared, root)) = &prepared {
-                    relativize_positions(&mut value, root);
-                    value["includes"] = include_report(
-                        prepared,
-                        root,
-                        input
-                            .include_root_index
-                            .expect("prepared includes have a root"),
-                    );
+                if let Some(report) = report {
+                    if let Some((_, root)) = &prepared {
+                        relativize_positions(&mut value, root);
+                    }
+                    value["includes"] = report;
                 }
                 Self::output(value)
             }
@@ -3510,7 +3533,7 @@ impl CarveServer {
                     })
             });
         match result {
-            Ok((operations, count, changes)) => match serde_json::from_str::<Value>(&operations) {
+            Ok((operations, count, changes)) => match crate::server::json_value(&operations) {
                 Ok(operations) => {
                     let change_count = changes.len();
                     let value = json!({"operations": operations, "operationCount": count, "changes": changes, "changeCount": change_count});
@@ -3584,7 +3607,7 @@ impl CarveServer {
                 Ok((ast, source))
             });
         match result {
-            Ok((ast, source)) => match serde_json::from_str::<Value>(&ast) {
+            Ok((ast, source)) => match crate::server::json_value(&ast) {
                 Ok(ast) => Self::output(json!({"ast": ast, "source": source})),
                 Err(error) => Self::error(format!("AST serialization failed: {error}")),
             },
@@ -3796,7 +3819,7 @@ impl CarveServer {
             Ok(value) => value,
             Err(error) => return Self::error(error.to_string()),
         };
-        let before = match serde_json::from_str::<Value>(&before_json) {
+        let before = match crate::server::json_value(&before_json) {
             Ok(value) => value,
             Err(error) => return Self::error(format!("AST serialization failed: {error}")),
         };
@@ -3972,7 +3995,7 @@ impl CarveServer {
         }
         let encode_operations = |operations| -> Result<Value, String> {
             let json = carve::ast_patch_to_json(operations).map_err(|error| error.to_string())?;
-            serde_json::from_str(&json).map_err(|error| error.to_string())
+            crate::server::json_value(&json).map_err(|error| error.to_string())
         };
         let forward = match encode_operations(&patch.forward) {
             Ok(value) => value,
@@ -4094,8 +4117,8 @@ impl CarveServer {
                 let changes = explain_ast_operations(&input.before, &patch.forward);
                 let value = json!({
                     "version": 1,
-                    "forward": serde_json::from_str::<Value>(&forward).map_err(|error| error.to_string())?,
-                    "inverse": serde_json::from_str::<Value>(&inverse).map_err(|error| error.to_string())?,
+                    "forward": crate::server::json_value(&forward).map_err(|error| error.to_string())?,
+                    "inverse": crate::server::json_value(&inverse).map_err(|error| error.to_string())?,
                     "beforeFingerprint": patch.before_fingerprint,
                     "afterFingerprint": patch.after_fingerprint,
                     "changes": changes,
@@ -4222,7 +4245,7 @@ impl CarveServer {
                     Ok((ast, source))
                 });
         match result {
-            Ok((ast, output_source)) => match serde_json::from_str::<Value>(&ast) {
+            Ok((ast, output_source)) => match crate::server::json_value(&ast) {
                 Ok(ast) => {
                     let direction = if input.inverse { "inverse" } else { "forward" };
                     let code = if input.inverse {
@@ -4483,6 +4506,7 @@ mod tests {
         );
     }
     use super::*;
+    use carve::Profile;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// An explicitly set `LinkPolicy::default()` removed the element and never
@@ -4757,6 +4781,70 @@ mod tests {
             CarveServer::new().render(call(json!({"source": source, "target": "html"})))
         });
         assert_ne!(result.is_error, Some(true));
+    }
+
+    #[test]
+    fn default_html_keeps_structure_and_still_reports_a_denied_destination() {
+        let server = CarveServer::new();
+        let render = |source: &str| {
+            structured(&server.render(call(json!({"source": source, "target": "html"}))))
+        };
+        assert_eq!(
+            render("[](https://example.com)\n")["value"],
+            json!("<p><a href=\"https://example.com\"></a></p>")
+        );
+        let quoted = render("Text[^1]\n\n> [^1]: Note.\n");
+        assert!(
+            quoted["value"].as_str().unwrap().contains("<blockquote>"),
+            "{quoted}"
+        );
+        assert_eq!(quoted["totalLosses"], json!(0));
+        let denied = render("[x](javascript:alert(1))\n");
+        assert_eq!(denied["value"], json!("<p><a href=\"\">x</a></p>"));
+        assert_eq!(denied["losses"][0]["code"], json!("destination-denied"));
+        let targets = structured(&server.check_targets(call(
+            json!({"source": "[](https://example.com)\n", "targets": ["html"]}),
+        )));
+        assert_eq!(
+            targets["targets"][0]["status"],
+            json!("compatible"),
+            "{targets}"
+        );
+    }
+
+    #[test]
+    fn parse_reads_back_a_tree_deeper_than_serde_json_allows() {
+        let source = (0..40)
+            .map(|index| format!("{}- x\n", " ".repeat(index * 2)))
+            .collect::<String>();
+        let server = CarveServer::new();
+        let parsed = server.parse(call(json!({"source": source})));
+        assert_ne!(parsed.is_error, Some(true), "{parsed:?}");
+        assert_eq!(structured(&parsed)["type"], json!("document"));
+        let targets = server.check_targets(call(json!({"source": source, "targets": ["html"]})));
+        assert_ne!(targets.is_error, Some(true), "{targets:?}");
+    }
+
+    #[test]
+    fn parse_omits_positions_on_request_and_caps_its_output() {
+        let server = CarveServer::new();
+        let without =
+            structured(&server.parse(call(json!({"source": "Hi *x*\n", "positions": false}))));
+        assert!(!without.to_string().contains("\"pos\""), "{without}");
+        let with = structured(&server.parse(call(json!({"source": "Hi *x*\n"}))));
+        assert!(with.to_string().contains("\"pos\""));
+
+        let paragraph = "Some *strong* and /em/ text with a [link](https://x.org) here.\n\n";
+        let source = paragraph.repeat(900_000 / paragraph.len());
+        let refused = server.parse(call(json!({"source": source})));
+        assert_eq!(refused.is_error, Some(true));
+        assert!(
+            format!("{refused:?}")
+                .contains(&format!("the limit is {MAX_PARSE_OUTPUT_BYTES} bytes")),
+            "{refused:?}"
+        );
+        let fits = server.parse(call(json!({"source": source, "positions": false})));
+        assert_ne!(fits.is_error, Some(true));
     }
 
     #[test]
