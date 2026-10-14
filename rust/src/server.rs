@@ -2,7 +2,7 @@ use carve::extensions::SemanticSpan;
 use carve::{
     AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, Profile,
     RenderLoss, RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve,
-    migrate_djot, migrate_html, migrate_markdown, with_render_loss_report,
+    migrate_djot, migrate_html, with_render_loss_report,
 };
 use regex::Regex;
 use rmcp::{
@@ -1731,7 +1731,19 @@ fn migration_json(result: carve::MigrationResult) -> Value {
 fn migrate_markdown_dialect(
     source: &str,
     dialect: Option<&MarkdownDialect>,
-) -> carve::MigrationResult {
+) -> Result<carve::MigrationResult, String> {
+    migrate_markdown_dialect_with(source, dialect, carve::try_migrate_markdown)
+}
+
+// The import is injected so a test can stand in for a refusal no known input reaches.
+fn migrate_markdown_dialect_with<E: std::fmt::Display>(
+    source: &str,
+    dialect: Option<&MarkdownDialect>,
+    import: impl Fn(&str) -> Result<carve::MigrationResult, E>,
+) -> Result<carve::MigrationResult, String> {
+    let refused = |error: E| {
+        format!("Markdown migration failed: the Carve writer refused the imported tree ({error}).")
+    };
     let default = MarkdownDialect::default();
     let dialect = dialect.unwrap_or(&default);
     let mut value = source.to_owned();
@@ -1797,7 +1809,7 @@ fn migrate_markdown_dialect(
             format!("{}\\{{{}}}", &c[1], &c[2])
         });
     }
-    let mut result = migrate_markdown(&value);
+    let mut result = import(&value).map_err(refused)?;
     let dialect_enabled = dialect.highlight
         || dialect.superscript
         || dialect.math
@@ -1817,7 +1829,7 @@ fn migrate_markdown_dialect(
         }];
     } else if code_rewrites + div_escapes > 0 {
         // Nothing was rewritten that Markdown reads differently: assess the input.
-        result.report = migrate_markdown(source).report;
+        result.report = import(source).map_err(refused)?.report;
     }
     for (index, replacement) in replacements.into_iter().enumerate() {
         result.value = result
@@ -1837,7 +1849,7 @@ fn migrate_markdown_dialect(
     {
         result.value.push('\n');
     }
-    result
+    Ok(result)
 }
 
 pub(crate) fn utf16_offset(source: &str, byte: usize) -> usize {
@@ -4060,11 +4072,14 @@ impl CarveServer {
                 }
             }
             SourceFormat::Markdown => {
-                migrate_markdown_dialect(&input.source, input.markdown_dialect.as_ref())
+                match migrate_markdown_dialect(&input.source, input.markdown_dialect.as_ref()) {
+                    Ok(result) => result,
+                    Err(error) => return Self::error(error),
+                }
             }
             SourceFormat::Djot => {
                 let mut result = migrate_djot(&input.source);
-                if result.value.ends_with('\n') {
+                if result.value.ends_with('\n') && !input.source.ends_with('\n') {
                     result.value.pop();
                 }
                 result
@@ -4233,6 +4248,36 @@ impl ServerHandler for CarveServer {
 
 #[cfg(test)]
 mod tests {
+
+    fn migrate_markdown_dialect_ok(
+        source: &str,
+        dialect: Option<&MarkdownDialect>,
+    ) -> carve::MigrationResult {
+        migrate_markdown_dialect(source, dialect).expect("the writer accepts the import")
+    }
+
+    #[test]
+    fn markdown_deeper_than_the_writer_ceiling_is_an_error_not_a_panic() {
+        // A large stack: an unoptimized build recurses deeper per level than the ceiling allows for.
+        let result = std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(|| migrate_markdown_dialect(&format!("{} x\n", ">".repeat(1000)), None))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(result.unwrap_err().contains("deeper than its ceiling"));
+    }
+
+    #[test]
+    fn a_refused_markdown_tree_is_an_error_not_a_panic() {
+        let result = migrate_markdown_dialect_with("text", None, |_| {
+            Err::<carve::MigrationResult, _>("cannot spell code")
+        });
+        assert_eq!(
+            result.unwrap_err(),
+            "Markdown migration failed: the Carve writer refused the imported tree (cannot spell code)."
+        );
+    }
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4344,7 +4389,7 @@ mod tests {
     #[test]
     fn a_rewritten_dialect_construct_is_not_reported_as_literal_text() {
         let diagnostic = |source, dialect: Option<&MarkdownDialect>| {
-            let report = migrate_markdown_dialect(source, dialect).report;
+            let report = migrate_markdown_dialect_ok(source, dialect).report;
             let first = &report.diagnostics[0];
             (
                 first.code.clone(),
@@ -4384,7 +4429,7 @@ mod tests {
     fn abbreviation_definitions_import_by_default() {
         let source = "*[HTML]: Hyper Text\n\nHTML";
         assert!(
-            migrate_markdown_dialect(source, None)
+            migrate_markdown_dialect_ok(source, None)
                 .value
                 .starts_with("*[HTML]:")
         );
@@ -4393,7 +4438,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            migrate_markdown_dialect(source, Some(&off))
+            migrate_markdown_dialect_ok(source, Some(&off))
                 .value
                 .starts_with("\\*[HTML]:")
         );
@@ -4402,11 +4447,11 @@ mod tests {
     #[test]
     fn markdown_dialect_is_explicit() {
         assert_eq!(
-            migrate_markdown_dialect("==marked==", None).value,
+            migrate_markdown_dialect_ok("==marked==", None).value,
             "==marked=="
         );
         assert_eq!(
-            migrate_markdown_dialect(
+            migrate_markdown_dialect_ok(
                 "==marked==",
                 Some(&MarkdownDialect {
                     highlight: true,
@@ -4416,9 +4461,12 @@ mod tests {
             .value,
             "=marked="
         );
-        assert_eq!(migrate_markdown_dialect("^[note]", None).value, "\\^[note]");
         assert_eq!(
-            migrate_markdown_dialect(
+            migrate_markdown_dialect_ok("^[note]", None).value,
+            "\\^[note]"
+        );
+        assert_eq!(
+            migrate_markdown_dialect_ok(
                 "^[note]",
                 Some(&MarkdownDialect {
                     inline_footnotes: true,
@@ -4445,9 +4493,9 @@ mod tests {
                 "|= A |= B |\n| a | b |\n",
             ),
         ] {
-            assert_eq!(migrate_markdown_dialect(source, None).value, expected);
+            assert_eq!(migrate_markdown_dialect_ok(source, None).value, expected);
         }
-        assert_eq!(migrate_markdown_dialect("a", None).value, "a");
+        assert_eq!(migrate_markdown_dialect_ok("a", None).value, "a");
     }
 
     #[test]
@@ -4481,7 +4529,7 @@ mod tests {
     fn dialect_placeholder_cannot_collide_with_source_text() {
         let source = "CARVEMCPDIALECTTOKEN0X ==marked==";
         assert_eq!(
-            migrate_markdown_dialect(
+            migrate_markdown_dialect_ok(
                 source,
                 Some(&MarkdownDialect {
                     highlight: true,
