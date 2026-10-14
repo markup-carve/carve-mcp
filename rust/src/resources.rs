@@ -269,6 +269,10 @@ const LINT_RULES: &[(&str, &str)] = &[
         "The selected semantic span ignores an authored attribute value.",
     ),
     (
+        "table-span-marker-blocked",
+        "A table span marker cannot extend a cell, so it renders as a cell of its own.",
+    ),
+    (
         "unclosed-container-fence",
         "A colon-fenced container reaches the end of the document without a closer.",
     ),
@@ -322,7 +326,7 @@ mod tests {
     fn lint_rule_lookup_is_case_insensitive() {
         assert!(lint_rule_markdown("UNCLOSED-CONTAINER-FENCE").is_some());
         let names = lint_rule_names().collect::<Vec<_>>();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 25);
         assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }

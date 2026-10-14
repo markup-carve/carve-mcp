@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.8 - 2026-10-14
+
+### Breaking
+
+- `carve_migrate` reads `*[TERM]: expansion` in Markdown as an abbreviation definition by default on both servers, following carve-js 0.1.11 and carve-lang 0.1.9. Pass `markdownDialect: { abbreviations: false }` to keep the old reading (#87).
+
+### Fixed
+
+- The Rust server's `carve_migrate` reports `fidelity-unverified` for Markdown dialect options and constructs exactly as the JavaScript server does, instead of certifying them (#87).
+
+### Added
+
+- Both servers describe the new `table-span-marker-blocked` lint rule (#87).
+
+### Changed
+
+- Requires `@markup-carve/carve` 0.1.11 and `carve-lang` 0.1.9 (#87).
+
 ## 0.1.7 - 2026-10-08
 
 ### Added

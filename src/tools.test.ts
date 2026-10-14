@@ -269,7 +269,19 @@ describe('Carve operations', () => {
       value: expect.stringContaining('Hello'),
       report: { schemaVersion: 2, sourceFormat: 'html', diagnostics: expect.any(Array) },
     });
-    for (const [format, source] of [['markdown', '**Hello**'], ['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']] as const) {
+    // Markdown import assesses each construct against the published fidelity contract.
+    expect(migrate('**Hello**', 'markdown')).toMatchObject({
+      value: expect.stringContaining('Hello'),
+      report: {
+        schemaVersion: 2,
+        sourceFormat: 'markdown',
+        diagnostics: [
+          expect.objectContaining({ code: 'markdown-paragraph', severity: 'info', fidelity: 'preserved' }),
+          expect.objectContaining({ code: 'markdown-strong', severity: 'info', fidelity: 'preserved' }),
+        ],
+      },
+    });
+    for (const [format, source] of [['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']] as const) {
       expect(migrate(source, format)).toMatchObject({
         value: expect.stringContaining('Hello'),
         report: {
