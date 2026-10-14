@@ -1514,6 +1514,8 @@ enum AsciiMode {
 enum TypographyMode {
     Glyph,
     Source,
+    #[serde(rename = "quotes-source")]
+    QuotesSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -1575,7 +1577,9 @@ struct RenderInput {
     )]
     max_render_losses: Option<usize>,
     #[serde(default)]
-    #[schemars(description = "Render typographic glyphs or the punctuation the author typed.")]
+    #[schemars(
+        description = "Render typographic glyphs, the punctuation the author typed, or the typed quotes with every other glyph kept (quotes-source)."
+    )]
     smart_typography: Option<TypographyMode>,
     #[serde(default)]
     #[schemars(
@@ -3142,6 +3146,7 @@ impl CarveServer {
         options.smart_typography = match input.smart_typography {
             None | Some(TypographyMode::Glyph) => SmartTypographyMode::Glyph,
             Some(TypographyMode::Source) => SmartTypographyMode::Source,
+            Some(TypographyMode::QuotesSource) => SmartTypographyMode::QuotesSource,
         };
         for extension in &input.extensions {
             options = match extension {

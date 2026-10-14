@@ -23,6 +23,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- `carve_render` accepts `smartTypography: 'quotes-source'` on both servers: typed quotes and apostrophes stay as written while ellipses and dashes are still substituted (#89).
 - `carve_parse` takes `positions` (default `true`); `false` leaves out the `pos` objects. Results larger than 16 MiB of JSON are refused with a tool error on both servers.
 
 ## 0.1.8 - 2026-10-14

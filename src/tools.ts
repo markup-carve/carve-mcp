@@ -55,7 +55,7 @@ export interface RenderSettings {
   lowercaseHeadingIds?: boolean;
   strictLosses?: boolean;
   maxRenderLosses?: number;
-  smartTypography?: 'glyph' | 'source';
+  smartTypography?: 'glyph' | 'source' | 'quotes-source';
   extensions?: ExtensionName[];
   allowRawHtml?: boolean;
   sanitizeUrls?: boolean;
@@ -78,7 +78,7 @@ function renderOptions(settings: RenderSettings) {
     lowercaseHeadingIds: settings.lowercaseHeadingIds ?? (portable ? true : undefined),
     strictLosses: settings.strictLosses,
     maxRenderLosses: settings.maxRenderLosses,
-    smartTypography: settings.smartTypography,
+    smartTypography: settings.smartTypography === 'quotes-source' ? { quotes: false } : settings.smartTypography,
     extensions: extensionInstances(settings.extensions),
     allowRawHtml: settings.allowRawHtml ?? false,
     // Never the caller's value: neither server may be asked to emit a denied

@@ -74,6 +74,7 @@ const calls = [
   ['carve_render', { source: '[[Some Page]]', target: 'html', extensions: ['wikilinks'] }],
   ['carve_render', { source: '# Mixed', target: 'html', asciiHeadingIds: 'strict', lowercaseHeadingIds: true }],
   ['carve_render', { source: 'Wait...', target: 'plain', smartTypography: 'source' }],
+  ['carve_render', { source: '"Wait..." -- it\'s fine', target: 'html', smartTypography: 'quotes-source' }],
   ['carve_render', { source: '`<b>x</b>`{=html}', target: 'html', allowRawHtml: false, sanitizeUrls: true }],
   ['carve_render', { source: '```=latex\nx\n```', target: 'plain' }],
   ['carve_parse', { source: '# Hello' }],

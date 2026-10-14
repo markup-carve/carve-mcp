@@ -56,6 +56,9 @@ describe('Carve operations', () => {
     expect(() => render('# Hello', 'markdown', { preset: 'static-html' })).toThrow(/HTML target/);
     expect(() => render('[x]{samp}', 'markdown', { extensions: ['semantic-spans'] })).toThrow(/HTML target/);
   });
+  it('keeps typed quotes while substituting other glyphs', () => {
+    expect(render('"Wait..." -- it\'s fine', 'html', { smartTypography: 'quotes-source' }).value).toContain('<p>"Wait…" – it\'s fine</p>');
+  });
   it('blanks a denied destination at either sanitizeUrls setting', () => {
     const source = '[x](javascript:alert(1))\n';
     const reported = render(source, 'html', { sanitizeUrls: true });
