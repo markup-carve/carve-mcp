@@ -425,7 +425,8 @@ impl Workspace {
                     source,
                     &carve::Options::default().with_positions(true),
                 );
-                let value: Value = serde_json::from_str(&ast).map_err(|error| error.to_string())?;
+                let value: Value =
+                    crate::server::json_value(&ast).map_err(|error| error.to_string())?;
                 let mut ids = BTreeSet::new();
                 collect_heading_ids(&value, &mut ids);
                 if folds_anchors(path) {

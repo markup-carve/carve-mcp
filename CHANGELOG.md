@@ -13,6 +13,18 @@ All notable changes to this project are documented in this file.
 - Tools that run the Carve writer refuse a document nested deeper than 256 AST levels with a tool error instead of stalling every other request, on both servers. The Rust server gives its runtime workers a 64 MiB stack, so a deep `carve_render` no longer overflows in an unoptimized build.
 - A workspace write into a missing directory names the requested path instead of the absolute host path; other workspace errors on the Node server have the root path removed.
 
+### Fixed
+
+- The Rust server's default HTML render no longer drops empty elements or structure: `[](https://example.com)` renders its link and a footnote definition inside a quote keeps its blockquote, matching the Node server. A denied destination is still blanked and reported. `carve_check_targets` renders the same way.
+- The Rust server parses ASTs of any depth the engine produces; a nested list 31 levels deep made `carve_parse`, `carve_check_targets` and the AST tools fail with a serde_json recursion error.
+- The Rust server answers a request nested deeper than 128 JSON levels instead of dropping it and leaving the client waiting. It accepts up to 2048 levels and answers a deeper or wrongly shaped request with `-32600`.
+- Both servers answer malformed JSON with a JSON-RPC `-32700` parse error on stdio, and the Node server does so over HTTP too, instead of ignoring the line or replying in plain text.
+- A Node tool error's text content is the error message; it used to read "Completed successfully."
+
+### Added
+
+- `carve_parse` takes `positions` (default `true`); `false` leaves out the `pos` objects. Results larger than 16 MiB of JSON are refused with a tool error on both servers.
+
 ## 0.1.8 - 2026-10-14
 
 ### Breaking

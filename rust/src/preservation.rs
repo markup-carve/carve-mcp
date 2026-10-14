@@ -284,14 +284,14 @@ mod tests {
     #[test]
     fn table_fields_are_assessed_without_extending_render_losses() {
         let source = "|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n";
-        let ast: Value = serde_json::from_str(&carve::to_json_with_options(
+        let ast: Value = crate::server::json_value(&carve::to_json_with_options(
             source,
             &carve::Options::default(),
         ))
         .unwrap();
         assert_eq!(assess(&ast, "markdown")["totalDiagnostics"], 3);
         assert_eq!(assess(&ast, "html")["totalDiagnostics"], 0);
-        let moved: Value = serde_json::from_str(&carve::to_json_with_options(
+        let moved: Value = crate::server::json_value(&carve::to_json_with_options(
             "| 1 | 2 |\n|= A |= B |\n",
             &carve::Options::default(),
         ))

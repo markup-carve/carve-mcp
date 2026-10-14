@@ -171,6 +171,32 @@ export function parse(source: string, scope?: IncludeScope): AstJsonDocument & {
   return { ...toAstJson(resolveDocument(doc, { asciiHeadingIds: false })), includes };
 }
 
+/** Largest `carve_parse` result returned, in JSON bytes. */
+export const MAX_PARSE_OUTPUT_BYTES = 16 * 1024 * 1024;
+
+function withoutPositions(value: unknown): void {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const item = pending.pop();
+    if (!item || typeof item !== 'object') continue;
+    if (Array.isArray(item)) { pending.push(...item); continue; }
+    const record = item as Record<string, unknown>;
+    delete record.pos;
+    for (const child of Object.values(record)) if (child && typeof child === 'object') pending.push(child);
+  }
+}
+
+/** `carve_parse`: the AST, optionally without positions, refused past the output cap. */
+export function parseForTool(source: string, scope?: IncludeScope, positions = true): AstJsonDocument & { includes?: IncludeReport } {
+  const ast = parse(source, scope);
+  if (!positions) withoutPositions(ast);
+  const bytes = Buffer.byteLength(JSON.stringify(ast), 'utf8');
+  if (bytes > MAX_PARSE_OUTPUT_BYTES) {
+    throw new Error(`carve_parse result is ${bytes} bytes; the limit is ${MAX_PARSE_OUTPUT_BYTES} bytes. Pass positions: false or parse a smaller document.`);
+  }
+  return ast;
+}
+
 export function validateStructuredPayload(value: unknown, label: string): number {
   let serialized: string | undefined;
   try { serialized = JSON.stringify(value); }

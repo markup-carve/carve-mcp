@@ -9,6 +9,7 @@ mod preservation;
 mod resources;
 mod server;
 mod splice;
+mod transport;
 mod workspace;
 
 const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write] [--tool-profile PROFILE]\n       carve-mcp-rs [--help | --version]\n\nProfiles: review, convert, structure, workspace, all (default).\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";
@@ -141,7 +142,10 @@ async fn run() -> ExitCode {
                 }
             };
             match server::CarveServer::with_workspace_and_profile(workspace, tool_profile)
-                .serve(rmcp::transport::stdio())
+                .serve(transport::LineTransport::new(
+                    tokio::io::stdin(),
+                    tokio::io::stdout(),
+                ))
                 .await
             {
                 Ok(service) => match service.waiting().await {

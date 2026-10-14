@@ -167,6 +167,9 @@ Inputs are limited to 1 MB. Tools that run the Carve writer (`carve_format`,
 `carve_apply_ast_patch`, `carve_apply_reversible_ast_patch`, `carve_plan_ast_edit`, the workspace formatting
 previews) refuse a document nested deeper than 256 AST levels with a tool error
 before writing, because the writer's cost climbs steeply with depth.
+A `carve_parse` result is limited to 16 MiB of
+JSON; a larger one is refused with a tool error. Pass `positions: false` to drop
+the `pos` objects, which make up most of the output.
 
 ## Structured AST patches
 
@@ -382,6 +385,11 @@ ports. HTTP mode validates host and origin headers, limits request bodies to 7
 MB, allows 60 MCP requests per minute per socket peer, caps concurrent MCP
 requests at 32, and applies request, header, and keep-alive timeouts. Workspace
 writes over HTTP require a token even on loopback.
+
+Both servers answer a request that is not valid JSON with a JSON-RPC parse
+error (`-32700`, `id: null`), on stdio and, for the Node server, over HTTP with
+status 400. The Rust server accepts requests nested up to 2048 levels and
+answers a deeper one, or one of the wrong shape, with `-32600`.
 
 Put public deployments behind TLS. When a reverse proxy terminates TLS, apply
 client-aware rate limits there because the built-in listener sees the proxy as
