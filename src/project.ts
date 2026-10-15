@@ -1,12 +1,13 @@
 import { dirname, extname, posix } from 'node:path';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
+import { expandDocument } from './includes.js';
 import { format as formatCarve, lint, parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
 export interface ProjectWarning {
-  rule: 'missing-local-file' | 'broken-local-anchor' | 'unreadable-document';
-  code: 'CARVE_PROJECT_MISSING_FILE' | 'CARVE_PROJECT_BROKEN_ANCHOR' | 'CARVE_PROJECT_UNREADABLE_DOCUMENT';
+  rule: 'missing-local-file' | 'broken-local-anchor' | 'unreadable-document' | 'include-warning' | 'incomplete-scan';
+  code: 'CARVE_PROJECT_MISSING_FILE' | 'CARVE_PROJECT_BROKEN_ANCHOR' | 'CARVE_PROJECT_UNREADABLE_DOCUMENT' | 'CARVE_PROJECT_INCLUDE_WARNING' | 'CARVE_PROJECT_INCOMPLETE_SCAN';
   severity: 'error' | 'warning';
   message: string;
   suggestion: string;
@@ -24,8 +25,10 @@ const MAX_PROJECT_BYTES = 25_000_000;
 
 const PROJECT_DIAGNOSTICS = {
   'missing-local-file': { code: 'CARVE_PROJECT_MISSING_FILE', severity: 'error', suggestion: 'Fix the destination or add the missing document.' },
-  'broken-local-anchor': { code: 'CARVE_PROJECT_BROKEN_ANCHOR', severity: 'error', suggestion: 'Update the fragment to match a heading ID in the destination document.' },
+  'broken-local-anchor': { code: 'CARVE_PROJECT_BROKEN_ANCHOR', severity: 'error', suggestion: 'Update the fragment to match an ID in the destination document.' },
   'unreadable-document': { code: 'CARVE_PROJECT_UNREADABLE_DOCUMENT', severity: 'warning', suggestion: 'Make the file readable UTF-8 text or exclude it from the review.' },
+  'include-warning': { code: 'CARVE_PROJECT_INCLUDE_WARNING', severity: 'error', suggestion: 'Fix the include target or line range before publishing.' },
+  'incomplete-scan': { code: 'CARVE_PROJECT_INCOMPLETE_SCAN', severity: 'error', suggestion: 'Increase the review limit or reduce the workspace scope.' },
 } as const;
 
 function projectWarning(rule: ProjectWarning['rule'], warning: Omit<ProjectWarning, 'rule' | 'code' | 'severity' | 'suggestion'>): ProjectWarning {
@@ -60,19 +63,23 @@ function foldsAnchors(path: string): boolean {
   return !CARVE_EXTENSIONS.has(extname(path).toLowerCase());
 }
 
-function headingIds(source: string, fold: boolean): Set<string> {
+function anchorIds(source: string, fold: boolean): Set<string> {
+  return anchorIdsFromTree(parse(source), fold);
+}
+
+function anchorIdsFromTree(tree: unknown, fold: boolean): Set<string> {
   const ids = new Set<string>();
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) { value.forEach(walk); return; }
     if (!value || typeof value !== 'object') return;
     const node = value as Record<string, unknown>;
-    if (node.type === 'heading' && node.attrs && typeof node.attrs === 'object') {
+    if ((!fold || node.type === 'heading') && node.attrs && typeof node.attrs === 'object') {
       const id = (node.attrs as Record<string, unknown>).id;
       if (typeof id === 'string') ids.add(fold ? id.toLowerCase() : id);
     }
     for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
   };
-  walk(parse(source));
+  walk(tree);
   return ids;
 }
 
@@ -88,7 +95,7 @@ function localTarget(from: string, raw: string): { path: string; fragment?: stri
 export async function reviewWorkspace(
   workspace: Workspace,
   rootIndex: number,
-  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[]; checkLinks?: boolean; checkAnchors?: boolean } = {},
+  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[]; checkLinks?: boolean; checkAnchors?: boolean; strict?: boolean } = {},
 ) {
   const listed = await workspace.list(rootIndex, options);
   const discovered = new Set(listed.files);
@@ -124,10 +131,44 @@ export async function reviewWorkspace(
   }
 
   const projectWarnings: ProjectWarning[] = [...readWarnings];
+  const includeDependencies: Array<{ path: string; dependency: string; resolved: boolean }> = [];
+  let unresolvedInclude = false;
+  const expandedAnchors = new Map<string, Set<string>>();
+  const includeWarningKeys = new Set<string>();
+  if (options.strict) {
+    for (const [path, source] of sources) {
+      if (!CARVE_EXTENSIONS.has(extname(path).toLowerCase())) continue;
+      let result;
+      try { result = expandDocument(source, [], { rootIndex, root: workspace.roots[rootIndex]!.real, sourcePath: path, allowedPaths: new Set(sources.keys()) }); }
+      catch (error) {
+        projectWarnings.push(projectWarning('include-warning', { path, line: 1, column: 1,
+          message: `Include validation failed: ${error instanceof Error ? error.message : String(error)}` }));
+        continue;
+      }
+      expandedAnchors.set(path, anchorIdsFromTree(result.doc, false));
+      for (const warning of result.includes.warnings) {
+        const key = `${warning.file ?? path}\u0000${warning.line}\u0000${warning.column}\u0000${warning.rule}`;
+        if (includeWarningKeys.has(key)) continue;
+        includeWarningKeys.add(key);
+        projectWarnings.push(projectWarning('include-warning', { path: warning.file ?? path, line: warning.line, column: warning.column,
+          message: warning.rule === 'include-unresolved'
+            ? `${warning.rule}: ${warning.message} Check the path and review scope (depth, limit, exclusions).`
+            : `${warning.rule}: ${warning.message}` }));
+      }
+      if (result.includes.suppressedWarnings > 0) projectWarnings.push(projectWarning('include-warning', { path, line: 1, column: 1,
+        message: `${result.includes.suppressedWarnings} additional include warnings were suppressed.` }));
+      for (const dependency of result.includes.dependencies) {
+        if (!dependency.resolved) unresolvedInclude = true;
+        includeDependencies.push({ path, dependency: dependency.path, resolved: dependency.resolved });
+      }
+    }
+  }
+  if (options.strict && (listed.truncated || sizeTruncated)) projectWarnings.push(projectWarning('incomplete-scan', { path: '', line: 1, column: 1,
+    message: 'Workspace review stopped at a file or byte limit.' }));
   const anchors = new Map<string, Set<string>>();
   if (options.checkLinks !== false && options.checkAnchors !== false) {
     for (const [path, source] of sources) {
-      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, headingIds(source, foldsAnchors(path)));
+      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, expandedAnchors.get(path) ?? anchorIds(source, foldsAnchors(path)));
     }
   }
   for (const [path, source] of sources) {
@@ -185,7 +226,7 @@ export async function reviewWorkspace(
 
   return {
     rootIndex,
-    valid: warningCount + projectWarnings.length === 0,
+    valid: warningCount + projectWarnings.length === 0 && !(options.strict && (listed.truncated || sizeTruncated)),
     filesDiscovered: listed.files.length,
     filesChecked: files.length,
     warningCount: warningCount + projectWarnings.length,
@@ -200,5 +241,10 @@ export async function reviewWorkspace(
     projectWarnings,
     truncated: listed.truncated || sizeTruncated,
     totalBytes,
+    checks: { localLint: true, localLinks: options.checkLinks !== false, anchors: options.checkLinks !== false && options.checkAnchors !== false,
+      includes: options.strict === true, complete: !(listed.truncated || sizeTruncated || readWarnings.length > 0 || unresolvedInclude) },
+    includeDependencies,
+    filesRead: [...sources.keys()],
+    scope: { maxDepth: listed.maxDepth, limit: listed.limit, excluded: workspace.review.exclude ?? [] },
   };
 }

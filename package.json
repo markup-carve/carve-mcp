@@ -5,7 +5,8 @@
   "mcpName": "io.github.markup-carve/carve-mcp",
   "type": "module",
   "bin": {
-    "carve-mcp": "dist/index.js"
+    "carve-mcp": "dist/index.js",
+    "carve-mcp-review": "dist/review-cli.js"
   },
   "files": [
     "dist"

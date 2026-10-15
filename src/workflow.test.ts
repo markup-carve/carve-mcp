@@ -1,9 +1,11 @@
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from './server.js';
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 describe('writer project workflow', () => {
   const closeables: Array<{ close(): Promise<void> }> = [];
@@ -32,6 +34,13 @@ describe('writer project workflow', () => {
         writerReview: expect.arrayContaining([expect.objectContaining({ priority: 1, severity: 'error', mode: 'writer-review' })]),
       },
     });
+    const strictReview = await client.callTool({ name: 'carve_review_workspace', arguments: { rootIndex: 0, strict: true } });
+    expect(strictReview.structuredContent).toMatchObject({
+      checks: { localLint: true, localLinks: true, anchors: true, includes: true, complete: true },
+      filesRead: ['docs/guide.crv', 'index.crv'],
+      includeDependencies: [],
+      versions: { engine: expect.any(String), mcp: version },
+    });
 
     const batch = await client.callTool({ name: 'carve_prepare_workspace_edits', arguments: { rootIndex: 0 } });
     expect(batch.structuredContent).toMatchObject({ filesPrepared: 2, filesChanged: 2, errorCount: 0,
@@ -46,6 +55,7 @@ describe('writer project workflow', () => {
     } });
     expect(await readFile(join(root, 'docs', 'guide.crv'), 'utf8')).toBe(proposal.proposedContent);
     expect(events.map(({ tool, status }) => ({ tool, status }))).toEqual([
+      { tool: 'carve_review_workspace', status: 'ok' },
       { tool: 'carve_review_workspace', status: 'ok' },
       { tool: 'carve_prepare_workspace_edits', status: 'ok' },
       { tool: 'carve_prepare_edit', status: 'ok' },
