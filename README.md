@@ -27,6 +27,12 @@ default and can be enabled for explicitly configured document roots.
   refuses edits that change the node's kind, change how the rest of the
   document parses, or add lint findings, returns forward and undo patches, and
   can write the result through the hash-guarded workspace write.
+- `carve_reviewed_edit` adds a workspace check to that edit. It previews the
+  exact patch and undo patch, then checks local links and includes in the
+  proposed document. A write needs `expectedSha256` and is refused when the
+  scan is truncated, a file is unreadable, include warnings are suppressed, or
+  the edit introduces a project error. Existing unresolved includes appear in
+  the receipt so they can be repaired separately.
 - `carve_plan_ast_edit` turns one or more exact semantic matches and small edit
   intents into one explained, reversible source patch for approval.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic
@@ -36,6 +42,11 @@ default and can be enabled for explicitly configured document roots.
   `includeAst: true`.
 - `carve_migrate` converts HTML, Markdown, Djot, or BBCode and reports version 2 migration fidelity.
 - `carve_reference_graph` indexes cross-document headings, footnotes, abbreviations, links, and images, including broken edges and orphaned definitions (when workspace access is enabled).
+
+`carve_review_workspace` accepts `strict: true` to check include targets and
+line ranges. Its receipt lists files read and include dependencies. For CI,
+use `carve-mcp-review --root docs --strict` as described in
+[development and deployment](docs/development.md).
 
 Tools return concise text for readers alongside schema-validated structured
 results for clients. Six optional prompts guide common review, conversion, and

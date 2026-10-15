@@ -15,7 +15,7 @@ export interface IncludeReport {
   suppressedWarnings: number;
 }
 
-export interface IncludeScope { rootIndex: number; root: string; sourcePath?: string; allowedPaths?: ReadonlySet<string> }
+export interface IncludeScope { rootIndex: number; root: string; sourcePath?: string; allowedPaths?: ReadonlySet<string>; replacements?: ReadonlyMap<string, string> }
 
 /**
  * The containment root a tool call may expand includes under.
@@ -65,7 +65,7 @@ function contained(root: string, id: string): string | undefined {
  * the engine resolver would refuse anyway (missing, outside the root,
  * absolute) is left to it so its denial classes stay intact.
  */
-export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>): IncludeResolver {
+export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>, replacements?: ReadonlyMap<string, string>): IncludeResolver {
   const inner = fileSystemResolver(root);
   return (includePath, ctx) => {
     if (isAbsolute(includePath)) return inner(includePath, ctx);
@@ -82,7 +82,11 @@ export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>)
     if (documentPathRefusal(lexical) || documentPathRefusal(canonical)) return { source: null, id: includePath, denial: 'denied' };
     try { if (!statSync(real).isFile()) return { source: null, id: includePath, denial: 'denied' }; }
     catch { return { source: null, id: includePath, denial: 'denied' }; }
-    return inner(includePath, ctx);
+    const resolved = inner(includePath, ctx);
+    const replacement = replacements?.get(real);
+    if (replacement === undefined || resolved === null) return resolved;
+    if (typeof resolved === 'string') return replacement;
+    return resolved.source === null ? resolved : { ...resolved, source: replacement };
   };
 }
 
@@ -107,7 +111,7 @@ function relativizePositions(doc: Document, root: string): void {
 export function expandDocument(source: string, extensions: CarveExtension[], scope: IncludeScope): { doc: Document; includes: IncludeReport } {
   const doc = parse(source, { extensions, positions: true });
   const expanded = expandIncludes(doc, source, {
-    resolve: policyResolver(scope.root, scope.allowedPaths),
+    resolve: policyResolver(scope.root, scope.allowedPaths, scope.replacements),
     ...(scope.sourcePath ? { sourcePath: scope.sourcePath } : {}),
     extensions,
   });

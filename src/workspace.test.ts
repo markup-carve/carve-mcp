@@ -173,6 +173,17 @@ describe('workspace operations', () => {
     expect(review.projectWarnings).toEqual([]);
   });
 
+  it('checks resolved reference links and records harmless include id renames', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'child.crv'), '{#same}\nChild.\n');
+    await writeFile(join(root, 'index.crv'), '{#same}\nParent.\n\n{{ child.crv }}\n\n[missing][target]\n\n[target]: child.crv#Gone\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0, { strict: true });
+    expect(review.projectWarnings.map(({ rule, target }) => ({ rule, target }))).toEqual([
+      { rule: 'broken-local-anchor', target: 'child.crv#Gone' },
+    ]);
+    expect(review.includeAdjustments).toContainEqual(expect.objectContaining({ rule: 'include-id-rename' }));
+  });
+
   it('compares reference graph keys exactly', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'index.crv'), '# Home\n\n[home](index.crv#home)\n\n[^Note]: Upper\n\nUsed[^note].');

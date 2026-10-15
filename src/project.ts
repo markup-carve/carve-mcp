@@ -1,4 +1,4 @@
-import { dirname, extname, posix } from 'node:path';
+import { dirname, extname, posix, resolve } from 'node:path';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { expandDocument } from './includes.js';
@@ -57,6 +57,28 @@ function lineColumn(source: string, offset: number) {
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 };
 }
 
+function documentLinks(path: string, source: string): Array<{ raw: string; line: number; column: number }> {
+  if (CARVE_EXTENSIONS.has(extname(path).toLowerCase())) {
+    const links: Array<{ raw: string; line: number; column: number }> = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) { value.forEach(walk); return; }
+      if (!value || typeof value !== 'object') return;
+      const node = value as Record<string, unknown>;
+      if (node.type === 'link' && typeof node.href === 'string') {
+        const pos = node.pos as { startLine?: number; startColumn?: number } | undefined;
+        links.push({ raw: node.href, line: pos?.startLine ?? 1, column: pos?.startColumn ?? 1 });
+      }
+      for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
+    };
+    walk(parse(source));
+    return links;
+  }
+  const opaque = opaqueRanges(source);
+  return [...source.matchAll(LINK)].filter((match) => !match[0].startsWith('!')
+    && !opaque.some(([start, end]) => (match.index ?? 0) >= start && (match.index ?? 0) < end))
+    .map((match) => ({ raw: match[1]!, ...lineColumn(source, (match.index ?? 0) + match[0].indexOf(match[1]!)) }));
+}
+
 // Carve ids compare exactly (carve#2732). Markdown and Djot targets keep the
 // fold: their anchors follow their own renderer's slug rule, not Carve's.
 function foldsAnchors(path: string): boolean {
@@ -95,7 +117,8 @@ function localTarget(from: string, raw: string): { path: string; fragment?: stri
 export async function reviewWorkspace(
   workspace: Workspace,
   rootIndex: number,
-  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[]; checkLinks?: boolean; checkAnchors?: boolean; strict?: boolean } = {},
+  options: { maxDepth?: number; limit?: number; platforms?: LintPlatform[]; checkLinks?: boolean; checkAnchors?: boolean;
+    strict?: boolean; replacements?: ReadonlyMap<string, string> } = {},
 ) {
   const listed = await workspace.list(rootIndex, options);
   const discovered = new Set(listed.files);
@@ -111,9 +134,11 @@ export async function reviewWorkspace(
         message: `Document could not be reviewed: ${error instanceof Error ? error.message : String(error)}` }));
       continue;
     }
-    if (totalBytes + read.bytes > MAX_PROJECT_BYTES) { sizeTruncated = true; break; }
-    totalBytes += read.bytes;
-    sources.set(path, read.content);
+    const replacement = options.replacements?.get(path);
+    const bytes = replacement === undefined ? read.bytes : Buffer.byteLength(replacement, 'utf8');
+    if (totalBytes + bytes > MAX_PROJECT_BYTES) { sizeTruncated = true; break; }
+    totalBytes += bytes;
+    sources.set(path, replacement ?? read.content);
   }
 
   const files = [];
@@ -132,14 +157,18 @@ export async function reviewWorkspace(
 
   const projectWarnings: ProjectWarning[] = [...readWarnings];
   const includeDependencies: Array<{ path: string; dependency: string; resolved: boolean }> = [];
+  const includeAdjustments: Array<{ path: string; rule: string; message: string; line: number; column: number }> = [];
   let unresolvedInclude = false;
+  let suppressedIncludeWarnings = false;
   const expandedAnchors = new Map<string, Set<string>>();
   const includeWarningKeys = new Set<string>();
   if (options.strict) {
+    const root = workspace.roots[rootIndex]!.real;
+    const replacements = new Map([...options.replacements ?? []].map(([path, content]) => [resolve(root, path), content]));
     for (const [path, source] of sources) {
       if (!CARVE_EXTENSIONS.has(extname(path).toLowerCase())) continue;
       let result;
-      try { result = expandDocument(source, [], { rootIndex, root: workspace.roots[rootIndex]!.real, sourcePath: path, allowedPaths: new Set(sources.keys()) }); }
+      try { result = expandDocument(source, [], { rootIndex, root, sourcePath: path, allowedPaths: new Set(sources.keys()), replacements }); }
       catch (error) {
         projectWarnings.push(projectWarning('include-warning', { path, line: 1, column: 1,
           message: `Include validation failed: ${error instanceof Error ? error.message : String(error)}` }));
@@ -147,6 +176,11 @@ export async function reviewWorkspace(
       }
       expandedAnchors.set(path, anchorIdsFromTree(result.doc, false));
       for (const warning of result.includes.warnings) {
+        if (['include-heading-clamp', 'include-id-rename', 'include-footnote-rename'].includes(warning.rule)) {
+          includeAdjustments.push({ path: warning.file ?? path, rule: warning.rule, message: warning.message,
+            line: warning.line, column: warning.column });
+          continue;
+        }
         const key = `${warning.file ?? path}\u0000${warning.line}\u0000${warning.column}\u0000${warning.rule}`;
         if (includeWarningKeys.has(key)) continue;
         includeWarningKeys.add(key);
@@ -155,8 +189,11 @@ export async function reviewWorkspace(
             ? `${warning.rule}: ${warning.message} Check the path and review scope (depth, limit, exclusions).`
             : `${warning.rule}: ${warning.message}` }));
       }
-      if (result.includes.suppressedWarnings > 0) projectWarnings.push(projectWarning('include-warning', { path, line: 1, column: 1,
-        message: `${result.includes.suppressedWarnings} additional include warnings were suppressed.` }));
+      if (result.includes.suppressedWarnings > 0) {
+        suppressedIncludeWarnings = true;
+        projectWarnings.push(projectWarning('include-warning', { path, line: 1, column: 1,
+          message: `${result.includes.suppressedWarnings} additional include warnings were suppressed.` }));
+      }
       for (const dependency of result.includes.dependencies) {
         if (!dependency.resolved) unresolvedInclude = true;
         includeDependencies.push({ path, dependency: dependency.path, resolved: dependency.resolved });
@@ -173,19 +210,16 @@ export async function reviewWorkspace(
   }
   for (const [path, source] of sources) {
     if (options.checkLinks === false) break;
-    const opaque = opaqueRanges(source);
-    for (const match of source.matchAll(LINK)) {
-      if (opaque.some(([start, end]) => (match.index ?? 0) >= start && (match.index ?? 0) < end)) continue;
-      if (match[0].startsWith('!')) continue;
-      const target = localTarget(path, match[1]);
+    for (const link of documentLinks(path, source)) {
+      const target = localTarget(path, link.raw);
       if (!target) continue;
       if (!DOCUMENT_EXTENSIONS.has(extname(target.path).toLowerCase())) continue;
-      const location = lineColumn(source, (match.index ?? 0) + match[0].indexOf(match[1]));
+      const location = { line: link.line, column: link.column };
       if (!discovered.has(target.path)) {
-        projectWarnings.push(projectWarning('missing-local-file', { path, target: match[1], ...location,
+        projectWarnings.push(projectWarning('missing-local-file', { path, target: link.raw, ...location,
           message: `Local link target does not exist in this workspace review: ${target.path}` }));
       } else if (options.checkAnchors !== false && target.fragment && anchors.has(target.path) && !anchors.get(target.path)?.has(foldsAnchors(target.path) ? target.fragment.toLowerCase() : target.fragment)) {
-        projectWarnings.push(projectWarning('broken-local-anchor', { path, target: match[1], ...location,
+        projectWarnings.push(projectWarning('broken-local-anchor', { path, target: link.raw, ...location,
           message: `Local link anchor does not exist in ${target.path}: #${target.fragment}` }));
       }
     }
@@ -242,8 +276,10 @@ export async function reviewWorkspace(
     truncated: listed.truncated || sizeTruncated,
     totalBytes,
     checks: { localLint: true, localLinks: options.checkLinks !== false, anchors: options.checkLinks !== false && options.checkAnchors !== false,
-      includes: options.strict === true, complete: !(listed.truncated || sizeTruncated || readWarnings.length > 0 || unresolvedInclude) },
+      includes: options.strict === true, suppressedIncludeWarnings,
+      complete: !(listed.truncated || sizeTruncated || readWarnings.length > 0 || unresolvedInclude || suppressedIncludeWarnings) },
     includeDependencies,
+    includeAdjustments,
     filesRead: [...sources.keys()],
     scope: { maxDepth: listed.maxDepth, limit: listed.limit, excluded: workspace.review.exclude ?? [] },
   };

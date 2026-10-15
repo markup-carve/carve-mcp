@@ -137,4 +137,70 @@ describe('carve_replace_source over MCP', () => {
       expect(tool.annotations?.readOnlyHint).toBe(!writes);
     }
   });
+
+  it('reviews cross-file references before a guarded write and returns an exact undo', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    const original = '{#summary}\nSee [guide](guide.crv#Guide).\n';
+    await writeFile(join(root, 'doc.crv'), original);
+    await writeFile(join(root, 'guide.crv'), '# Guide\n');
+    const client = await connect({ roots: [root], allowWrite: true });
+    const selector = { kind: 'id', value: 'summary' };
+    const bad = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'doc.crv', selector, text: 'See [guide](guide.crv#Gone).',
+    } });
+    expect(bad).toMatchObject({ isError: true, structuredContent: { reason: 'new-project-findings' } });
+    expect(await readFile(join(root, 'doc.crv'), 'utf8')).toBe(original);
+    const preview = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'doc.crv', selector, text: 'See [guide](guide.crv#Guide) and more.',
+    } });
+    const receipt = preview.structuredContent as { sha256: string; resultSha256: string; project: { filesRead: string[]; introduced: unknown[] }; undoPatch: { edits: Array<{ start: number; end: number; replacement: string }> } };
+    expect(receipt.project).toMatchObject({ filesRead: ['doc.crv', 'guide.crv'], introduced: [] });
+    expect(await readFile(join(root, 'doc.crv'), 'utf8')).toBe(original);
+    const applied = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'doc.crv', selector, text: 'See [guide](guide.crv#Guide) and more.', expectedSha256: receipt.sha256, dryRun: false,
+    } });
+    expect(applied.isError).not.toBe(true);
+    expect(applyPatch(await readFile(join(root, 'doc.crv'), 'utf8'), receipt.undoPatch)).toBe(original);
+    const stale = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'doc.crv', selector, text: 'Again', expectedSha256: receipt.sha256, dryRun: false,
+    } });
+    expect(stale).toMatchObject({ isError: true, structuredContent: { reason: 'stale-source' } });
+  });
+
+  it('reviews includes against proposed bytes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'part.crv'), 'first\nsecond\n');
+    await writeFile(join(root, 'index.crv'), '{{ part.crv @lines:2-2 }}\n');
+    const client = await connect({ roots: [root], allowWrite: true });
+    const input = { rootIndex: 0, path: 'part.crv', selector: { kind: 'node-type', value: 'paragraph' }, text: 'first' };
+    const unsafe = await client.callTool({ name: 'carve_reviewed_edit', arguments: input });
+    expect(unsafe).toMatchObject({ isError: true, structuredContent: { reason: 'new-project-findings' } });
+    expect(await readFile(join(root, 'part.crv'), 'utf8')).toBe('first\nsecond\n');
+    const safe = await client.callTool({ name: 'carve_reviewed_edit', arguments: { ...input, text: 'first\nthird' } });
+    expect(safe.isError).not.toBe(true);
+  });
+
+  it('allows an edit that repairs an unresolved include', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.crv'), '{{ gone.crv }}\n');
+    const client = await connect({ roots: [root], allowWrite: true });
+    const repaired = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: 'Fixed.',
+    } });
+    expect(repaired.isError).not.toBe(true);
+    expect((repaired.structuredContent as { project: { complete: boolean } }).project.complete).toBe(true);
+  });
+
+  it('keeps an unrelated existing include error in the receipt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'broken.crv'), '{{ gone.crv }}\n');
+    await writeFile(join(root, 'doc.crv'), '{#p}\nOld text.\n');
+    const client = await connect({ roots: [root], allowWrite: true });
+    const preview = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'doc.crv', selector: { kind: 'id', value: 'p' }, text: 'New text.',
+    } });
+    expect(preview.isError).not.toBe(true);
+    expect((preview.structuredContent as { project: { complete: boolean; existing: Array<{ rule: string }> } }).project)
+      .toMatchObject({ complete: false, existing: [expect.objectContaining({ rule: 'include-warning' })] });
+  });
 });

@@ -1,5 +1,6 @@
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
 import { createRequire } from 'node:module';
+import { posix } from 'node:path';
 import { KNOWN_LINT_PLATFORMS, LIB_VERSION, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, parseForTool, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
@@ -104,8 +105,9 @@ const sourceReplaceOutput = z.object({ match: z.object({ path: z.string(), type:
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int(),
-  checks: z.object({ localLint: z.boolean(), localLinks: z.boolean(), anchors: z.boolean(), includes: z.boolean(), complete: z.boolean() }),
+  checks: z.object({ localLint: z.boolean(), localLinks: z.boolean(), anchors: z.boolean(), includes: z.boolean(), suppressedIncludeWarnings: z.boolean(), complete: z.boolean() }),
   includeDependencies: z.array(z.object({ path: z.string(), dependency: z.string(), resolved: z.boolean() })), filesRead: z.array(z.string()),
+  includeAdjustments: z.array(z.unknown()),
   scope: z.object({ maxDepth: z.number().int(), limit: z.number().int(), excluded: z.array(z.string()) }),
   versions: z.object({ engine: z.string(), mcp: z.string() }),
 }).loose();
@@ -238,6 +240,53 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
         strict,
       }), versions: { engine: LIB_VERSION, mcp: packageVersion },
     })));
+    if (toolEnabled(toolProfile, 'carve_reviewed_edit')) server.registerTool('carve_reviewed_edit', {
+      title: 'Preview or apply a reviewed block edit',
+      description: 'Replace one selected Carve block, check the proposed result against local lint and workspace references and includes, then return exact forward and undo patches. A write requires the source hash and a complete project scan.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), path: z.string().min(1), selector: astSelector,
+        scope: z.enum(['node', 'section']).default('node'), text: sourceSchema,
+        expectedSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+        ...(workspace.allowWrite ? { dryRun: z.boolean().default(true) } : {}),
+      }).strict(),
+      outputSchema: sourceReplaceOutput.extend({ project: z.object({ filesRead: z.array(z.string()), includeDependencies: z.array(z.unknown()),
+        includeAdjustments: z.array(z.unknown()), introduced: z.array(z.unknown()), existing: z.array(z.unknown()), complete: z.boolean() }).loose() }),
+      annotations: workspace.allowWrite ? { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } : readOnly,
+    }, safe('carve_reviewed_edit', observe, async ({ rootIndex, path, selector, scope, text, expectedSha256, dryRun }) => {
+      const document = await documentSource({ rootIndex, path });
+      const checkedPath = posix.normalize(path.replaceAll('\\', '/'));
+      if (dryRun === false && !expectedSha256) throw new Error('expectedSha256 is required when dryRun is false.');
+      const { output, result } = replaceSource(document.source, selector, text, { scope, expectedSha256, sha256: document.sha256 });
+      const options = { maxDepth: workspace.review.maxDepth ?? 10, limit: workspace.review.limit ?? 500,
+        platforms: workspace.review.platforms ?? [], checkLinks: true, checkAnchors: true, strict: true };
+      const before = await reviewWorkspace(workspace, rootIndex, options);
+      const after = await reviewWorkspace(workspace, rootIndex, { ...options, replacements: new Map([[checkedPath, result]]) });
+      if (!after.filesRead.includes(checkedPath)) {
+        throw new SourceEditRefusal('The edited file is outside the workspace review scope.',
+          { reason: 'outside-project-scope', filesRead: after.filesRead });
+      }
+      if (before.truncated || after.truncated || before.checks.suppressedIncludeWarnings || after.checks.suppressedIncludeWarnings
+          || before.projectWarnings.some((warning) => warning.rule === 'unreadable-document')
+          || after.projectWarnings.some((warning) => warning.rule === 'unreadable-document')) {
+        throw new SourceEditRefusal('The workspace scan is incomplete; the edit cannot be reviewed.',
+          { reason: 'incomplete-project-check', filesRead: after.filesRead });
+      }
+      const key = (warning: { rule: string; path: string; target?: string; message: string }) =>
+        `${warning.rule}\u0000${warning.path}\u0000${warning.target ?? ''}\u0000${warning.message}`;
+      const existing = new Map<string, number>();
+      for (const warning of before.projectWarnings) existing.set(key(warning), (existing.get(key(warning)) ?? 0) + 1);
+      const introduced = after.projectWarnings.filter((warning) => {
+        const id = key(warning);
+        const count = existing.get(id) ?? 0;
+        if (count > 0) { existing.set(id, count - 1); return false; }
+        return warning.severity === 'error';
+      });
+      if (introduced.length) throw new SourceEditRefusal('The edit introduces project validation errors.',
+        { reason: 'new-project-findings', introduced });
+      const project = { filesRead: after.filesRead, includeDependencies: after.includeDependencies,
+        includeAdjustments: after.includeAdjustments, introduced, existing: after.projectWarnings, complete: after.checks.complete };
+      if (dryRun !== false) return { ...output, project };
+      return { ...output, project, write: await workspace.write(rootIndex, checkedPath, result, document.sha256, false) };
+    }));
     if (toolEnabled(toolProfile, 'carve_reference_graph')) server.registerTool('carve_reference_graph', {
       title: 'Build Carve reference graph',
       description: 'Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.',
