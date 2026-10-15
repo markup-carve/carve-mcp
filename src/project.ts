@@ -60,13 +60,20 @@ function lineColumn(source: string, offset: number) {
 function documentLinks(path: string, source: string): Array<{ raw: string; line: number; column: number }> {
   if (CARVE_EXTENSIONS.has(extname(path).toLowerCase())) {
     const links: Array<{ raw: string; line: number; column: number }> = [];
+    const codepoints = Array.from(source);
     const walk = (value: unknown): void => {
       if (Array.isArray(value)) { value.forEach(walk); return; }
       if (!value || typeof value !== 'object') return;
       const node = value as Record<string, unknown>;
       if (node.type === 'link' && typeof node.href === 'string') {
-        const pos = node.pos as { startLine?: number; startColumn?: number } | undefined;
-        links.push({ raw: node.href, line: pos?.startLine ?? 1, column: pos?.startColumn ?? 1 });
+        const pos = node.pos as { startOffset?: number; endOffset?: number; startLine?: number; startColumn?: number } | undefined;
+        const start = pos?.startOffset ?? 0;
+        const segment = codepoints.slice(start, pos?.endOffset).join('');
+        const marker = node.ref ? -1 : segment.indexOf('](');
+        const hrefAt = marker < 0 ? -1 : segment.indexOf(node.href, marker + 2);
+        const location = hrefAt < 0 ? { line: pos?.startLine ?? 1, column: pos?.startColumn ?? 1 }
+          : lineColumn(source, codepoints.slice(0, start).join('').length + hrefAt);
+        links.push({ raw: node.href, ...location });
       }
       for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
     };
