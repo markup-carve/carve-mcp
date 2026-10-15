@@ -430,6 +430,12 @@ async function workspaceResults(command, args) {
 function normalizeEquivalentDiffs(result) {
   const normalized = structuredClone(result);
   for (const call of normalized.output) {
+    if (call.name === 'carve_review_workspace') {
+      // The reviewed-edit workflow's supplemental include receipt is currently
+      // exposed by the Node server only; parity still checks shared findings.
+      delete call.value?.includeAdjustments;
+      if (call.value?.checks) delete call.value.checks.suppressedIncludeWarnings;
+    }
     // The servers report their actual engine pins, which need not be the same release.
     if (call.value?.versions?.engine) call.value.versions.engine = '<engine version>';
     if (typeof call.value?.unifiedDiff === 'string' && call.value.unifiedDiff) {
@@ -475,7 +481,7 @@ try {
     const rootArgs = ['--root', workspaceRoot, '--allow-write'];
     const rustNames = await profileToolNames(`${target}/debug/carve-mcp-rs`, rootArgs, profile);
     const typescriptNames = await profileToolNames(process.execPath, ['dist/index.js', ...rootArgs], profile);
-    const knownTypeScriptOnly = ['workspace', 'all'].includes(profile) ? ['carve_reference_graph'] : [];
+    const knownTypeScriptOnly = ['workspace', 'all'].includes(profile) ? ['carve_reference_graph', 'carve_reviewed_edit'] : [];
     deepStrictEqual(typescriptNames.filter((name) => !rustNames.includes(name)), knownTypeScriptOnly);
     deepStrictEqual(rustNames, typescriptNames.filter((name) => !knownTypeScriptOnly.includes(name)));
   }

@@ -8,7 +8,7 @@ describe('tool profiles', () => {
       'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets',
       'carve_parse', 'carve_create_ast_patch', 'carve_apply_ast_patch', 'carve_select_ast_nodes',
       'carve_get_block', 'carve_replace_source', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch', 'carve_migrate',
-      'carve_read_file', 'carve_list_files', 'carve_review_workspace', 'carve_reference_graph',
+      'carve_read_file', 'carve_list_files', 'carve_review_workspace', 'carve_reviewed_edit', 'carve_reference_graph',
       'carve_prepare_edit', 'carve_prepare_workspace_edits', 'carve_workspace_info', 'carve_write_file',
     ]);
     expect(toolEnabled('all', 'carve_future_tool')).toBe(true);
@@ -21,7 +21,7 @@ describe('tool profiles', () => {
       'carve_select_ast_nodes', 'carve_get_block', 'carve_replace_source', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch',
     ]);
     expect(toolNames('workspace')).toEqual([
-      'carve_read_file', 'carve_list_files', 'carve_review_workspace', 'carve_reference_graph',
+      'carve_read_file', 'carve_list_files', 'carve_review_workspace', 'carve_reviewed_edit', 'carve_reference_graph',
       'carve_prepare_edit', 'carve_prepare_workspace_edits', 'carve_workspace_info', 'carve_write_file',
       'carve_get_block', 'carve_replace_source', 'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets',
     ]);
