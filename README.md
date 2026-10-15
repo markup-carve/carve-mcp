@@ -69,6 +69,11 @@ Merged cells and caption associations can therefore require review even when
 the pinned engine returns zero render losses. Table diagnostics name the AST
 node path and affected field.
 
+The response is a version 1 receipt. `source.sha256` identifies the UTF-8
+Carve input, and `versions` names the installed engine and MCP packages. Each
+target retains its status, render losses, preservation findings, and assessment
+scope. Keep this receipt with the converted output when reviewing a decision.
+
 Each result includes `assessmentScope` and a `preservation` report with
 `complete: false`, checked fields, and unchecked boundaries. A `compatible`
 result means the declared checks found no issue. It does not certify every

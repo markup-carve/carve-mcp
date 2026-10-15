@@ -13,7 +13,7 @@
       ]
     },
     "convert": {
-      "maximum": 1800,
+      "maximum": 1950,
       "workspace": false,
       "tools": [
         "carve_lint",

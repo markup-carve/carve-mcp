@@ -321,6 +321,14 @@ async function results(command, args, engineVersion) {
 
 const typescript = await results(process.execPath, ['dist/index.js'], javascriptEngineVersion);
 const rust = await results(`${target}/debug/carve-mcp-rs`, [], rustEngineVersion);
+// Receipt versions record the installed engine. Pins legitimately differ across servers.
+for (const result of [rust, typescript]) {
+  for (const call of result.output) {
+    if (call.name === 'carve_check_targets' && call.value?.versions?.engine) {
+      call.value.versions.engine = '<engine version>';
+    }
+  }
+}
 try {
   deepStrictEqual(rust, typescript);
 } catch (error) {

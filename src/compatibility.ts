@@ -1,7 +1,11 @@
-import { carveToAstJson } from '@markup-carve/carve';
+import { carveToAstJson, LIB_VERSION } from '@markup-carve/carve';
+import { createRequire } from 'node:module';
+import { sha256Text } from './blocks.js';
 import { assessTablePreservation } from './table-preservation.js';
 import type { LintPlatform } from '@markup-carve/carve';
 import { lint, render, validateSource, type RenderTarget } from './tools.js';
+
+const { version: mcpVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 export type CompatibilityTarget = 'html' | 'markdown' | 'plain' | 'ansi' | 'github' | 'wordpress' | 'pdf';
 
@@ -37,7 +41,9 @@ export function compatibilityMatrix(source: string, targets: CompatibilityTarget
       warningCount: diagnosed.warningCount, warnings: diagnosed.warnings,
       lossCount: rendered.totalLosses, losses: rendered.losses, lossesTruncated: rendered.truncated, suggestions };
   });
-  return { compatible: results.every(({ status }) => status === 'compatible'), targetCount: results.length,
+  return { receiptVersion: 1, source: { format: 'carve' as const, sha256: sha256Text(source) },
+    versions: { engine: LIB_VERSION, mcp: mcpVersion },
+    compatible: results.every(({ status }) => status === 'compatible'), targetCount: results.length,
     summary: { compatible: results.filter(({ status }) => status === 'compatible').length,
       warning: results.filter(({ status }) => status === 'warning').length,
       lossy: results.filter(({ status }) => status === 'lossy').length }, targets: results };
