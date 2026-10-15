@@ -1514,8 +1514,22 @@ enum AsciiMode {
 enum TypographyMode {
     Glyph,
     Source,
-    #[serde(rename = "quotes-source")]
-    QuotesSource,
+}
+
+/// carve-js's `SmartTypographyOption`: a mode, a boolean, or per-family switches.
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum TypographySetting {
+    Mode(TypographyMode),
+    Enabled(bool),
+    Families(TypographyFamilies),
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TypographyFamilies {
+    #[serde(default = "default_true")]
+    quotes: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, schemars::JsonSchema)]
@@ -1577,10 +1591,8 @@ struct RenderInput {
     )]
     max_render_losses: Option<usize>,
     #[serde(default)]
-    #[schemars(
-        description = "Render typographic glyphs, the punctuation the author typed, or the typed quotes with every other glyph kept (quotes-source)."
-    )]
-    smart_typography: Option<TypographyMode>,
+    #[schemars(description = "false is source; { quotes: false } keeps typed quotes only.")]
+    smart_typography: Option<TypographySetting>,
     #[serde(default)]
     #[schemars(
         default = "empty_extensions",
@@ -3144,9 +3156,13 @@ impl CarveServer {
             Some(AsciiMode::Strict) => AsciiHeadingIds::Strict,
         });
         options.smart_typography = match input.smart_typography {
-            None | Some(TypographyMode::Glyph) => SmartTypographyMode::Glyph,
-            Some(TypographyMode::Source) => SmartTypographyMode::Source,
-            Some(TypographyMode::QuotesSource) => SmartTypographyMode::QuotesSource,
+            Some(
+                TypographySetting::Mode(TypographyMode::Source) | TypographySetting::Enabled(false),
+            ) => SmartTypographyMode::Source,
+            Some(TypographySetting::Families(TypographyFamilies { quotes: false })) => {
+                SmartTypographyMode::QuotesSource
+            }
+            _ => SmartTypographyMode::Glyph,
         };
         for extension in &input.extensions {
             options = match extension {
@@ -4661,6 +4677,54 @@ mod tests {
                 .contains("Glossary text.")
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_file_under_a_symlinked_hidden_directory_is_refused() {
+        let (root, _, workspace) = policy_root();
+        std::os::unix::fs::symlink("../.git", root.join("docs/hidden")).unwrap();
+        let refused = workspace
+            .write(0, "docs/hidden/new.md", "x", None, true)
+            .unwrap_err();
+        assert!(refused.contains("Hidden paths"), "{refused}");
+        assert!(workspace.write(0, "docs/new.md", "x", None, true).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn smart_typography_takes_the_carve_js_option_shape() {
+        let server = CarveServer::new();
+        let render = |setting: Value| {
+            structured(&server.render(call(json!({
+                "source": "\"Wait...\" -- it's fine",
+                "target": "plain",
+                "smartTypography": setting,
+            }))))["value"]
+                .clone()
+        };
+        let glyph = json!("\u{201c}Wait\u{2026}\u{201d} \u{2013} it\u{2019}s fine\n");
+        let source = json!("\"Wait...\" -- it's fine\n");
+        assert_eq!(render(json!("glyph")), glyph);
+        assert_eq!(render(json!(true)), glyph);
+        assert_eq!(render(json!({"quotes": true})), glyph);
+        assert_eq!(render(json!("source")), source);
+        assert_eq!(render(json!(false)), source);
+        assert_eq!(
+            render(json!({"quotes": false})),
+            json!("\"Wait\u{2026}\" \u{2013} it's fine\n")
+        );
+        for refused in [
+            json!("quotes-source"),
+            json!({"quotes": false, "dashes": false}),
+        ] {
+            assert!(
+                serde_json::from_value::<RenderInput>(
+                    json!({"source": "x", "target": "plain", "smartTypography": refused})
+                )
+                .is_err()
+            );
+        }
     }
 
     #[cfg(unix)]

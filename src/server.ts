@@ -34,7 +34,7 @@ const renderSettings = {
   lowercaseHeadingIds: z.boolean().optional().describe('Lowercase generated heading IDs; explicit values override the preset.'),
   strictLosses: z.boolean().default(false).describe('Fail instead of returning output when a raw-format node would be dropped.'),
   maxRenderLosses: z.number().int().min(0).max(10_000).optional().describe('Maximum detailed losses to return.'),
-  smartTypography: z.enum(['glyph', 'source', 'quotes-source']).optional().describe('Render typographic glyphs, the punctuation the author typed, or the typed quotes with every other glyph kept (quotes-source).'),
+  smartTypography: z.union([z.enum(['glyph', 'source']), z.boolean(), z.object({ quotes: z.boolean().optional() }).strict()]).optional().describe('false is source; { quotes: false } keeps typed quotes only.'),
   extensions: z.array(z.enum(['autolink', 'semantic-spans', 'wikilinks'])).max(3).default([]).describe('Opt-in extensions; semantic-spans is HTML-only.'),
   allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output. Disabled by default.'),
   sanitizeUrls: z.boolean().default(true).describe('Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one.'),

@@ -50,6 +50,14 @@ describe('include workspace policy', () => {
     await expect(workspace.read(0, 'docs/env.md')).rejects.toThrow(/Hidden paths/);
   });
 
+  it.skipIf(process.platform === 'win32')('refuses a new file under a symlinked hidden directory', async () => {
+    const { root, workspace } = await fixture({ '.git/config': 'x\n' });
+    await mkdir(join(root, 'docs'));
+    await symlink('../.git', join(root, 'docs', 'hidden'));
+    await expect(workspace.write(0, 'docs/hidden/new.md', 'x', undefined, true)).rejects.toThrow(/Resolved path refused: Hidden paths/);
+    await expect(workspace.write(0, 'docs/new.md', 'x', undefined, true)).resolves.toMatchObject({ created: true });
+  });
+
   it('still expands a normal document reached through ..', async () => {
     const { workspace } = await fixture({ 'shared/glossary.crv': 'Glossary text.\n', 'chapters/one.crv': '{{ ../shared/glossary.crv }}\n' });
     const out = render('{{ chapters/one.crv }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));

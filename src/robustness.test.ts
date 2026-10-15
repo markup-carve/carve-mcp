@@ -34,6 +34,12 @@ describe('carve_parse output size', () => {
     expect(JSON.stringify(parseForTool('Hi *x*\n'))).toContain('"pos"');
   });
 
+  it('keeps an authored pos attribute when positions are omitted', () => {
+    const ast = parseForTool('[Hi]{pos=1}\n', undefined, false);
+    expect(JSON.stringify(ast)).toContain('"keyValues":{"pos":"1"}');
+    expect(JSON.stringify(ast)).not.toContain('"startLine"');
+  });
+
   it('refuses a result past the cap with a clear error, and positions: false fits', () => {
     const source = paragraph.repeat(Math.floor(900_000 / paragraph.length));
     expect(() => parseForTool(source)).toThrow(new RegExp(`limit is ${MAX_PARSE_OUTPUT_BYTES} bytes.*positions: false`));

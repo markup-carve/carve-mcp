@@ -74,7 +74,9 @@ const calls = [
   ['carve_render', { source: '[[Some Page]]', target: 'html', extensions: ['wikilinks'] }],
   ['carve_render', { source: '# Mixed', target: 'html', asciiHeadingIds: 'strict', lowercaseHeadingIds: true }],
   ['carve_render', { source: 'Wait...', target: 'plain', smartTypography: 'source' }],
-  ['carve_render', { source: '"Wait..." -- it\'s fine', target: 'html', smartTypography: 'quotes-source' }],
+  ['carve_render', { source: '"Wait..." -- it\'s fine', target: 'html', smartTypography: { quotes: false } }],
+  ['carve_render', { source: '"Wait..." -- it\'s fine', target: 'plain', smartTypography: false }],
+  ['carve_render', { source: '"Wait..." -- it\'s fine', target: 'plain', smartTypography: { quotes: true } }],
   ['carve_render', { source: '`<b>x</b>`{=html}', target: 'html', allowRawHtml: false, sanitizeUrls: true }],
   ['carve_render', { source: '```=latex\nx\n```', target: 'plain' }],
   ['carve_parse', { source: '# Hello' }],
@@ -207,8 +209,14 @@ function localRef(schema, ref) {
 }
 
 function schemaNode(root, raw) {
-  const selected = raw.anyOf?.find((item) => item.type !== 'null') ?? raw;
+  const options = raw.anyOf?.filter((item) => item.type !== 'null');
+  const selected = options?.length === 1 ? options[0] : raw;
   const node = selected.$ref ? { ...localRef(root, selected.$ref), ...selected, $ref: undefined } : selected;
+  // A union compares member by member: Node lists it inline, schemars behind a $ref.
+  const union = node.anyOf?.filter((item) => item.type !== 'null');
+  if (union && union.length > 1) {
+    return { anyOf: union.map((item) => schemaNode(root, item)), description: raw.description ?? node.description };
+  }
   const type = Array.isArray(node.type) ? node.type.filter((item) => item !== 'null')[0] : node.type;
   return {
     type,

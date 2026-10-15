@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, readFile, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { MAX_SOURCE_BYTES } from './tools.js';
 import type { ReviewConfiguration } from './config.js';
 
@@ -148,6 +148,7 @@ export class Workspace {
     try { parent = await realpath(dirname(target)); }
     catch { throw new Error(`Workspace directory not found for ${path}.`); }
     if (!inside(root.real, parent)) throw new Error('Resolved parent escapes the configured workspace root.');
+    this.resolvedRefusal(root, resolve(parent, basename(target)));
 
     let currentSha256: string | null = null;
     let currentMode = 0o600;
