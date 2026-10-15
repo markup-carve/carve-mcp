@@ -2259,6 +2259,7 @@ fn include_report(
         "rootIndex": root_index,
         "warnings": prepared.warnings.iter().map(|warning| json!({
             "rule": warning.rule, "message": warning.message,
+            "line": warning.line, "column": warning.column,
             "file": warning.file.as_deref().and_then(&contained),
         })).collect::<Vec<_>>(),
         "dependencies": prepared.dependencies.iter().filter_map(|dependency| contained(&dependency.id).map(|path| json!({
@@ -4943,6 +4944,26 @@ mod tests {
         assert_eq!(
             include_report(&prepared, &canonical_root, 0)["dependencies"],
             json!([{"path":"chapter.crv","resolved":true}])
+        );
+        let (missing, _) = prepare_includes(
+            Some(&workspace),
+            Some(0),
+            Some("book.crv"),
+            "Intro.\nText {{ absent.crv }}\n",
+            &options,
+            CarveRenderTarget::Html,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            include_report(&missing, &canonical_root, 0)["warnings"][0],
+            json!({
+                "rule": "include-unresolved",
+                "message": "Include \"absent.crv\" could not be resolved.",
+                "line": 2,
+                "column": 6,
+                "file": "book.crv",
+            })
         );
 
         let without_root = CarveServer::new();
