@@ -1065,6 +1065,11 @@ struct ReviewOutputSchema {
     project_warnings: Vec<Value>,
     truncated: bool,
     total_bytes: i64,
+    checks: Value,
+    include_dependencies: Vec<Value>,
+    files_read: Vec<String>,
+    scope: Value,
+    versions: Value,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1091,7 +1096,7 @@ fn default_file_limit() -> usize {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkspaceReviewInput {
     root_index: usize,
     #[serde(default)]
@@ -4527,6 +4532,17 @@ mod tests {
         );
     }
     use super::*;
+
+    #[test]
+    fn unsupported_strict_workspace_review_is_rejected() {
+        assert!(
+            serde_json::from_value::<WorkspaceReviewInput>(json!({
+                "rootIndex": 0,
+                "strict": true
+            }))
+            .is_err()
+        );
+    }
     use carve::Profile;
     use std::time::{SystemTime, UNIX_EPOCH};
 

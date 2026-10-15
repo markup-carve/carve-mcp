@@ -76,7 +76,9 @@ For CI, run `carve-mcp-review --root docs --strict`. Use `--limit`,
 `--max-depth`, and repeatable `--exclude` paths to set the scan scope. The
 command prints JSON and exits 0 when valid, 1 when diagnostics or an incomplete
 scan make it invalid, and 2 for an argument or workspace error. The normal MCP
-review stays read-only and keeps include checks opt-in.
+review stays read-only and keeps include checks opt-in. Strict include review is
+currently available in the TypeScript server and this CLI; the Rust server
+rejects the unsupported `strict` argument.
 
 `carve_prepare_edit` reads and canonically formats a `.crv` or `.carve` file,
 then returns the proposed content, a source-preserving structured patch, a

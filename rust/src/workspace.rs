@@ -15,6 +15,7 @@ use crate::server::{AST_CHILD_FIELDS, MAX_SOURCE_BYTES, lint_values};
 const EXTENSIONS: &[&str] = &[
     "crv", "carve", "md", "markdown", "txt", "html", "htm", "djot",
 ];
+const CARVE_ENGINE_VERSION: &str = "0.1.9";
 
 #[derive(Debug, Clone)]
 struct Root(PathBuf);
@@ -436,7 +437,7 @@ impl Workspace {
                 let value: Value =
                     crate::server::json_value(&ast).map_err(|error| error.to_string())?;
                 let mut ids = BTreeSet::new();
-                collect_heading_ids(&value, &mut ids);
+                collect_anchor_ids(&value, &mut ids, !folds_anchors(path));
                 if folds_anchors(path) {
                     ids = ids.into_iter().map(|id| id.to_lowercase()).collect();
                 }
@@ -521,7 +522,7 @@ impl Workspace {
                         .encode_utf16()
                         .count()
                         + 1;
-                    project_warnings.push(json!({"rule":"broken-local-anchor","code":"CARVE_PROJECT_BROKEN_ANCHOR","severity":"error","suggestion":"Update the fragment to match a heading ID in the destination document.","message":format!("Local link anchor does not exist in {normalized}: #{fragment}"),"path":path,"target":raw,"line":line_no,"column":column}));
+                    project_warnings.push(json!({"rule":"broken-local-anchor","code":"CARVE_PROJECT_BROKEN_ANCHOR","severity":"error","suggestion":"Update the fragment to match an ID in the destination document.","message":format!("Local link anchor does not exist in {normalized}: #{fragment}"),"path":path,"target":raw,"line":line_no,"column":column}));
                 }
             }
         }
@@ -610,8 +611,22 @@ impl Workspace {
             }
         }
         warning_count += project_warnings.len();
+        let complete = !listing["truncated"].as_bool().unwrap_or(false)
+            && !size_truncated
+            && !project_warnings
+                .iter()
+                .any(|warning| warning["rule"] == "unreadable-document");
+        let files_read = paths
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|path| sources.contains_key(*path))
+            .collect::<Vec<_>>();
         Ok(
-            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"fixPlan":{"automatic":automatic,"writerReview":writer_review},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes}),
+            json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"fixPlan":{"automatic":automatic,"writerReview":writer_review},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes,
+                "checks":{"localLint":true,"localLinks":check_links,"anchors":check_links && check_anchors,"includes":false,"complete":complete},
+                "includeDependencies":[],"filesRead":files_read,
+                "scope":{"maxDepth":listing["maxDepth"],"limit":listing["limit"],"excluded":&self.review.exclude},
+                "versions":{"engine":CARVE_ENGINE_VERSION,"mcp":env!("CARGO_PKG_VERSION")}}),
         )
     }
 }
@@ -625,24 +640,24 @@ fn folds_anchors(path: &str) -> bool {
         .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "crv" | "carve"))
 }
 
-fn collect_heading_ids(value: &Value, ids: &mut BTreeSet<String>) {
+fn collect_anchor_ids(value: &Value, ids: &mut BTreeSet<String>, all: bool) {
     if let Some(values) = value.as_array() {
         for child in values {
-            collect_heading_ids(child, ids);
+            collect_anchor_ids(child, ids, all);
         }
         return;
     }
     let Some(record) = value.as_object() else {
         return;
     };
-    if record.get("type").and_then(Value::as_str) == Some("heading")
+    if (all || record.get("type").and_then(Value::as_str) == Some("heading"))
         && let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
     {
         ids.insert(id.to_owned());
     }
     for field in AST_CHILD_FIELDS {
         if let Some(child) = record.get(field) {
-            collect_heading_ids(child, ids);
+            collect_anchor_ids(child, ids, all);
         }
     }
 }
@@ -699,6 +714,14 @@ fn rooted_normalize(path: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn reported_engine_version_matches_the_exact_cargo_pin() {
+        assert!(
+            include_str!("../Cargo.toml")
+                .contains(&format!("carve-lang = \"={CARVE_ENGINE_VERSION}\""))
+        );
+    }
 
     fn temporary_root() -> PathBuf {
         let stamp = SystemTime::now()
@@ -795,12 +818,12 @@ mod tests {
         let root = temporary_root();
         fs::write(
             root.join("guide.crv"),
-            "# Top\n\n- # In A List\n\n:::note\n# In A Note\n:::\n\n> # In A Quote\n\n^ Caption\n",
+            "# Top\n\n{#summary}\nSummary text.\n\n- # In A List\n\n:::note\n# In A Note\n:::\n\n> # In A Quote\n\n^ Caption\n",
         )
         .unwrap();
         fs::write(
             root.join("index.crv"),
-"[top](guide.crv#Top)\n[list](guide.crv#In-A-List)\n[note](guide.crv#In-A-Note)\n[quote](guide.crv#In-A-Quote)\n[gone](guide.crv#not-a-heading)\n[case](guide.crv#top)\n",
+"[top](guide.crv#Top)\n[paragraph](guide.crv#summary)\n[list](guide.crv#In-A-List)\n[note](guide.crv#In-A-Note)\n[quote](guide.crv#In-A-Quote)\n[gone](guide.crv#not-a-heading)\n[case](guide.crv#top)\n",
         )
         .unwrap();
         let workspace = Workspace::new(

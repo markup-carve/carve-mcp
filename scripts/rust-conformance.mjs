@@ -430,6 +430,8 @@ async function workspaceResults(command, args) {
 function normalizeEquivalentDiffs(result) {
   const normalized = structuredClone(result);
   for (const call of normalized.output) {
+    // The servers report their actual engine pins, which need not be the same release.
+    if (call.value?.versions?.engine) call.value.versions.engine = '<engine version>';
     if (typeof call.value?.unifiedDiff === 'string' && call.value.unifiedDiff) {
       call.value.unifiedDiff = `<valid diff; truncated=${Boolean(call.value.diffTruncated)}>`;
     }
