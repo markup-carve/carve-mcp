@@ -313,6 +313,14 @@ impl Workspace {
         if !parent.starts_with(&root.0) {
             return Err("Resolved parent escapes the configured workspace root.".into());
         }
+        Self::check_resolved(
+            root,
+            &parent.join(
+                target
+                    .file_name()
+                    .ok_or("Workspace path has no file name.")?,
+            ),
+        )?;
         if let Ok(canonical) = fs::canonicalize(&target) {
             Self::check_resolved(root, &canonical)?;
         }

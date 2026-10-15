@@ -24,6 +24,7 @@ import {
   type LintPlatform,
   type MigrationResult,
   type RenderResult,
+  type SmartTypographyOption,
   type CarveExtension,
   type MarkdownDialect,
   type AstJsonDocument,
@@ -55,7 +56,7 @@ export interface RenderSettings {
   lowercaseHeadingIds?: boolean;
   strictLosses?: boolean;
   maxRenderLosses?: number;
-  smartTypography?: 'glyph' | 'source' | 'quotes-source';
+  smartTypography?: SmartTypographyOption;
   extensions?: ExtensionName[];
   allowRawHtml?: boolean;
   sanitizeUrls?: boolean;
@@ -78,7 +79,7 @@ function renderOptions(settings: RenderSettings) {
     lowercaseHeadingIds: settings.lowercaseHeadingIds ?? (portable ? true : undefined),
     strictLosses: settings.strictLosses,
     maxRenderLosses: settings.maxRenderLosses,
-    smartTypography: settings.smartTypography === 'quotes-source' ? { quotes: false } : settings.smartTypography,
+    smartTypography: settings.smartTypography,
     extensions: extensionInstances(settings.extensions),
     allowRawHtml: settings.allowRawHtml ?? false,
     // Never the caller's value: neither server may be asked to emit a denied
@@ -181,7 +182,8 @@ function withoutPositions(value: unknown): void {
     if (!item || typeof item !== 'object') continue;
     if (Array.isArray(item)) { pending.push(...item); continue; }
     const record = item as Record<string, unknown>;
-    delete record.pos;
+    // A string `pos` is an authored attribute such as `{pos=1}`, not a position.
+    if (record.pos && typeof record.pos === 'object') delete record.pos;
     for (const child of Object.values(record)) if (child && typeof child === 'object') pending.push(child);
   }
 }

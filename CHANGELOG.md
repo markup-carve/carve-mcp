@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file.
 ### Security
 
 - Include expansion in `carve_render` and `carve_parse` follows the `carve_read_file` document policy on both servers: `{{ .env }}`, `{{ .git/config }}`, a path under `node_modules`, `vendor` or `target`, or an unsupported extension stays unresolved, checked on the written and the resolved path.
-- `carve_read_file` and `carve_write_file` check the hidden-path and extension policy on the resolved path too, so a symlink such as `docs/env.md -> ../.env` is refused on both servers.
+- `carve_read_file` and `carve_write_file` check the hidden-path and extension policy on the resolved path too, so a symlink such as `docs/env.md -> ../.env`, or a new file under a directory symlink such as `docs/hidden -> ../.git`, is refused on both servers (#96).
 - `carve_parse` with includes reports `pos.file` relative to the root instead of as an absolute host path, on both servers.
 - An include naming a FIFO or other non-regular file is refused instead of read, which blocked the Node event loop or pinned a Rust worker.
 - Tools that run the Carve writer refuse a document nested deeper than 256 AST levels with a tool error instead of stalling every other request, on both servers. The Rust server gives its runtime workers a 64 MiB stack, so a deep `carve_render` no longer overflows in an unoptimized build.
@@ -23,7 +23,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- `carve_render` accepts `smartTypography: 'quotes-source'` on both servers: typed quotes and apostrophes stay as written while ellipses and dashes are still substituted (#89).
+- `carve_render` takes carve-js's `smartTypography` shape on both servers: `'glyph'`, `'source'`, a boolean, or `{ quotes: false }`, which keeps typed quotes and apostrophes as written while ellipses and dashes are still substituted (#89, #95, #96).
 - `carve_parse` takes `positions` (default `true`); `false` leaves out the `pos` objects. Results larger than 16 MiB of JSON are refused with a tool error on both servers.
 
 ## 0.1.8 - 2026-10-14
