@@ -27,7 +27,7 @@ use crate::{
     blocks::{BlockScope, get_blocks, sha256_text},
     resources,
     splice::{EditFailure, ReplaceRequest, replace_source},
-    workspace::Workspace,
+    workspace::{CARVE_ENGINE_VERSION, Workspace},
 };
 
 pub(crate) const MAX_SOURCE_BYTES: usize = 1_000_000;
@@ -699,10 +699,25 @@ struct RenderOutputSchema {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct CompatibilityOutputSchema {
+    receipt_version: i64,
+    source: CompatibilitySourceSchema,
+    versions: CompatibilityVersionsSchema,
     compatible: bool,
     target_count: i64,
     summary: CompatibilitySummarySchema,
     targets: Vec<Value>,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct CompatibilitySourceSchema {
+    format: String,
+    sha256: String,
+}
+#[allow(dead_code)]
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+struct CompatibilityVersionsSchema {
+    engine: String,
+    mcp: String,
 }
 #[allow(dead_code)]
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -3429,7 +3444,7 @@ impl CarveServer {
             .filter(|item| item["status"] == "lossy")
             .count();
         Self::output(
-            json!({"compatible":warning == 0 && lossy == 0,"targetCount":results.len(),"summary":{"compatible":compatible,"warning":warning,"lossy":lossy},"targets":results}),
+            json!({"receiptVersion":1,"source":{"format":"carve","sha256":sha256_text(&input.source)},"versions":{"engine":CARVE_ENGINE_VERSION,"mcp":env!("CARGO_PKG_VERSION")},"compatible":warning == 0 && lossy == 0,"targetCount":results.len(),"summary":{"compatible":compatible,"warning":warning,"lossy":lossy},"targets":results}),
         )
     }
 

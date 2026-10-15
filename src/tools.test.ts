@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { LIB_VERSION } from '@markup-carve/carve';
+import { createRequire } from 'node:module';
+import { sha256Text } from './blocks.js';
+const { version: mcpVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { compatibilityMatrix } from './compatibility.js';
@@ -313,6 +317,7 @@ describe('table preservation in compatibility results', () => {
   it('rejects flattened spans even when the pinned engine reports no render losses', () => {
     const source = '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n';
     const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
+    expect(result).toMatchObject({ receiptVersion: 1, source: { format: 'carve', sha256: sha256Text(source) }, versions: { engine: LIB_VERSION, mcp: mcpVersion } });
     expect(result.compatible).toBe(false);
     expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
     expect(result.targets[1]).toMatchObject({ lossCount: 0, preservation: { totalDiagnostics: 3, complete: false } });

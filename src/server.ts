@@ -93,7 +93,7 @@ const migrateOutput = z.object({ value: z.string(), report: z.object({
   schemaVersion: z.literal(2), sourceFormat: z.enum(['html', 'markdown', 'djot', 'bbcode']),
   mode: z.string().optional(), adapter: z.string().optional(), diagnostics: z.array(migrationDiagnostic),
 }).loose() }).loose();
-const compatibilityOutput = z.object({ compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int() }), targets: z.array(z.unknown()) }).loose();
+const compatibilityOutput = z.object({ receiptVersion: z.number().int().min(1).max(1), source: z.object({ format: z.literal('carve'), sha256: z.string().regex(/^[0-9a-f]{64}$/) }), versions: z.object({ engine: z.string(), mcp: z.string() }), compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int() }), targets: z.array(z.unknown()) }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
