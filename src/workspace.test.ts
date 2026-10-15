@@ -129,6 +129,50 @@ describe('workspace operations', () => {
     expect(broken.map(({ target }) => target)).toEqual(['guide.crv#getting-started']);
   });
 
+  it('accepts explicit ids on Carve blocks and reports stale includes in strict review', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.crv'), '[valid](guide.crv#summary) [missing](guide.crv#Gone)\n');
+    await writeFile(join(root, 'guide.crv'), '{#summary}\nSales are 10.\n\n{{ code.txt @lines:50-60 }}\n');
+    await writeFile(join(root, 'code.txt'), 'one\ntwo\n');
+    const workspace = await prepareWorkspace({ roots: [root] });
+    const ordinary = await reviewWorkspace(workspace, 0);
+    expect(ordinary.projectWarnings.map(({ rule }) => rule)).toEqual(['broken-local-anchor']);
+    const strict = await reviewWorkspace(workspace, 0, { strict: true });
+    expect(strict.valid).toBe(false);
+    expect(strict.projectWarnings.map(({ rule }) => rule)).toEqual(['include-warning', 'broken-local-anchor']);
+    expect(strict.projectWarnings[0].message).toContain('include-lines-out-of-range');
+    expect(strict.checks).toMatchObject({ includes: true, complete: true });
+    expect(strict.filesRead).toEqual(['code.txt', 'guide.crv', 'index.crv']);
+    expect(strict.includeDependencies).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'guide.crv' })]));
+    const partial = await reviewWorkspace(workspace, 0, { strict: true, limit: 1 });
+    expect(partial).toMatchObject({ valid: false, truncated: true, checks: { complete: false } });
+  });
+
+  it('keeps strict include checks inside the scanned files and deduplicates nested warnings', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await mkdir(join(root, 'excluded'));
+    await writeFile(join(root, 'index.crv'), '{{ child.crv }}\n\n{{ excluded/private.crv }}\n');
+    await writeFile(join(root, 'child.crv'), '{{ code.txt @lines:50-60 }}\n');
+    await writeFile(join(root, 'code.txt'), 'one\n');
+    await writeFile(join(root, 'excluded', 'private.crv'), 'Private text.\n');
+    const workspace = await prepareWorkspace({ roots: [root], review: { exclude: ['excluded'] } });
+    const review = await reviewWorkspace(workspace, 0, { strict: true });
+    expect(review.filesRead).toEqual(['child.crv', 'code.txt', 'index.crv']);
+    expect(review.scope.excluded).toEqual(['excluded']);
+    expect(review.projectWarnings.filter(({ message }) => message.includes('include-lines-out-of-range'))).toHaveLength(1);
+    expect(review.projectWarnings.some(({ message }) => message.includes('include-unresolved'))).toBe(true);
+    expect(review.checks.complete).toBe(false);
+  });
+
+  it('resolves anchors brought into a Carve file by an include in strict review', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.crv'), '{{ child.crv }}\n');
+    await writeFile(join(root, 'child.crv'), '{#inside}\nIncluded paragraph.\n');
+    await writeFile(join(root, 'links.crv'), '[inside](index.crv#inside)\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0, { strict: true });
+    expect(review.projectWarnings).toEqual([]);
+  });
+
   it('compares reference graph keys exactly', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'index.crv'), '# Home\n\n[home](index.crv#home)\n\n[^Note]: Upper\n\nUsed[^note].');

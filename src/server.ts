@@ -1,6 +1,6 @@
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
 import { createRequire } from 'node:module';
-import { KNOWN_LINT_PLATFORMS, RenderLossError } from '@markup-carve/carve';
+import { KNOWN_LINT_PLATFORMS, LIB_VERSION, RenderLossError } from '@markup-carve/carve';
 import * as z from 'zod/v4';
 import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, parseForTool, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
 import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
@@ -103,7 +103,12 @@ const sourceReplaceOutput = z.object({ match: z.object({ path: z.string(), type:
   lint: z.object({ introduced: z.array(z.unknown()), resolved: z.array(z.unknown()) }), source: z.string().optional(), write: z.unknown().optional() }).loose();
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
-const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
+const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int(),
+  checks: z.object({ localLint: z.boolean(), localLinks: z.boolean(), anchors: z.boolean(), includes: z.boolean(), complete: z.boolean() }),
+  includeDependencies: z.array(z.object({ path: z.string(), dependency: z.string(), resolved: z.boolean() })), filesRead: z.array(z.string()),
+  scope: z.object({ maxDepth: z.number().int(), limit: z.number().int(), excluded: z.array(z.string()) }),
+  versions: z.object({ engine: z.string(), mcp: z.string() }),
+}).loose();
 const referenceGraphOutput = z.object({ rootIndex: z.number().int(), definitions: z.array(z.unknown()), references: z.array(z.unknown()), brokenReferences: z.array(z.unknown()), orphans: z.array(z.unknown()), errors: z.array(z.unknown()), counts: z.object({ definitions: z.number().int(), references: z.number().int(), broken: z.number().int(), orphans: z.number().int() }), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 
 function summary(value: unknown): string {
@@ -220,15 +225,18 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     }, safe('carve_list_files', observe, ({ rootIndex, maxDepth, limit }) => workspace.list(rootIndex, { maxDepth, limit })));
     if (toolEnabled(toolProfile, 'carve_review_workspace')) server.registerTool('carve_review_workspace', {
       title: 'Review Carve workspace',
-      description: 'Lint Carve files and validate explicit local document links and anchors across a bounded workspace scan.',
-      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional(), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).optional() }).strict(),
+      description: 'Lint Carve files and validate local links across a bounded workspace scan. Strict mode also checks includes and fails incomplete scans.',
+      inputSchema: z.object({ rootIndex: z.number().int().min(0), maxDepth: z.number().int().min(0).max(25).optional(), limit: z.number().int().min(1).max(2_000).optional(), platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).optional(), strict: z.boolean().default(false) }).strict(),
       outputSchema: reviewOutput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    }, safe('carve_review_workspace', observe, ({ rootIndex, maxDepth, limit, platforms }) => reviewWorkspace(workspace, rootIndex, {
-      maxDepth: maxDepth ?? workspace.review.maxDepth ?? 10,
-      limit: limit ?? workspace.review.limit ?? 500,
-      platforms: platforms ?? workspace.review.platforms ?? [],
-      checkLinks: workspace.review.checkLinks, checkAnchors: workspace.review.checkAnchors,
+    }, safe('carve_review_workspace', observe, async ({ rootIndex, maxDepth, limit, platforms, strict }) => ({
+      ...await reviewWorkspace(workspace, rootIndex, {
+        maxDepth: maxDepth ?? workspace.review.maxDepth ?? 10,
+        limit: limit ?? workspace.review.limit ?? 500,
+        platforms: platforms ?? workspace.review.platforms ?? [],
+        checkLinks: workspace.review.checkLinks, checkAnchors: workspace.review.checkAnchors,
+        strict,
+      }), versions: { engine: LIB_VERSION, mcp: packageVersion },
     })));
     if (toolEnabled(toolProfile, 'carve_reference_graph')) server.registerTool('carve_reference_graph', {
       title: 'Build Carve reference graph',

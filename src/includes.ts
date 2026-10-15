@@ -15,7 +15,7 @@ export interface IncludeReport {
   suppressedWarnings: number;
 }
 
-export interface IncludeScope { rootIndex: number; root: string; sourcePath?: string }
+export interface IncludeScope { rootIndex: number; root: string; sourcePath?: string; allowedPaths?: ReadonlySet<string> }
 
 /**
  * The containment root a tool call may expand includes under.
@@ -65,7 +65,7 @@ function contained(root: string, id: string): string | undefined {
  * the engine resolver would refuse anyway (missing, outside the root,
  * absolute) is left to it so its denial classes stay intact.
  */
-export function policyResolver(root: string): IncludeResolver {
+export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>): IncludeResolver {
   const inner = fileSystemResolver(root);
   return (includePath, ctx) => {
     if (isAbsolute(includePath)) return inner(includePath, ctx);
@@ -78,6 +78,7 @@ export function policyResolver(root: string): IncludeResolver {
     const lexical = contained(root, requested);
     const canonical = contained(root, real);
     if (lexical === undefined || canonical === undefined) return inner(includePath, ctx);
+    if (allowedPaths && (!allowedPaths.has(lexical) || !allowedPaths.has(canonical))) return { source: null, id: includePath, denial: 'denied' };
     if (documentPathRefusal(lexical) || documentPathRefusal(canonical)) return { source: null, id: includePath, denial: 'denied' };
     try { if (!statSync(real).isFile()) return { source: null, id: includePath, denial: 'denied' }; }
     catch { return { source: null, id: includePath, denial: 'denied' }; }
@@ -106,7 +107,7 @@ function relativizePositions(doc: Document, root: string): void {
 export function expandDocument(source: string, extensions: CarveExtension[], scope: IncludeScope): { doc: Document; includes: IncludeReport } {
   const doc = parse(source, { extensions, positions: true });
   const expanded = expandIncludes(doc, source, {
-    resolve: policyResolver(scope.root),
+    resolve: policyResolver(scope.root, scope.allowedPaths),
     ...(scope.sourcePath ? { sourcePath: scope.sourcePath } : {}),
     extensions,
   });

@@ -63,11 +63,22 @@ on the resolved one, so a symlink such as `docs/env.md -> ../.env` is refused.
 
 `carve_list_files` discovers eligible documents with bounded depth and result
 limits. `carve_review_workspace` lints Carve documents in one call, groups
-diagnostics, and checks explicit relative links for missing files or heading
-anchors. It reports truncation rather than implying that a partial scan covered
-the entire project. Unreadable document candidates are reported without
+diagnostics, and checks explicit relative links for missing files or document
+anchors. Pass `strict: true` to treat include warnings, including stale line
+ranges, as errors. The result names files read, include dependencies, enabled
+checks, scan limits and exclusions, scan completeness, and engine and MCP
+versions. Strict review fails when the scan is truncated.
+Unreadable document candidates are reported without
 aborting the remaining review. A review reads at most 25 MB in total, in
 addition to the 1 MB per-file limit.
+
+For CI, run `carve-mcp-review --root docs --strict`. Use `--limit`,
+`--max-depth`, and repeatable `--exclude` paths to set the scan scope. The
+command prints JSON and exits 0 when valid, 1 when diagnostics or an incomplete
+scan make it invalid, and 2 for an argument or workspace error. The normal MCP
+review stays read-only and keeps include checks opt-in. Strict include review is
+currently available in the TypeScript server and this CLI; the Rust server
+rejects the unsupported `strict` argument.
 
 `carve_prepare_edit` reads and canonically formats a `.crv` or `.carve` file,
 then returns the proposed content, a source-preserving structured patch, a
