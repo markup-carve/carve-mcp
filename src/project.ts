@@ -6,7 +6,8 @@ import { gfmFromMarkdown } from 'mdast-util-gfm';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { expandDocument } from './includes.js';
-import { format as formatCarve, lint, parse } from './tools.js';
+import { lint, parse } from './tools.js';
+import { formatWorkspaceSource } from './edits.js';
 import type { Workspace } from './workspace.js';
 
 export interface ProjectWarning {
@@ -315,7 +316,7 @@ export async function reviewWorkspace(
   const lossPaths: string[] = [];
   for (const [path, source] of sources) {
     if (!CARVE_EXTENSIONS.has(extname(path).toLowerCase())) continue;
-    const formatted = formatCarve(source);
+    const formatted = formatWorkspaceSource(source);
     if (formatted.value === source) continue;
     (formatted.totalLosses === 0 ? automaticPaths : lossPaths).push(path);
   }

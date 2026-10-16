@@ -11,7 +11,7 @@ import { includeScope } from './includes.js';
 import { reviewWorkspace } from './project.js';
 import { writerPrompts } from './prompts.js';
 import type { ToolObserver } from './telemetry.js';
-import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
+import { formatWorkspaceSource, prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
 import { getBlocks, sha256Text } from './blocks.js';
 import { replaceSource, SourceEditRefusal } from './splice.js';
@@ -212,10 +212,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     if (!workspace || input.rootIndex === undefined || input.path === undefined) throw new Error('Pass source, or rootIndex and path.');
     if (!['.crv', '.carve'].some((extension) => input.path!.toLowerCase().endsWith(extension))) throw new Error('Workspace document tools require a .crv or .carve file.');
     const file = await workspace.read(input.rootIndex, input.path);
-    // The decoder drops a leading BOM; restore it so offsets and splices match the file bytes.
-    const source = sha256Text(file.content) === file.sha256 ? file.content : `\uFEFF${file.content}`;
-    if (sha256Text(source) !== file.sha256) throw new Error('Workspace file did not decode to its exact bytes.');
-    return { source, sha256: file.sha256, fromFile: true };
+    return { source: file.content, sha256: file.sha256, fromFile: true };
   };
   if (workspace) {
     if (toolEnabled(toolProfile, 'carve_read_file')) server.registerTool('carve_read_file', {
@@ -322,7 +319,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     }, safe('carve_prepare_edit', observe, async ({ rootIndex, path }) => {
       if (!['.crv', '.carve'].some((extension) => path.toLowerCase().endsWith(extension))) throw new Error('Edit previews require a .crv or .carve file.');
       const current = await workspace.read(rootIndex, path);
-      const proposal = formatCarve(current.content);
+      const proposal = formatWorkspaceSource(current.content);
       const patch = proposal.totalLosses === 0
         ? createSourcePatch(current.content, proposal.value, 'formatting', 'canonical-format')
         : null;

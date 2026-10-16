@@ -130,8 +130,9 @@ export class Workspace {
     const bytes = await readFile(canonical);
     if (bytes.includes(0)) throw new Error('Binary files are not supported.');
     let content: string;
-    try { content = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    try { content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
     catch { throw new Error(`Workspace file is not valid UTF-8: ${path}`); }
+    if (!Buffer.from(content, 'utf8').equals(bytes)) throw new Error(`Workspace file did not decode to its exact bytes: ${path}`);
     return { rootIndex, path, content, sha256: sha256(bytes), bytes: bytes.length };
   }
 
