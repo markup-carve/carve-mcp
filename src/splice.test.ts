@@ -161,10 +161,21 @@ describe('carve_replace_source over MCP', () => {
     } });
     expect(applied.isError).not.toBe(true);
     expect(applyPatch(await readFile(join(root, 'doc.crv'), 'utf8'), receipt.undoPatch)).toBe(original);
+    const undoReceipt = (applied.structuredContent as { undoReceipt: string }).undoReceipt;
+    expect(typeof undoReceipt).toBe('string');
+    const forged = JSON.parse(undoReceipt) as { originalSha256: string };
+    forged.originalSha256 = '0'.repeat(64);
+    const tampered = await client.callTool({ name: 'carve_undo_reviewed_edit', arguments: { receipt: JSON.stringify(forged) } });
+    expect(tampered).toMatchObject({ isError: true, structuredContent: { reason: 'invalid-receipt' } });
     const stale = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
       rootIndex: 0, path: 'doc.crv', selector, text: 'Again', expectedSha256: receipt.sha256, dryRun: false,
     } });
     expect(stale).toMatchObject({ isError: true, structuredContent: { reason: 'stale-source' } });
+    const undone = await client.callTool({ name: 'carve_undo_reviewed_edit', arguments: { receipt: undoReceipt } });
+    expect(undone.isError).not.toBe(true);
+    expect(await readFile(join(root, 'doc.crv'), 'utf8')).toBe(original);
+    const repeated = await client.callTool({ name: 'carve_undo_reviewed_edit', arguments: { receipt: undoReceipt } });
+    expect(repeated).toMatchObject({ isError: true, structuredContent: { reason: 'stale-undo' } });
   });
 
   it('reviews includes against proposed bytes', async () => {
@@ -189,6 +200,16 @@ describe('carve_replace_source over MCP', () => {
     } });
     expect(repaired.isError).not.toBe(true);
     expect((repaired.structuredContent as { project: { complete: boolean } }).project.complete).toBe(true);
+    const sha256 = (repaired.structuredContent as { sha256: string }).sha256;
+    const applied = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
+      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: 'Fixed.',
+      expectedSha256: sha256, dryRun: false,
+    } });
+    expect(applied.isError).not.toBe(true);
+    const receipt = (applied.structuredContent as { undoReceipt: string }).undoReceipt;
+    const undone = await client.callTool({ name: 'carve_undo_reviewed_edit', arguments: { receipt } });
+    expect(undone.isError).not.toBe(true);
+    expect(await readFile(join(root, 'index.crv'), 'utf8')).toBe('{{ gone.crv }}\n');
   });
 
   it('keeps an unrelated existing include error in the receipt', async () => {

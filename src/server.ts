@@ -15,6 +15,7 @@ import { prepareWorkspaceEdits, unifiedDiff } from './edits.js';
 import { createSourcePatch } from './source-patch.js';
 import { getBlocks, sha256Text } from './blocks.js';
 import { replaceSource, SourceEditRefusal } from './splice.js';
+import { createUndoReceipt, undoReviewedEdit } from './reviewed-edits.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { buildReferenceGraph } from './reference-graph.js';
 import { compatibilityMatrix } from './compatibility.js';
@@ -102,6 +103,11 @@ const sourceReplaceOutput = z.object({ match: z.object({ path: z.string(), type:
   sha256: z.string(), resultSha256: z.string(), start: z.number().int(), end: z.number().int(),
   patch: z.object({ edits: z.array(z.unknown()) }).loose(), undoPatch: z.object({ edits: z.array(z.unknown()) }).loose(),
   lint: z.object({ introduced: z.array(z.unknown()), resolved: z.array(z.unknown()) }), source: z.string().optional(), write: z.unknown().optional() }).loose();
+const undoReceipt = z.object({ rootIndex: z.number().int().min(0), path: z.string(), expectedSha256: z.string(),
+  originalSha256: z.string(), undoPatch: sourcePatchOutput,
+  originalProjectWarnings: z.array(z.object({ rule: z.string(), path: z.string(), target: z.string().optional(),
+    message: z.string(), severity: z.enum(['error', 'warning']) }).strict()),
+  signature: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const editOutput = z.object({ rootIndex: z.number().int(), path: z.string(), expectedSha256: z.string(), changed: z.boolean(), proposedContent: z.string(), unifiedDiff: z.string(), diffTruncated: z.boolean(), patch: sourcePatchOutput.nullable(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
 const batchEditOutput = z.object({ rootIndex: z.number().int(), filesDiscovered: z.number().int(), filesPrepared: z.number().int(), filesChanged: z.number().int(), errorCount: z.number().int(), items: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int() }).loose();
 const reviewOutput = z.object({ rootIndex: z.number().int(), valid: z.boolean(), filesDiscovered: z.number().int(), filesChecked: z.number().int(), warningCount: z.number().int(), ruleCounts: z.record(z.string(), z.number().int()), summary: z.object({ bySeverity: z.object({ error: z.number().int(), warning: z.number().int() }), nextActions: z.array(z.string()) }), fixPlan: z.object({ automatic: z.array(z.unknown()), writerReview: z.array(z.unknown()) }), files: z.array(z.unknown()), projectWarnings: z.array(z.unknown()), truncated: z.boolean(), totalBytes: z.number().int(),
@@ -249,7 +255,8 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
         ...(workspace.allowWrite ? { dryRun: z.boolean().default(true) } : {}),
       }).strict(),
       outputSchema: sourceReplaceOutput.extend({ project: z.object({ filesRead: z.array(z.string()), includeDependencies: z.array(z.unknown()),
-        includeAdjustments: z.array(z.unknown()), introduced: z.array(z.unknown()), existing: z.array(z.unknown()), complete: z.boolean() }).loose() }),
+        includeAdjustments: z.array(z.unknown()), introduced: z.array(z.unknown()), existing: z.array(z.unknown()), complete: z.boolean() }).loose(),
+        undoReceipt: z.string().optional() }),
       annotations: workspace.allowWrite ? { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } : readOnly,
     }, safe('carve_reviewed_edit', observe, async ({ rootIndex, path, selector, scope, text, expectedSha256, dryRun }) => {
       const document = await documentSource({ rootIndex, path });
@@ -285,8 +292,18 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
       const project = { filesRead: after.filesRead, includeDependencies: after.includeDependencies,
         includeAdjustments: after.includeAdjustments, introduced, existing: after.projectWarnings, complete: after.checks.complete };
       if (dryRun !== false) return { ...output, project };
-      return { ...output, project, write: await workspace.write(rootIndex, checkedPath, result, document.sha256, false) };
+      const write = await workspace.write(rootIndex, checkedPath, result, document.sha256, false);
+      return { ...output, project, write, undoReceipt: createUndoReceipt({ rootIndex, path: checkedPath,
+        expectedSha256: write.sha256, originalSha256: document.sha256, undoPatch: output.undoPatch,
+        originalProjectWarnings: before.projectWarnings.map(({ rule, path, target, message, severity }) =>
+          ({ rule, path, ...(target ? { target } : {}), message, severity })) }) };
     }));
+    if (workspace.allowWrite && toolEnabled(toolProfile, 'carve_undo_reviewed_edit')) server.registerTool('carve_undo_reviewed_edit', {
+      title: 'Undo a reviewed block edit',
+      description: 'Restore exact source bytes from a signed receipt while the edited file hash still matches.',
+      inputSchema: z.object({ receipt: z.string() }).strict(), outputSchema: writeOutput,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    }, safe('carve_undo_reviewed_edit', observe, ({ receipt }) => undoReviewedEdit(workspace, undoReceipt.parse(JSON.parse(receipt)))));
     if (toolEnabled(toolProfile, 'carve_reference_graph')) server.registerTool('carve_reference_graph', {
       title: 'Build Carve reference graph',
       description: 'Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.',
