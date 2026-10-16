@@ -129,6 +129,53 @@ describe('workspace operations', () => {
     expect(broken.map(({ target }) => target)).toEqual(['guide.crv#getting-started']);
   });
 
+  it('checks percent-encoded local paths and refuses malformed or escaping paths', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'target file.crv'), '# Present\n');
+    await writeFile(join(root, 'index.crv'),
+      '[present](target%20file.crv) [missing](gone%20file.crv) [bad](bad%ZZ.crv) [escape](%2e%2e/out.crv)\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0, { strict: true });
+    expect(review.projectWarnings.map(({ rule, target }) => ({ rule, target }))).toEqual([
+      { rule: 'missing-local-file', target: 'gone%20file.crv' },
+      { rule: 'invalid-local-target', target: 'bad%ZZ.crv' },
+      { rule: 'invalid-local-target', target: '%2e%2e/out.crv' },
+    ]);
+    expect(review.valid).toBe(false);
+  });
+
+  it('checks Markdown reference links and leaves code and unused definitions alone', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'index.md'),
+      '[missing][ref]\n\n[ref]: missing.md\n[unused]: absent.md\n\n`[code][ref]`\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0, { strict: true });
+    expect(review.projectWarnings.map(({ rule, target }) => ({ rule, target }))).toEqual([
+      { rule: 'missing-local-file', target: 'missing.md' },
+    ]);
+    expect(review.checks.complete).toBe(true);
+    expect(review.valid).toBe(false);
+  });
+
+  it('uses Markdown heading markup and duplicate-slug rules for Markdown targets', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'guide.md'), '# Hello <em>World</em>\n\n# Hello <em>World</em>\n');
+    await writeFile(join(root, 'index.crv'),
+      '[first](guide.md#hello-world) [second](guide.md#hello-world-1) [bad](guide.md#hello-world-2)\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0, { strict: true });
+    expect(review.projectWarnings.map(({ rule, target }) => ({ rule, target }))).toEqual([
+      { rule: 'broken-local-anchor', target: 'guide.md#hello-world-2' },
+    ]);
+  });
+
+  it('locates Markdown links inside blockquotes and decodes heading entities', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    await writeFile(join(root, 'guide.md'), '# A &amp; B\n');
+    await writeFile(join(root, 'index.md'), '> one\n> [missing](gone.md)\n\n[good](guide.md#a--b)\n');
+    const review = await reviewWorkspace(await prepareWorkspace({ roots: [root] }), 0);
+    expect(review.projectWarnings).toEqual([
+      expect.objectContaining({ rule: 'missing-local-file', target: 'gone.md', line: 2, column: 3 }),
+    ]);
+  });
+
   it('accepts explicit ids on Carve blocks and reports stale includes in strict review', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'index.crv'), '[valid](guide.crv#summary) [missing](guide.crv#Gone)\n');

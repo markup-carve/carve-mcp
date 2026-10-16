@@ -1,4 +1,8 @@
 import { dirname, extname, posix, resolve } from 'node:path';
+import GithubSlugger from 'github-slugger';
+import { fromMarkdown } from 'mdast-util-from-markdown';
+import { gfm } from 'micromark-extension-gfm';
+import { gfmFromMarkdown } from 'mdast-util-gfm';
 import type { LintPlatform, LintWarning } from '@markup-carve/carve';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { expandDocument } from './includes.js';
@@ -6,8 +10,8 @@ import { format as formatCarve, lint, parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
 export interface ProjectWarning {
-  rule: 'missing-local-file' | 'broken-local-anchor' | 'unreadable-document' | 'include-warning' | 'incomplete-scan';
-  code: 'CARVE_PROJECT_MISSING_FILE' | 'CARVE_PROJECT_BROKEN_ANCHOR' | 'CARVE_PROJECT_UNREADABLE_DOCUMENT' | 'CARVE_PROJECT_INCLUDE_WARNING' | 'CARVE_PROJECT_INCOMPLETE_SCAN';
+  rule: 'missing-local-file' | 'broken-local-anchor' | 'invalid-local-target' | 'unreadable-document' | 'include-warning' | 'incomplete-scan';
+  code: 'CARVE_PROJECT_MISSING_FILE' | 'CARVE_PROJECT_BROKEN_ANCHOR' | 'CARVE_PROJECT_INVALID_TARGET' | 'CARVE_PROJECT_UNREADABLE_DOCUMENT' | 'CARVE_PROJECT_INCLUDE_WARNING' | 'CARVE_PROJECT_INCOMPLETE_SCAN';
   severity: 'error' | 'warning';
   message: string;
   suggestion: string;
@@ -18,6 +22,7 @@ export interface ProjectWarning {
 }
 
 const CARVE_EXTENSIONS = new Set(['.crv', '.carve']);
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown']);
 const DOCUMENT_EXTENSIONS = new Set(['.crv', '.carve', '.md', '.markdown', '.txt', '.html', '.htm', '.djot']);
 const ANCHOR_EXTENSIONS = new Set(['.crv', '.carve', '.md', '.markdown', '.djot']);
 const LINK = /!?(?:\[[^\]\n]*\])\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
@@ -26,6 +31,7 @@ const MAX_PROJECT_BYTES = 25_000_000;
 const PROJECT_DIAGNOSTICS = {
   'missing-local-file': { code: 'CARVE_PROJECT_MISSING_FILE', severity: 'error', suggestion: 'Fix the destination or add the missing document.' },
   'broken-local-anchor': { code: 'CARVE_PROJECT_BROKEN_ANCHOR', severity: 'error', suggestion: 'Update the fragment to match an ID in the destination document.' },
+  'invalid-local-target': { code: 'CARVE_PROJECT_INVALID_TARGET', severity: 'error', suggestion: 'Fix the local link destination before publishing.' },
   'unreadable-document': { code: 'CARVE_PROJECT_UNREADABLE_DOCUMENT', severity: 'warning', suggestion: 'Make the file readable UTF-8 text or exclude it from the review.' },
   'include-warning': { code: 'CARVE_PROJECT_INCLUDE_WARNING', severity: 'error', suggestion: 'Fix the include target or line range before publishing.' },
   'incomplete-scan': { code: 'CARVE_PROJECT_INCOMPLETE_SCAN', severity: 'error', suggestion: 'Increase the review limit or reduce the workspace scope.' },
@@ -57,6 +63,34 @@ function lineColumn(source: string, offset: number) {
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 };
 }
 
+type MarkdownNode = {
+  type: string; value?: string; url?: string; identifier?: string;
+  position?: { start: { offset?: number } };
+  children?: MarkdownNode[];
+};
+
+function markdownWalk(source: string, visit: (node: MarkdownNode, definitions: Map<string, string>) => void): void {
+  const root = fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }) as MarkdownNode;
+  const definitions = new Map<string, string>();
+  const walk = (node: MarkdownNode, collect: boolean): void => {
+    if (collect && node.type === 'definition' && node.identifier && node.url) {
+      definitions.set(node.identifier.toLowerCase(), node.url);
+    }
+    if (!collect) visit(node, definitions);
+    for (const child of node.children ?? []) walk(child, collect);
+  };
+  walk(root, true);
+  walk(root, false);
+}
+
+function headingText(nodes: MarkdownNode[]): string {
+  return nodes.map((node) => {
+    if (node.type === 'html') return '';
+    if (node.children) return headingText(node.children);
+    return node.value ?? '';
+  }).join('');
+}
+
 function documentLinks(path: string, source: string): Array<{ raw: string; line: number; column: number }> {
   if (CARVE_EXTENSIONS.has(extname(path).toLowerCase())) {
     const links: Array<{ raw: string; line: number; column: number }> = [];
@@ -80,6 +114,15 @@ function documentLinks(path: string, source: string): Array<{ raw: string; line:
     walk(parse(source));
     return links;
   }
+  if (MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase())) {
+    const links: Array<{ raw: string; line: number; column: number }> = [];
+    markdownWalk(source, (node, definitions) => {
+      const raw = node.type === 'link' ? node.url
+        : node.type === 'linkReference' ? definitions.get(node.identifier?.toLowerCase() ?? '') : undefined;
+      if (raw) links.push({ raw, ...lineColumn(source, node.position?.start.offset ?? 0) });
+    });
+    return links;
+  }
   const opaque = opaqueRanges(source);
   return [...source.matchAll(LINK)].filter((match) => !match[0].startsWith('!')
     && !opaque.some(([start, end]) => (match.index ?? 0) >= start && (match.index ?? 0) < end))
@@ -94,6 +137,15 @@ function foldsAnchors(path: string): boolean {
 
 function anchorIds(source: string, fold: boolean): Set<string> {
   return anchorIdsFromTree(parse(source), fold);
+}
+
+function markdownAnchorIds(source: string): Set<string> {
+  const ids = new Set<string>();
+  const slugger = new GithubSlugger();
+  markdownWalk(source, (node) => {
+    if (node.type === 'heading') ids.add(slugger.slug(headingText(node.children ?? [])));
+  });
+  return ids;
 }
 
 function anchorIdsFromTree(tree: unknown, fold: boolean): Set<string> {
@@ -112,13 +164,23 @@ function anchorIdsFromTree(tree: unknown, fold: boolean): Set<string> {
   return ids;
 }
 
-function localTarget(from: string, raw: string): { path: string; fragment?: string } | undefined {
+function localTarget(from: string, raw: string): { path: string; fragment?: string } | { invalid: string } | undefined {
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/|#)/i.test(raw)) return undefined;
-  const [rawPath, fragment] = raw.split('#', 2);
-  if (!rawPath || rawPath.includes('%')) return undefined;
-  const path = posix.normalize(posix.join(dirname(from).replaceAll('\\', '/'), rawPath));
-  if (path === '..' || path.startsWith('../')) return undefined;
-  return { path, fragment: fragment?.includes('%') ? undefined : fragment };
+  const [encodedPath, encodedFragment] = raw.split('#', 2);
+  if (!encodedPath) return undefined;
+  let decodedPath: string;
+  let fragment: string | undefined;
+  try {
+    decodedPath = decodeURIComponent(encodedPath);
+    fragment = encodedFragment === undefined ? undefined : decodeURIComponent(encodedFragment);
+  } catch {
+    return { invalid: 'The local link has malformed percent escapes.' };
+  }
+  const path = posix.normalize(posix.join(dirname(from).replaceAll('\\', '/'), decodedPath));
+  if (path === '..' || path.startsWith('../') || decodedPath.startsWith('/')) {
+    return { invalid: 'The local link escapes the workspace root.' };
+  }
+  return { path, fragment };
 }
 
 export async function reviewWorkspace(
@@ -212,7 +274,8 @@ export async function reviewWorkspace(
   const anchors = new Map<string, Set<string>>();
   if (options.checkLinks !== false && options.checkAnchors !== false) {
     for (const [path, source] of sources) {
-      if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, expandedAnchors.get(path) ?? anchorIds(source, foldsAnchors(path)));
+      if (MARKDOWN_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, markdownAnchorIds(source));
+      else if (ANCHOR_EXTENSIONS.has(extname(path).toLowerCase())) anchors.set(path, expandedAnchors.get(path) ?? anchorIds(source, foldsAnchors(path)));
     }
   }
   for (const [path, source] of sources) {
@@ -220,6 +283,11 @@ export async function reviewWorkspace(
     for (const link of documentLinks(path, source)) {
       const target = localTarget(path, link.raw);
       if (!target) continue;
+      if ('invalid' in target) {
+        projectWarnings.push(projectWarning('invalid-local-target', { path, target: link.raw,
+          line: link.line, column: link.column, message: target.invalid }));
+        continue;
+      }
       if (!DOCUMENT_EXTENSIONS.has(extname(target.path).toLowerCase())) continue;
       const location = { line: link.line, column: link.column };
       if (!discovered.has(target.path)) {
