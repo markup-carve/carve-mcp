@@ -465,6 +465,26 @@ async function profileToolNames(command, baseArgs, profile) {
   finally { await client.close(); }
 }
 
+async function includeWarning(command, args) {
+  const client = new Client({ name: 'include-warning-conformance', version: '0.1.0' });
+  await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
+  try {
+    const result = await client.callTool({
+      name: 'carve_render',
+      arguments: {
+        source: 'Intro.\n{{ absent.crv }}\n',
+        target: 'html',
+        includeRootIndex: 0,
+        sourcePath: 'docs/main.crv',
+      },
+    });
+    const value = result.structuredContent ?? JSON.parse(result.content[0].text);
+    return value.includes.warnings[0];
+  } finally {
+    await client.close();
+  }
+}
+
 for (const profile of ['review', 'convert', 'structure', 'workspace', 'all']) {
   deepStrictEqual(
     await profileToolNames(`${target}/debug/carve-mcp-rs`, [], profile),
@@ -485,6 +505,16 @@ try {
   writeFileSync(join(workspaceRoot, 'archive', 'old.crv'), '# Old\n');
   const configuration = join(workspaceRoot, 'carve-mcp.json');
   writeFileSync(configuration, JSON.stringify({ roots: ['.'], review: { exclude: ['archive'], maxDepth: 8, limit: 100 } }));
+  const rustIncludeWarning = await includeWarning(`${target}/debug/carve-mcp-rs`, ['--config', configuration]);
+  const typescriptIncludeWarning = await includeWarning(process.execPath, ['dist/index.js', '--config', configuration]);
+  deepStrictEqual(rustIncludeWarning, typescriptIncludeWarning);
+  deepStrictEqual(rustIncludeWarning, {
+    rule: 'include-unresolved',
+    message: 'Include "absent.crv" could not be resolved.',
+    line: 2,
+    column: 1,
+    file: 'docs/main.crv',
+  });
   for (const profile of ['review', 'convert', 'structure', 'workspace', 'all']) {
     const rootArgs = ['--root', workspaceRoot, '--allow-write'];
     const rustNames = await profileToolNames(`${target}/debug/carve-mcp-rs`, rootArgs, profile);
