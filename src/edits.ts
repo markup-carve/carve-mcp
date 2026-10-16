@@ -8,6 +8,13 @@ const CARVE_EXTENSIONS = new Set(['.crv', '.carve']);
 const MAX_BATCH_FILES = 100;
 const MAX_BATCH_BYTES = 25_000_000;
 
+export function formatWorkspaceSource(source: string) {
+  const proposal = formatCarve(source);
+  return source.startsWith('\uFEFF') && !proposal.value.startsWith('\uFEFF')
+    ? { ...proposal, value: `\uFEFF${proposal.value}` }
+    : proposal;
+}
+
 function diffPath(path: string): string {
   return path.replace(/[\x00-\x1f\x7f-\x9f]/g, '?');
 }
@@ -61,7 +68,7 @@ export async function prepareWorkspaceEdits(
       const current = await workspace.read(rootIndex, path);
       if (totalBytes + current.bytes > MAX_BATCH_BYTES) { sizeTruncated = true; break; }
       totalBytes += current.bytes;
-      const proposal = formatCarve(current.content);
+      const proposal = formatWorkspaceSource(current.content);
       const sourcePatch = proposal.totalLosses === 0
         ? createSourcePatch(current.content, proposal.value, 'formatting', 'canonical-format')
         : null;

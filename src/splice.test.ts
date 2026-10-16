@@ -178,6 +178,35 @@ describe('carve_replace_source over MCP', () => {
     expect(repeated).toMatchObject({ isError: true, structuredContent: { reason: 'stale-undo' } });
   });
 
+  it('keeps a BOM, escaped links, and attached attributes outside a reviewed edit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
+    const original = '\uFEFF# Title\r\n\r\n\\[literal](https://example.com) \\<https://example.com>\r\n\r\n[link](https://example.com){.keep #link-id}\r\n\r\n{#edit}\r\nOld text.\r\n';
+    const file = join(root, 'doc.crv');
+    await writeFile(file, original);
+    const client = await connect({ roots: [root], allowWrite: true });
+    const args = { rootIndex: 0, path: 'doc.crv', selector: { kind: 'id', value: 'edit' }, text: 'New text.' };
+    const preview = await client.callTool({ name: 'carve_reviewed_edit', arguments: args });
+    expect(preview.isError).not.toBe(true);
+    const result = preview.structuredContent as { sha256: string; patch: { sourceBytes: number; edits: Array<{ start: number; end: number; replacement: string }> }; undoPatch: { edits: Array<{ start: number; end: number; replacement: string }> } };
+    const originalBytes = Buffer.from(original);
+    expect(result.patch.sourceBytes).toBe(originalBytes.length);
+    expect(await readFile(file)).toEqual(originalBytes);
+
+    const applied = await client.callTool({ name: 'carve_reviewed_edit', arguments: { ...args, expectedSha256: result.sha256, dryRun: false } });
+    expect(applied.isError).not.toBe(true);
+    const after = await readFile(file);
+    const edit = result.patch.edits[0]!;
+    expect(after.subarray(0, edit.start)).toEqual(originalBytes.subarray(0, edit.start));
+    expect(after.subarray(edit.start + Buffer.byteLength(edit.replacement))).toEqual(originalBytes.subarray(edit.end));
+    expect(applyPatch(original, result.patch)).toBe(after.toString('utf8'));
+    expect(applyPatch(after.toString('utf8'), result.undoPatch)).toBe(original);
+
+    const receipt = (applied.structuredContent as { undoReceipt: string }).undoReceipt;
+    const undone = await client.callTool({ name: 'carve_undo_reviewed_edit', arguments: { receipt } });
+    expect(undone.isError).not.toBe(true);
+    expect(await readFile(file)).toEqual(originalBytes);
+  });
+
   it('reviews includes against proposed bytes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'part.crv'), 'first\nsecond\n');
