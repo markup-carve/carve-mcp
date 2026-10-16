@@ -16,6 +16,7 @@ const WORKSPACE_TOOLS = [
   'carve_read_file', 'carve_list_files', 'carve_review_workspace', 'carve_reviewed_edit',
   'carve_reference_graph', 'carve_prepare_edit',
   'carve_prepare_workspace_edits', 'carve_workspace_info', 'carve_write_file',
+  'carve_undo_reviewed_edit',
 ] as const;
 
 const PROFILE_TOOLS: Record<ToolProfile, ReadonlySet<string>> = {

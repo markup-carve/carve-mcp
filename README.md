@@ -33,6 +33,11 @@ default and can be enabled for explicitly configured document roots.
   scan is truncated, a file is unreadable, include warnings are suppressed, or
   the edit introduces a project error. Existing unresolved includes appear in
   the receipt so they can be repaired separately.
+- `carve_undo_reviewed_edit` accepts the signed `undoReceipt` returned by a
+  successful `carve_reviewed_edit` write. It restores the original bytes only
+  while the edited file still has the resulting hash. Undo accepts unrelated
+  existing project findings but refuses new ones. Receipts are valid for the
+  lifetime of the server process.
 - `carve_plan_ast_edit` turns one or more exact semantic matches and small edit
   intents into one explained, reversible source patch for approval.
 - `carve_create_reversible_ast_patch` adds inverse operations and semantic

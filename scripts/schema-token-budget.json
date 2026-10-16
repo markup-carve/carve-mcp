@@ -39,7 +39,7 @@
       ]
     },
     "workspace": {
-      "maximum": 8800,
+      "maximum": 9100,
       "workspace": true,
       "tools": [
         "carve_lint",
@@ -57,7 +57,8 @@
         "carve_workspace_info",
         "carve_write_file",
         "carve_get_block",
-        "carve_replace_source"
+        "carve_replace_source",
+        "carve_undo_reviewed_edit"
       ]
     },
     "all": {
@@ -85,7 +86,7 @@
   "scenarios": {
     "all-workspace": {
       "profile": "all",
-      "maximum": 13200,
+      "maximum": 13500,
       "workspace": true,
       "tools": [
         "carve_lint",
@@ -111,7 +112,8 @@
         "carve_prepare_edit",
         "carve_prepare_workspace_edits",
         "carve_workspace_info",
-        "carve_write_file"
+        "carve_write_file",
+        "carve_undo_reviewed_edit"
       ]
     }
   }

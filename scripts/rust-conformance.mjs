@@ -489,7 +489,7 @@ try {
     const rootArgs = ['--root', workspaceRoot, '--allow-write'];
     const rustNames = await profileToolNames(`${target}/debug/carve-mcp-rs`, rootArgs, profile);
     const typescriptNames = await profileToolNames(process.execPath, ['dist/index.js', ...rootArgs], profile);
-    const knownTypeScriptOnly = ['workspace', 'all'].includes(profile) ? ['carve_reference_graph', 'carve_reviewed_edit'] : [];
+    const knownTypeScriptOnly = ['workspace', 'all'].includes(profile) ? ['carve_reference_graph', 'carve_reviewed_edit', 'carve_undo_reviewed_edit'] : [];
     deepStrictEqual(typescriptNames.filter((name) => !rustNames.includes(name)), knownTypeScriptOnly);
     deepStrictEqual(rustNames, typescriptNames.filter((name) => !knownTypeScriptOnly.includes(name)));
   }
