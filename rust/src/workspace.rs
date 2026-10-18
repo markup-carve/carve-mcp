@@ -15,7 +15,7 @@ use crate::server::{AST_CHILD_FIELDS, MAX_SOURCE_BYTES, lint_values};
 const EXTENSIONS: &[&str] = &[
     "crv", "carve", "md", "markdown", "txt", "html", "htm", "djot",
 ];
-pub(crate) const CARVE_ENGINE_VERSION: &str = "0.1.9";
+pub(crate) const CARVE_ENGINE_VERSION: &str = "0.1.10";
 
 #[derive(Debug, Clone)]
 struct Root(PathBuf);

@@ -2279,6 +2279,7 @@ fn include_report(
         "rootIndex": root_index,
         "warnings": prepared.warnings.iter().map(|warning| json!({
             "rule": warning.rule, "message": warning.message,
+            "line": warning.line, "column": warning.column,
             "file": warning.file.as_deref().and_then(&contained),
         })).collect::<Vec<_>>(),
         "dependencies": prepared.dependencies.iter().filter_map(|dependency| contained(&dependency.id).map(|path| json!({
@@ -2666,6 +2667,24 @@ impl CarveServer {
         let fields = row.as_object_mut().expect("loss row is an object");
         if let Some(format) = loss.format {
             fields.insert("format".to_string(), json!(format));
+        }
+        if let Some(attribute) = loss.attribute {
+            fields.insert("attribute".to_string(), json!(attribute));
+        }
+        if let Some(style) = loss.style {
+            fields.insert("style".to_string(), json!(style));
+        }
+        if let Some(delim) = loss.delim {
+            fields.insert("delim".to_string(), json!(delim.to_string()));
+        }
+        if let Some(emitted_delim) = loss.emitted_delim {
+            fields.insert("emittedDelim".to_string(), json!(emitted_delim.to_string()));
+        }
+        if let Some(colspan) = loss.colspan {
+            fields.insert("colspan".to_string(), json!(colspan));
+        }
+        if let Some(rowspan) = loss.rowspan {
+            fields.insert("rowspan".to_string(), json!(rowspan));
         }
         if let Some(pos) = loss.pos {
             fields.insert(
@@ -4974,6 +4993,26 @@ mod tests {
         assert_eq!(
             include_report(&prepared, &canonical_root, 0)["dependencies"],
             json!([{"path":"chapter.crv","resolved":true}])
+        );
+        let (missing, _) = prepare_includes(
+            Some(&workspace),
+            Some(0),
+            Some("book.crv"),
+            "Intro.\nText {{ absent.crv }}\n",
+            &options,
+            CarveRenderTarget::Html,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            include_report(&missing, &canonical_root, 0)["warnings"][0],
+            json!({
+                "rule": "include-unresolved",
+                "message": "Include \"absent.crv\" could not be resolved.",
+                "line": 2,
+                "column": 6,
+                "file": "book.crv",
+            })
         );
 
         let without_root = CarveServer::new();
