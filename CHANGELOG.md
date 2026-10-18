@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.9 - 2026-10-18
+
+### Fixes
+
+- Resolve block ids, included ids and reviewed workspace files in cross-file link checks; report incomplete strict scans and missing include targets (#100).
+- Check Markdown reference links and repeated heading slugs; decode local targets and report malformed or out-of-workspace paths (#107).
+- Preserve a leading UTF-8 BOM through workspace reads and edits (#108).
+- Forward include warning positions and optional Rust render-loss fields (#99).
+
+### Improvements
+
+- Add `carve-mcp-review` for strict project review, JSON output, exit codes and receipts (#100).
+- Add checked block edit previews and application to the Node server (#101).
+- Return version 1 target-check receipts with source hash and package versions on both servers (#102).
+- Allow reviewed edits to be undone during the server process (#103).
+- Update to carve-rs 0.1.10 and carve-js 0.1.12 for Carve 0.1.10 syntax and AST contract 1.2 (#99).
+
 ## 0.1.8 - 2026-10-15
 
 ### Breaking
