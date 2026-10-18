@@ -2668,6 +2668,24 @@ impl CarveServer {
         if let Some(format) = loss.format {
             fields.insert("format".to_string(), json!(format));
         }
+        if let Some(attribute) = loss.attribute {
+            fields.insert("attribute".to_string(), json!(attribute));
+        }
+        if let Some(style) = loss.style {
+            fields.insert("style".to_string(), json!(style));
+        }
+        if let Some(delim) = loss.delim {
+            fields.insert("delim".to_string(), json!(delim.to_string()));
+        }
+        if let Some(emitted_delim) = loss.emitted_delim {
+            fields.insert("emittedDelim".to_string(), json!(emitted_delim.to_string()));
+        }
+        if let Some(colspan) = loss.colspan {
+            fields.insert("colspan".to_string(), json!(colspan));
+        }
+        if let Some(rowspan) = loss.rowspan {
+            fields.insert("rowspan".to_string(), json!(rowspan));
+        }
         if let Some(pos) = loss.pos {
             fields.insert(
                 "pos".to_string(),

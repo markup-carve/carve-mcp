@@ -80,8 +80,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "carve-lang"
-version = "0.1.9"
-source = "git+https://github.com/markup-carve/carve-rs?rev=94eabab7735b08ea04c1981f9d563929ab72717e#94eabab7735b08ea04c1981f9d563929ab72717e"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9b7a2a3b758f76ce1888ad1371bd933c5f2ccded01305c03f1550641a45c1d"
 dependencies = [
  "html5ever",
  "markup5ever_rcdom",
