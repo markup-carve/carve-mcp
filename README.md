@@ -8,7 +8,7 @@ default and can be enabled for explicitly configured document roots.
 
 - `carve_lint` checks a document and returns precise, structured warnings.
 - `carve_diagnose_and_fix` previews safe fixes, applies selected fix IDs, and returns an undo patch; ambiguous repairs remain writer-review items.
-- `carve_format` produces canonical Carve and reports rendering losses.
+- `carve_format` produces canonical Carve and reports rendering losses. Pass `alignTables: true` to pad table cells so each column lines up (CARVE-P11-071); the Rust server refuses that option until its bundled carve-lang engine can write aligned tables.
 - `carve_render` renders HTML, Markdown, plain text, or ANSI.
 - `carve_check_targets` compares publishing compatibility across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles.
 - `carve_parse` returns the resolved, position-aware interchange AST; `positions: false` leaves out source positions.

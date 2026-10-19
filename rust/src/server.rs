@@ -1191,9 +1191,13 @@ struct WorkspaceWriteInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-struct SourceInput {
+#[serde(rename_all = "camelCase")]
+struct FormatInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
+    #[serde(default)]
+    #[schemars(description = "Pad table cells so columns align.")]
+    align_tables: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2080,6 +2084,8 @@ fn writer_depth_error() -> String {
         "Document nests deeper than {MAX_WRITER_DEPTH} AST levels; the Carve writer limit is {MAX_WRITER_DEPTH}."
     )
 }
+
+pub const ALIGN_TABLES_UNSUPPORTED: &str = "alignTables is not supported by this server yet: the bundled carve-lang engine has no aligned-table writer. Use the Node server, or omit alignTables for the canonical form.";
 
 /// `carve::to_carve_with_report` behind the writer depth guard.
 pub fn format_carve_checked(source: &str) -> Result<carve::RenderResult<String>, String> {
@@ -3139,9 +3145,13 @@ impl CarveServer {
             open_world_hint = false
         )
     )]
-    fn format(&self, Parameters(input): Parameters<SourceInput>) -> CallToolResult {
+    fn format(&self, Parameters(input): Parameters<FormatInput>) -> CallToolResult {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
+        }
+        if input.align_tables {
+            // carve-lang 0.1.10 has no aligned-table writer.
+            return Self::error(ALIGN_TABLES_UNSUPPORTED.to_string());
         }
         match format_carve_checked(&input.source) {
             Ok(result) => Self::render_result(result),
@@ -4875,6 +4885,17 @@ mod tests {
                 "{patched:?}"
             );
         });
+    }
+
+    #[test]
+    fn align_tables_is_refused_until_the_engine_can_write_it() {
+        let server = CarveServer::new();
+        let source = "| a | bb |\n| ccc | d |\n";
+        let refused = server.format(call(json!({"source": source, "alignTables": true})));
+        assert_eq!(refused.is_error, Some(true));
+        assert!(format!("{refused:?}").contains("alignTables is not supported by this server yet"));
+        let canonical = server.format(call(json!({"source": source, "alignTables": false})));
+        assert_eq!(structured(&canonical)["value"], json!(source));
     }
 
     #[test]

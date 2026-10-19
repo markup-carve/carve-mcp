@@ -132,10 +132,10 @@ export function assertWriterDepth(value: unknown): void {
   }
 }
 
-export function format(source: string): RenderResult {
+export function format(source: string, options: { alignTables?: boolean } = {}): RenderResult {
   validateSource(source);
   assertWriterDepth(parseCarve(source));
-  return carveToCarveWithReport(source);
+  return carveToCarveWithReport(source, options.alignTables ? { alignTables: true } : {});
 }
 
 export function render(source: string, target: RenderTarget, settings: RenderSettings = {}, scope?: IncludeScope): RenderResult & { includes?: IncludeReport } {
