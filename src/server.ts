@@ -24,6 +24,7 @@ import { toolEnabled, type ToolProfile } from './tool-profile.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 const sourceSchema = z.string().describe(`Document source (maximum ${MAX_SOURCE_BYTES} UTF-8 bytes)`);
+const ALIGN_TABLES_DESCRIPTION = 'Pad table cells so columns align.';
 const sourceEditOutput = z.object({ start: z.number().int().min(0).describe('Inclusive UTF-8 byte offset'), end: z.number().int().min(0).describe('Exclusive UTF-8 byte offset'), replacement: z.string(),
   kind: z.enum(['formatting', 'syntax-migration', 'quick-fix', 'refactor']), code: z.string().min(1) }).strict();
 const sourcePatchOutput = z.object({ version: z.literal(1), sourceFingerprint: z.string().regex(/^fnv1a64:[0-9a-f]{16}$/),
@@ -430,10 +431,10 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   if (toolEnabled(toolProfile, 'carve_format')) server.registerTool('carve_format', {
     title: 'Format Carve',
     description: 'Format Carve source canonically and report any lossy raw-format nodes.',
-    inputSchema: z.object({ source: sourceSchema }),
+    inputSchema: z.object({ source: sourceSchema, alignTables: z.boolean().default(false).describe(ALIGN_TABLES_DESCRIPTION) }),
     outputSchema: renderOutput,
     annotations: readOnly,
-  }, safe('carve_format', observe, ({ source: document }) => formatCarve(document)));
+  }, safe('carve_format', observe, ({ source: document, alignTables }) => formatCarve(document, { alignTables })));
 
   if (toolEnabled(toolProfile, 'carve_render')) server.registerTool('carve_render', {
     title: 'Render Carve',
