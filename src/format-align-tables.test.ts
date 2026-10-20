@@ -7,20 +7,9 @@ import { format } from './tools.js';
 // Copied from markup-carve/carve resources/spec/table-alignment-fixtures.json (4cb3b4cb).
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures/table-alignment-fixtures.json', import.meta.url), 'utf8')) as Array<{ name: string; canonical: string; aligned: string }>;
 
-// The pinned carve-js 0.1.12 measures a `\ ` escape at its source width, which
-// the spec later ruled against. `it.fails` turns red once the engine bump fixes
-// them, so the list cannot outlive the gap.
-const PENDING_ENGINE = new Set([
-  'non-breaking space escape',
-  'two non-breaking space escapes',
-  'escape in a header cell beside an inline marker',
-  'escape on a continuation line',
-]);
-
 describe('carve_format alignTables', () => {
   for (const fixture of fixtures) {
-    const run = PENDING_ENGINE.has(fixture.name) ? it.fails : it;
-    run(`aligns: ${fixture.name}`, () => {
+    it(`aligns: ${fixture.name}`, () => {
       expect(format(fixture.canonical, { alignTables: true }).value).toBe(fixture.aligned);
     });
     it(`canonicalizes: ${fixture.name}`, () => {

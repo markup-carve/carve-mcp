@@ -2085,15 +2085,34 @@ fn writer_depth_error() -> String {
     )
 }
 
-pub const ALIGN_TABLES_UNSUPPORTED: &str = "alignTables is not supported by this server yet: the bundled carve-lang engine has no aligned-table writer. Use the Node server, or omit alignTables for the canonical form.";
-
 /// `carve::to_carve_with_report` behind the writer depth guard.
 pub fn format_carve_checked(source: &str) -> Result<carve::RenderResult<String>, String> {
+    format_carve_checked_with(source, false)
+}
+
+fn format_carve_checked_with(
+    source: &str,
+    align_tables: bool,
+) -> Result<carve::RenderResult<String>, String> {
     if ast_json_deeper_than(
         &carve::to_json_with_options(source, &Options::default()),
         MAX_WRITER_DEPTH,
     ) {
         return Err(writer_depth_error());
+    }
+    if align_tables {
+        let value = carve::try_to_carve_with_options(
+            source,
+            &Options::default().with_align_tables(true),
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(carve::RenderResult {
+            value,
+            losses: Vec::new(),
+            total_losses: 0,
+            totals_by_code: Default::default(),
+            truncated: false,
+        });
     }
     carve::to_carve_with_report(source, CheckedRenderOptions::default())
         .map_err(|error| error.to_string())
@@ -3149,11 +3168,7 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        if input.align_tables {
-            // carve-lang 0.1.10 has no aligned-table writer.
-            return Self::error(ALIGN_TABLES_UNSUPPORTED.to_string());
-        }
-        match format_carve_checked(&input.source) {
+        match format_carve_checked_with(&input.source, input.align_tables) {
             Ok(result) => Self::render_result(result),
             Err(error) => Self::error(error.to_string()),
         }
@@ -4888,14 +4903,23 @@ mod tests {
     }
 
     #[test]
-    fn align_tables_is_refused_until_the_engine_can_write_it() {
+    fn align_tables_formats_tables_and_preserves_the_canonical_default() {
         let server = CarveServer::new();
         let source = "| a | bb |\n| ccc | d |\n";
-        let refused = server.format(call(json!({"source": source, "alignTables": true})));
-        assert_eq!(refused.is_error, Some(true));
-        assert!(format!("{refused:?}").contains("alignTables is not supported by this server yet"));
+        let aligned = server.format(call(json!({"source": source, "alignTables": true})));
+        assert_ne!(aligned.is_error, Some(true));
+        assert_eq!(structured(&aligned), json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false}));
         let canonical = server.format(call(json!({"source": source, "alignTables": false})));
         assert_eq!(structured(&canonical)["value"], json!(source));
+    }
+
+    #[test]
+    fn align_tables_counts_non_breaking_space_escape_width() {
+        let server = CarveServer::new();
+        let source = "| a\\ b | x |\n| ccc | `y|z` |\n";
+        let aligned = server.format(call(json!({"source": source, "alignTables": true})));
+        assert_ne!(aligned.is_error, Some(true));
+        assert_eq!(structured(&aligned)["value"], json!("| a\\ b | x     |\n| ccc  | `y|z` |\n"));
     }
 
     #[test]
