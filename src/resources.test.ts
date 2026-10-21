@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { LIB_VERSION, SPEC_VERSION } from '@markup-carve/carve';
 import { authoringGuide, findRule, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
+import { lint } from './tools.js';
 
 describe('documentation resources', () => {
   it('keeps the quick start concise and task focused', () => {
@@ -13,11 +14,22 @@ describe('documentation resources', () => {
   });
 
   it('documents every stable lint diagnostic name', () => {
-    expect(lintRuleNames).toHaveLength(25);
-    expect(lintRuleNames).toEqual(expect.arrayContaining(['platform-mention-token', 'platform-issue-reference', 'table-span-marker-blocked']));
+    expect(lintRuleNames).toHaveLength(67);
+    expect(lintRuleNames).toEqual(expect.arrayContaining([
+      'platform-mention-token', 'platform-issue-reference', 'table-span-marker-blocked',
+      'continuation-marker-refused', 'list-marker-below-content-column', 'ordered-list-split-by-indent',
+      'consumed-key-near-miss', 'include-duplicate-option', 'include-non-text',
+    ]));
     expect(lintRuleMarkdown('unclosed-container-fence')).toContain('without a closer');
     expect(lintRuleMarkdown('constructor')).toBeUndefined();
     expect(lintRuleMarkdown('__proto__')).toBeUndefined();
+  });
+
+  it('resolves the resource of every warning carve_lint returns', () => {
+    const documents = ['> {.k}\n', '# Title {#x}\n', '>quote\n', '[a]:\n', '``` raw html\n<b>\n```\n', '[x](#nope)\n', '{{}}\n'];
+    const rules = documents.flatMap((document) => lint(document).warnings.map((warning) => warning.rule));
+    expect(rules).toHaveLength(documents.length);
+    for (const rule of rules) expect(lintRuleMarkdown(rule), rule).toBeDefined();
   });
 
   it('indexes every active and retired rule exactly once', () => {
