@@ -190,109 +190,17 @@ pub fn rule_ids() -> Vec<&'static str> {
         .collect()
 }
 
-const LINT_RULES: &[(&str, &str)] = &[
-    (
-        "bidi-control-in-source",
-        "Invisible bidirectional controls can make source read differently from its stored order.",
-    ),
-    (
-        "block-marker-as-text",
-        "A block marker is being read as ordinary text, usually because spacing or indentation is wrong.",
-    ),
-    (
-        "braced-comment-in-a-template-source",
-        "A braced comment can be interpreted by an outer template before Carve sees it.",
-    ),
-    (
-        "broken-crossref",
-        "A cross-reference does not resolve to a document target.",
-    ),
-    (
-        "carve-version-unsupported",
-        "The document requests a Carve version this engine does not support.",
-    ),
-    (
-        "colon-fence-length-mismatch",
-        "A container closer must use the same number of colons as its opener.",
-    ),
-    (
-        "duplicate-footnote-definition",
-        "More than one definition uses the same footnote label.",
-    ),
-    (
-        "duplicate-heading-id",
-        "More than one heading resolves to the same identifier.",
-    ),
-    (
-        "fence-title-syntax",
-        "A fence title or label does not use the required quoted or bracketed form.",
-    ),
-    ("figure-group-empty", "A composite figure has no panels."),
-    (
-        "figure-group-nested",
-        "Composite figure groups cannot be nested.",
-    ),
-    (
-        "figure-group-opener-metadata",
-        "Figure-group metadata is placed where it cannot be represented safely.",
-    ),
-    (
-        "figure-group-panel-number",
-        "A figure panel number conflicts with the group numbering model.",
-    ),
-    (
-        "figure-group-single-panel",
-        "A composite figure has only one panel and does not need grouping.",
-    ),
-    (
-        "footnote-labels-differ-only-in-whitespace",
-        "Footnote labels differ only by whitespace and can be confused.",
-    ),
-    (
-        "platform-issue-reference",
-        "The selected publishing platform can relink a bare issue reference unexpectedly.",
-    ),
-    (
-        "platform-mention-token",
-        "The selected publishing platform can relink a bare mention unexpectedly.",
-    ),
-    (
-        "quote-fence-ends-the-quote-above",
-        "A quote fence closes a preceding quote instead of opening the intended block.",
-    ),
-    (
-        "semantic-attribute-outside-span",
-        "A semantic attribute is attached where it cannot create the intended span.",
-    ),
-    (
-        "semantic-attribute-value-ignored",
-        "The selected semantic span ignores an authored attribute value.",
-    ),
-    (
-        "table-span-marker-blocked",
-        "A table span marker cannot extend a cell, so it renders as a cell of its own.",
-    ),
-    (
-        "unclosed-container-fence",
-        "A colon-fenced container reaches the end of the document without a closer.",
-    ),
-    (
-        "unresolved-footnote",
-        "A footnote reference has no matching definition.",
-    ),
-    (
-        "unresolved-reference-link",
-        "A reference-style link has no matching definition or heading.",
-    ),
-    (
-        "unused-footnote-definition",
-        "A footnote is defined but never referenced.",
-    ),
-];
+fn lint_rules() -> &'static [(String, String)] {
+    static RULES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    RULES.get_or_init(|| {
+        serde_json::from_str(include_str!("../resources/lint-rules.json"))
+            .expect("generated lint rule resources must be valid JSON")
+    })
+}
 
 pub fn lint_rule_markdown(name: &str) -> Option<String> {
     let normalized = name.to_lowercase();
-    LINT_RULES
+    lint_rules()
         .iter()
         .find(|(name, _)| *name == normalized)
         .map(|(name, description)| {
@@ -303,7 +211,7 @@ pub fn lint_rule_markdown(name: &str) -> Option<String> {
 }
 
 pub fn lint_rule_names() -> impl Iterator<Item = &'static str> {
-    LINT_RULES.iter().map(|(name, _)| *name)
+    lint_rules().iter().map(|(name, _)| name.as_str())
 }
 
 #[cfg(test)]
@@ -326,7 +234,8 @@ mod tests {
     fn lint_rule_lookup_is_case_insensitive() {
         assert!(lint_rule_markdown("UNCLOSED-CONTAINER-FENCE").is_some());
         let names = lint_rule_names().collect::<Vec<_>>();
-        assert_eq!(names.len(), 25);
+        assert_eq!(names.len(), 67);
+        assert!(lint_rule_markdown("continuation-marker-refused").is_some());
         assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
     }
 }
