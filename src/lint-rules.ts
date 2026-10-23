@@ -13,6 +13,7 @@ export const lintRuleDescriptions = {
   'definition-term-block-folded': 'A block opener indented under a definition term folds into the term as text instead of opening a block.',
   'delimited-table-malformed': 'A csv or tsv table has malformed quoting, so it stays a code block.',
   'delimited-table-wide-row': 'A csv or tsv record is wider than the first record; the extra fields are kept.',
+  'description-separator-below-content-column': 'A : or :: separator sits left of the definition list it seems to continue, so it adds no entry: it folds into the open item as text or ends the item.',
   'duplicate-footnote-definition': 'More than one definition uses the same footnote label.',
   'duplicate-heading-id': 'More than one heading resolves to the same identifier.',
   'empty-include-path': 'An include directive has no path, so it stays literal text.',

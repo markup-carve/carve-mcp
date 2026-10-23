@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 atomic-write-file = "0.3.1"
-carve-lang = "=0.1.10"
+carve-lang = "=0.1.11"
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
@@ -29,6 +29,6 @@ similar = "2.7.0"
 name = "carve-mcp-rs"
 path = "src/main.rs"
 
-# Draft until the wave releases: build against carve-rs main. At release delete this table and set carve-lang = "=0.1.11" (and CARVE_ENGINE_VERSION).
+# Draft until the wave releases: build against carve-rs main. At release delete this table; carve-lang = "=0.1.11" and CARVE_ENGINE_VERSION are already set.
 [patch.crates-io]
-carve-lang = { git = "https://github.com/markup-carve/carve-rs.git", rev = "f95434c91c0faca54fb221281b82e999ecb7cf3c" }
+carve-lang = { git = "https://github.com/markup-carve/carve-rs.git", rev = "64492bb209e11ab51d699b4bb89b015fa4a71a69" }

@@ -14,11 +14,12 @@ describe('documentation resources', () => {
   });
 
   it('documents every stable lint diagnostic name', () => {
-    expect(lintRuleNames).toHaveLength(67);
+    expect(lintRuleNames).toHaveLength(68);
     expect(lintRuleNames).toEqual(expect.arrayContaining([
       'platform-mention-token', 'platform-issue-reference', 'table-span-marker-blocked',
       'continuation-marker-refused', 'list-marker-below-content-column', 'ordered-list-split-by-indent',
       'consumed-key-near-miss', 'include-duplicate-option', 'include-non-text',
+      'description-separator-below-content-column',
     ]));
     expect(lintRuleMarkdown('unclosed-container-fence')).toContain('without a closer');
     expect(lintRuleMarkdown('constructor')).toBeUndefined();
@@ -26,7 +27,7 @@ describe('documentation resources', () => {
   });
 
   it('resolves the resource of every warning carve_lint returns', () => {
-    const documents = ['> {.k}\n', '# Title {#x}\n', '>quote\n', '[a]:\n', '``` raw html\n<b>\n```\n', '[x](#nope)\n', '{{}}\n'];
+    const documents = ['> {.k}\n', '# Title {#x}\n', '>quote\n', '[a]:\n', '``` raw html\n<b>\n```\n', '[x](#nope)\n', '{{}}\n', '- a\n  :: term\n : detail\n'];
     const rules = documents.flatMap((document) => lint(document).warnings.map((warning) => warning.rule));
     expect(rules).toHaveLength(documents.length);
     for (const rule of rules) expect(lintRuleMarkdown(rule), rule).toBeDefined();
