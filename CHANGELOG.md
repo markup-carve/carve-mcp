@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file.
 ### Fixes
 
 - Every lint rule in the spec's validation table has a `carve://lint-rules/<rule>` resource on both servers, so a warning for an include rule, `continuation-marker-refused` or another id added in this wave no longer points at a missing resource (#113, #112).
+- The Rust server's Markdown `carve_migrate` matches carve-js 0.1.13: trailing blank lines end in one newline, and with no dialect option set, input holding `^[...]` or `[text]{...}` gets a per-construct assessment instead of `fidelity-unverified` (#112).
 
 ### Improvements
 

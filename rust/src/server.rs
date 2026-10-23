@@ -1795,14 +1795,12 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
     while source.contains(&token_prefix) {
         token_prefix.push('_');
     }
-    let protected = std::cell::Cell::new(0usize);
     let mut protect = |pattern: &str, replacement: &dyn Fn(&regex::Captures<'_>) -> String| {
         value = Regex::new(pattern)
             .unwrap()
             .replace_all(&value, |caps: &regex::Captures<'_>| {
                 let token = format!("{token_prefix}{}X", replacements.len());
                 replacements.push(replacement(caps));
-                protected.set(protected.get() + 1);
                 token
             })
             .into_owned();
@@ -1813,7 +1811,6 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         c[0].to_owned()
     });
     protect(r"`+[^`\n]*`+", &|c| c[0].to_owned());
-    let code_rewrites = protected.get();
     if dialect.highlight {
         protect(r"==([^=\n]+)==", &|c| format!("={}=", &c[1]));
     }
@@ -1833,18 +1830,11 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
     } else {
         protect(r"(?m)^\*\[([^\]]+)\]:(.*)$", &|c| format!("\\{}", &c[0]));
     }
-    let before_divs = protected.get();
     if dialect.fenced_divs {
         protect(r"(?m)^:::(.*)$", &|c| c[0].to_owned());
     } else {
         protect(r"(?m)^:::(.*)$", &|c| format!("\\{}", &c[0]));
     }
-    // An escaped `:::` line is still a Markdown paragraph the importer can assess.
-    let div_escapes = if dialect.fenced_divs {
-        0
-    } else {
-        protected.get() - before_divs
-    };
     if dialect.attributes {
         protect(r"(\[[^\]\n]+\])\{([^{}\n]+)\}", &|c| c[0].to_owned());
     } else {
@@ -1859,7 +1849,7 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         || dialect.inline_footnotes
         || dialect.fenced_divs
         || dialect.attributes;
-    if dialect_enabled || replacements.len() > code_rewrites + div_escapes {
+    if dialect_enabled {
         // The importer cannot vouch for dialect constructs; carve-js reports
         // this same single row from its native dialect option.
         result.report.diagnostics = vec![carve::MigrationDiagnostic {
@@ -1870,8 +1860,9 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
             confidence: carve::MigrationConfidence::Fallback,
             path: None,
         }];
-    } else if code_rewrites + div_escapes > 0 {
-        // Nothing was rewritten that Markdown reads differently: assess the input.
+    } else if !replacements.is_empty() {
+        // With no dialect on, every rewrite is an escape or a protected span that
+        // Markdown reads the same way, so assess the input as carve-js does.
         result.report = import(source).map_err(refused)?.report;
     }
     for (index, replacement) in replacements.into_iter().enumerate() {
@@ -1885,12 +1876,6 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         .count();
     if trailing_linefeeds == 0 && result.value.ends_with('\n') {
         result.value.pop();
-    } else if trailing_linefeeds >= 2
-        && result.value != "\n"
-        && result.value.ends_with('\n')
-        && !result.value.ends_with("\n\n")
-    {
-        result.value.push('\n');
     }
     Ok(result)
 }
@@ -5095,17 +5080,24 @@ mod tests {
             highlight: true,
             ..Default::default()
         };
-        for (source, dialect) in [("==marked==", Some(&highlight)), ("^[note]", None)] {
-            assert_eq!(
-                diagnostic(source, dialect),
-                (
-                    "fidelity-unverified".to_owned(),
-                    "dropped".to_owned(),
-                    "fallback".to_owned()
-                ),
-                "{source:?}"
-            );
-        }
+        assert_eq!(
+            diagnostic("==marked==", Some(&highlight)),
+            (
+                "fidelity-unverified".to_owned(),
+                "dropped".to_owned(),
+                "fallback".to_owned()
+            )
+        );
+        // With no dialect on, the escaped `^[` reads as Markdown text, so the
+        // input itself is assessed, as carve-js 0.1.13 does.
+        assert_eq!(
+            diagnostic("^[note]", None),
+            (
+                "markdown-paragraph".to_owned(),
+                "preserved".to_owned(),
+                "exact".to_owned()
+            )
+        );
         assert_eq!(
             diagnostic("Text", None),
             (
@@ -5175,9 +5167,9 @@ mod tests {
             ("a\n", "a\n"),
             ("# H\n", "# H\n"),
             ("- a\n- b\n", "- a\n- b\n"),
-            ("a\n\n", "a\n\n"),
-            ("a\n\n\n", "a\n\n"),
-            ("a\r\n\r\n", "a\n\n"),
+            ("a\n\n", "a\n"),
+            ("a\n\n\n", "a\n"),
+            ("a\r\n\r\n", "a\n"),
             ("\n\n", "\n"),
             (
                 "| A | B |\n| --- | --- |\n| a | b |\n",
