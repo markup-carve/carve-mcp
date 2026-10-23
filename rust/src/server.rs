@@ -2086,15 +2086,23 @@ fn format_carve_checked_with(
         return Err(writer_depth_error());
     }
     if align_tables {
-        let value =
-            carve::try_to_carve_with_options(source, &Options::default().with_align_tables(true))
-                .map_err(|error| error.to_string())?;
+        let report = with_render_loss_report(
+            CarveRenderTarget::Carve,
+            CheckedRenderOptions::default(),
+            || {
+                carve::try_to_carve_with_options(
+                    source,
+                    &Options::default().with_align_tables(true),
+                )
+            },
+        )
+        .map_err(|error| error.to_string())?;
         return Ok(carve::RenderResult {
-            value,
-            losses: Vec::new(),
-            total_losses: 0,
-            totals_by_code: Default::default(),
-            truncated: false,
+            value: report.value.map_err(|error| error.to_string())?,
+            losses: report.losses,
+            total_losses: report.total_losses,
+            totals_by_code: report.totals_by_code,
+            truncated: report.truncated,
         });
     }
     carve::to_carve_with_report(source, CheckedRenderOptions::default())
