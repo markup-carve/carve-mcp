@@ -39,7 +39,7 @@
       ]
     },
     "workspace": {
-      "maximum": 9100,
+      "maximum": 9150,
       "workspace": true,
       "tools": [
         "carve_lint",

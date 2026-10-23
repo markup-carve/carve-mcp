@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { prepareWorkspace } from './workspace.js';
 import { createServer } from './server.js';
 import { includeScope } from './includes.js';
-import { parse, render } from './tools.js';
+import { lint, parse, render } from './tools.js';
 
 async function fixture(files: Record<string, string>) {
   const root = await mkdtemp(join(tmpdir(), 'carve-mcp-includes-'));
@@ -147,6 +147,98 @@ describe('include reporting', () => {
   });
 });
 
+const SERVER_JS = 'const hidden = 1;\n// #region start\nexport const shown = 2;\n// #endregion\n';
+
+describe('code includes of source files', () => {
+  it('renders a @code region of a .js file as a code block', async () => {
+    const { workspace } = await fixture({ 'src/server.js': SERVER_JS });
+    const out = render('{{ src/server.js @region:start @code:js }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.value).toContain('<code class="language-js">export const shown = 2;');
+    expect(out.value).not.toContain('hidden');
+    expect(out.includes?.warnings).toEqual([]);
+    expect(out.includes?.dependencies).toEqual([{ path: 'src/server.js', resolved: true }]);
+  });
+
+  it('keeps a text include of a source file literal', async () => {
+    const { workspace } = await fixture({ 'src/server.js': SERVER_JS });
+    const out = render('{{ src/server.js }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.value).toContain('{{ src/server.js }}');
+    expect(out.value).not.toContain('shown');
+    expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual(['include-unresolved']);
+  });
+
+  it('refuses a source file in both modes when the document also splices it as Carve', async () => {
+    const { workspace } = await fixture({ 'src/server.js': SERVER_JS });
+    const out = render('{{ src/server.js @code:js }}\n\n{{ src/server.js }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.value).not.toContain('shown');
+  });
+
+  it('keeps a text include of a source file literal inside an included Carve file', async () => {
+    const { workspace } = await fixture({ 'src/server.js': SERVER_JS, 'part.crv': '{{ src/server.js }}\n\n{{ src/server.js @code:js }}\n' });
+    const out = render('{{ part.crv }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.value).toContain('{{ src/server.js }}');
+  });
+
+  it('still refuses hidden and dependency paths for @code includes', async () => {
+    const { workspace } = await fixture({ '.env': 'SECRET=env\n', 'node_modules/pkg/index.js': 'SECRET=module\n' });
+    for (const path of ['.env', 'node_modules/pkg/index.js']) {
+      const out = render(`{{ ${path} @code }}\n`, 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+      expect(out.value).not.toContain('SECRET');
+      expect(out.includes?.dependencies.every((dependency) => !dependency.resolved)).toBe(true);
+    }
+  });
+
+  it('expands a @code include for carve_parse on the same terms', async () => {
+    const { workspace } = await fixture({ 'src/server.js': SERVER_JS });
+    const ast = parse('{{ src/server.js @region:start @code:js }}\n', includeScope(workspace, { includeRootIndex: 0 }));
+    expect(JSON.stringify(ast.children)).toContain('export const shown = 2;');
+  });
+});
+
+describe('lint through includes', () => {
+  it('reports a finding inside an included file by its root-relative path', async () => {
+    const { root, workspace } = await fixture({ 'parts/child.crv': 'See [x][missing].\n' });
+    const out = lint('{{ parts/child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0, sourcePath: 'index.crv' }));
+    expect(out.valid).toBe(false);
+    expect(out.warnings).toEqual([expect.objectContaining({
+      rule: 'unresolved-reference-link', file: 'parts/child.crv', line: 1, column: 5,
+      includedBy: [expect.objectContaining({ file: 'index.crv', line: 1, column: 1 })],
+    })]);
+    expect(JSON.stringify(out)).not.toContain(root);
+  });
+
+  it('reports include offsets in UTF-16 units of the file they name', async () => {
+    const { workspace } = await fixture({ 'child.crv': '\u{1F600} {{ gone.crv }}\n' });
+    const out = lint('\u{1F600}\u{1F600} {{ absent.crv }}\n\n{{ child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.warnings).toEqual([
+      expect.objectContaining({ rule: 'include-unresolved', line: 1, column: 4, start: 5, end: 21 }),
+      expect.objectContaining({
+        rule: 'include-unresolved', file: 'child.crv', line: 1, column: 3, start: 3, end: 17,
+        includedBy: [{ line: 3, column: 1, start: 23, end: 38 }],
+      }),
+    ]);
+  });
+
+  it('lints nothing included without a root', async () => {
+    const out = lint('{{ parts/child.crv }}\n');
+    expect(out.warnings).toEqual([]);
+  });
+
+  it('reports an include it could not resolve', async () => {
+    const { workspace } = await fixture({ 'child.crv': 'Child.\n' });
+    const out = lint('{{ settings.json }}\n', [], includeScope(workspace, { includeRootIndex: 0 }));
+    expect(out.warnings.map((warning) => warning.rule)).toEqual(['include-unresolved']);
+  });
+
+  it('applies the render policy, so a hidden file is never linted', async () => {
+    const { root, workspace } = await fixture({ 'child.crv': 'Child.\n' });
+    await mkdir(join(root, '.private'));
+    await writeFile(join(root, '.private', 'notes.crv'), 'See [x][secret-label].\n');
+    const out = lint('{{ .private/notes.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0 }));
+    expect(JSON.stringify(out)).not.toContain('secret-label');
+  });
+});
+
 describe('include options over MCP', () => {
   const closeables: Array<{ close(): Promise<void> }> = [];
   afterEach(async () => { await Promise.all(closeables.splice(0).map((item) => item.close())); });
@@ -168,6 +260,7 @@ describe('include options over MCP', () => {
     const client = await connect();
     expect(await properties(client, 'carve_render')).not.toContain('includeRootIndex');
     expect(await properties(client, 'carve_parse')).not.toContain('includeRootIndex');
+    expect(await properties(client, 'carve_lint')).not.toContain('includeRootIndex');
   });
 
   it('advertises the include option once a root is configured, and expands through it', async () => {
@@ -182,6 +275,18 @@ describe('include options over MCP', () => {
     expect(called.structuredContent).toEqual(expect.objectContaining({
       value: expect.stringContaining('Child text.'),
       includes: expect.objectContaining({ rootIndex: 0, dependencies: [{ path: 'child.crv', resolved: true }] }),
+    }));
+  });
+
+  it('lints included content through carve_lint once a root is configured', async () => {
+    const { root } = await fixture({ 'child.crv': 'See [x][missing].\n' });
+    const client = await connect([root]);
+    expect(await properties(client, 'carve_lint')).toContain('includeRootIndex');
+    const called = await client.callTool({ name: 'carve_lint', arguments: { source: '{{ child.crv }}\n', includeRootIndex: 0 } });
+    expect(called.isError).not.toBe(true);
+    expect(called.structuredContent).toEqual(expect.objectContaining({
+      valid: false,
+      warnings: [expect.objectContaining({ rule: 'unresolved-reference-link', file: 'child.crv', resourceUri: 'carve://lint-rules/unresolved-reference-link' })],
     }));
   });
 

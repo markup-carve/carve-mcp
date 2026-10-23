@@ -33,11 +33,15 @@ function sha256(content: string | Uint8Array): string {
  * `docs/env.md -> ../.env` passes the first check and fails the second.
  */
 export function documentPathRefusal(path: string): string | undefined {
+  return hiddenPathRefusal(path) ?? (DOCUMENT_EXTENSIONS.has(extname(path).toLowerCase()) ? undefined : 'Unsupported document extension.');
+}
+
+/** The part of the document policy that also binds a `@code` include of a source file. */
+export function hiddenPathRefusal(path: string): string | undefined {
   const segments = path.split(/[\\/]/);
   if (segments.some((segment) => segment.startsWith('.') || SKIPPED_DIRECTORIES.has(segment))) {
     return 'Hidden paths and dependency directories are not readable workspace documents.';
   }
-  if (!DOCUMENT_EXTENSIONS.has(extname(path).toLowerCase())) return 'Unsupported document extension.';
   return undefined;
 }
 
