@@ -8,9 +8,27 @@ const rawIndex = source.match(/export const ruleIndex = ([\s\S]+?) as const;/)?.
 if (!commit || !rawIndex) throw new Error('Could not read generated rule data.');
 
 const generated = `${JSON.stringify({ sourceCommit: commit, index: JSON.parse(rawIndex) }, null, 2)}\n`;
+
+// The Rust server serves the same lint rule descriptions as src/lint-rules.ts.
+const lintSourceUrl = new URL('../src/lint-rules.ts', import.meta.url);
+const lintOutputUrl = new URL('../rust/resources/lint-rules.json', import.meta.url);
+const lintSource = await readFile(lintSourceUrl, 'utf8');
+const lintBody = lintSource.match(/export const lintRuleDescriptions = \{\n([\s\S]*?)\n\} as const;/)?.[1];
+if (!lintBody) throw new Error('Could not read lint rule descriptions.');
+const lintLines = lintBody.split('\n');
+const lintRules = lintLines.map((line) => {
+  const match = line.match(/^ {2}'([a-z-]+)': '((?:[^'\\]|\\.)*)',$/);
+  if (!match) throw new Error(`Unexpected lint rule line: ${line}`);
+  return [match[1], match[2].replace(/\\(.)/g, '$1')];
+});
+const lintGenerated = `${JSON.stringify(lintRules, null, 2)}\n`;
+
 if (process.argv.includes('--check')) {
   const current = await readFile(outputUrl, 'utf8').catch(() => '');
   if (current !== generated) throw new Error('Rust rule resources are stale; run npm run sync:rust-resources.');
+  const lintCurrent = await readFile(lintOutputUrl, 'utf8').catch(() => '');
+  if (lintCurrent !== lintGenerated) throw new Error('Rust lint rule resources are stale; run npm run sync:rust-resources.');
 } else {
   await writeFile(outputUrl, generated);
+  await writeFile(lintOutputUrl, lintGenerated);
 }
