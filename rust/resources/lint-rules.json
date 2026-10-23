@@ -56,6 +56,10 @@
     "A csv or tsv record is wider than the first record; the extra fields are kept."
   ],
   [
+    "description-separator-below-content-column",
+    "A : or :: separator sits left of the definition list it seems to continue, so it adds no entry: it folds into the open item as text or ends the item."
+  ],
+  [
     "duplicate-footnote-definition",
     "More than one definition uses the same footnote label."
   ],

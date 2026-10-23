@@ -25,7 +25,7 @@ import { selectAstNodes } from './tools.js';
  * `astNodePaths` cannot drive the walk itself: it takes a whole document, while
  * `nodeText` walks a single node and the reference graph walks a parse result.
  */
-const ENGINE_WIRE_FIELDS = new URL('../node_modules/@markup-carve/carve/dist/wire-fields.js', import.meta.url);
+const ENGINE_WIRE_FIELDS = new URL('../node_modules/@markup-carve/carve/dist/ast/wire-fields.js', import.meta.url);
 const RUST_SERVER = new URL('../rust/src/server.rs', import.meta.url);
 
 /**
@@ -111,7 +111,7 @@ describe('the AST child-field list', () => {
 
   it("matches the order of the engine's own walk", async () => {
     const { ALL_OWNED_CHILD_FIELDS } = await import(
-      '../node_modules/@markup-carve/carve/dist/owned-child-fields.js'
+      '../node_modules/@markup-carve/carve/dist/ast/owned-child-fields.js'
     );
 
     expect(ALL_OWNED_CHILD_FIELDS, 'the engine no longer exports its ordered walk').toBeInstanceOf(Array);
@@ -122,7 +122,7 @@ describe('the AST child-field list', () => {
 
   it('excludes only fields the wire AST never spells', async () => {
     const { ALL_OWNED_CHILD_FIELDS } = await import(
-      '../node_modules/@markup-carve/carve/dist/owned-child-fields.js'
+      '../node_modules/@markup-carve/carve/dist/ast/owned-child-fields.js'
     );
 
     expect(ALL_OWNED_CHILD_FIELDS.filter((field) => !AST_CHILD_FIELDS.includes(field as never)))

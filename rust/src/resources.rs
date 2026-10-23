@@ -234,7 +234,7 @@ mod tests {
     fn lint_rule_lookup_is_case_insensitive() {
         assert!(lint_rule_markdown("UNCLOSED-CONTAINER-FENCE").is_some());
         let names = lint_rule_names().collect::<Vec<_>>();
-        assert_eq!(names.len(), 67);
+        assert_eq!(names.len(), 68);
         assert!(lint_rule_markdown("continuation-marker-refused").is_some());
         assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
     }

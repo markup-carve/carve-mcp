@@ -1795,14 +1795,12 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
     while source.contains(&token_prefix) {
         token_prefix.push('_');
     }
-    let protected = std::cell::Cell::new(0usize);
     let mut protect = |pattern: &str, replacement: &dyn Fn(&regex::Captures<'_>) -> String| {
         value = Regex::new(pattern)
             .unwrap()
             .replace_all(&value, |caps: &regex::Captures<'_>| {
                 let token = format!("{token_prefix}{}X", replacements.len());
                 replacements.push(replacement(caps));
-                protected.set(protected.get() + 1);
                 token
             })
             .into_owned();
@@ -1813,7 +1811,6 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         c[0].to_owned()
     });
     protect(r"`+[^`\n]*`+", &|c| c[0].to_owned());
-    let code_rewrites = protected.get();
     if dialect.highlight {
         protect(r"==([^=\n]+)==", &|c| format!("={}=", &c[1]));
     }
@@ -1833,18 +1830,11 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
     } else {
         protect(r"(?m)^\*\[([^\]]+)\]:(.*)$", &|c| format!("\\{}", &c[0]));
     }
-    let before_divs = protected.get();
     if dialect.fenced_divs {
         protect(r"(?m)^:::(.*)$", &|c| c[0].to_owned());
     } else {
         protect(r"(?m)^:::(.*)$", &|c| format!("\\{}", &c[0]));
     }
-    // An escaped `:::` line is still a Markdown paragraph the importer can assess.
-    let div_escapes = if dialect.fenced_divs {
-        0
-    } else {
-        protected.get() - before_divs
-    };
     if dialect.attributes {
         protect(r"(\[[^\]\n]+\])\{([^{}\n]+)\}", &|c| c[0].to_owned());
     } else {
@@ -1859,7 +1849,7 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         || dialect.inline_footnotes
         || dialect.fenced_divs
         || dialect.attributes;
-    if dialect_enabled || replacements.len() > code_rewrites + div_escapes {
+    if dialect_enabled {
         // The importer cannot vouch for dialect constructs; carve-js reports
         // this same single row from its native dialect option.
         result.report.diagnostics = vec![carve::MigrationDiagnostic {
@@ -1870,8 +1860,9 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
             confidence: carve::MigrationConfidence::Fallback,
             path: None,
         }];
-    } else if code_rewrites + div_escapes > 0 {
-        // Nothing was rewritten that Markdown reads differently: assess the input.
+    } else if !replacements.is_empty() {
+        // With no dialect on, every rewrite is an escape or a protected span that
+        // Markdown reads the same way, so assess the input as carve-js does.
         result.report = import(source).map_err(refused)?.report;
     }
     for (index, replacement) in replacements.into_iter().enumerate() {
@@ -1885,12 +1876,6 @@ fn migrate_markdown_dialect_with<E: std::fmt::Display>(
         .count();
     if trailing_linefeeds == 0 && result.value.ends_with('\n') {
         result.value.pop();
-    } else if trailing_linefeeds >= 2
-        && result.value != "\n"
-        && result.value.ends_with('\n')
-        && !result.value.ends_with("\n\n")
-    {
-        result.value.push('\n');
     }
     Ok(result)
 }
@@ -2085,15 +2070,40 @@ fn writer_depth_error() -> String {
     )
 }
 
-pub const ALIGN_TABLES_UNSUPPORTED: &str = "alignTables is not supported by this server yet: the bundled carve-lang engine has no aligned-table writer. Use the Node server, or omit alignTables for the canonical form.";
-
 /// `carve::to_carve_with_report` behind the writer depth guard.
 pub fn format_carve_checked(source: &str) -> Result<carve::RenderResult<String>, String> {
+    format_carve_checked_with(source, false)
+}
+
+fn format_carve_checked_with(
+    source: &str,
+    align_tables: bool,
+) -> Result<carve::RenderResult<String>, String> {
     if ast_json_deeper_than(
         &carve::to_json_with_options(source, &Options::default()),
         MAX_WRITER_DEPTH,
     ) {
         return Err(writer_depth_error());
+    }
+    if align_tables {
+        let report = with_render_loss_report(
+            CarveRenderTarget::Carve,
+            CheckedRenderOptions::default(),
+            || {
+                carve::try_to_carve_with_options(
+                    source,
+                    &Options::default().with_align_tables(true),
+                )
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(carve::RenderResult {
+            value: report.value.map_err(|error| error.to_string())?,
+            losses: report.losses,
+            total_losses: report.total_losses,
+            totals_by_code: report.totals_by_code,
+            truncated: report.truncated,
+        });
     }
     carve::to_carve_with_report(source, CheckedRenderOptions::default())
         .map_err(|error| error.to_string())
@@ -3149,11 +3159,7 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        if input.align_tables {
-            // carve-lang 0.1.10 has no aligned-table writer.
-            return Self::error(ALIGN_TABLES_UNSUPPORTED.to_string());
-        }
-        match format_carve_checked(&input.source) {
+        match format_carve_checked_with(&input.source, input.align_tables) {
             Ok(result) => Self::render_result(result),
             Err(error) => Self::error(error.to_string()),
         }
@@ -4888,14 +4894,29 @@ mod tests {
     }
 
     #[test]
-    fn align_tables_is_refused_until_the_engine_can_write_it() {
+    fn align_tables_formats_tables_and_preserves_the_canonical_default() {
         let server = CarveServer::new();
         let source = "| a | bb |\n| ccc | d |\n";
-        let refused = server.format(call(json!({"source": source, "alignTables": true})));
-        assert_eq!(refused.is_error, Some(true));
-        assert!(format!("{refused:?}").contains("alignTables is not supported by this server yet"));
+        let aligned = server.format(call(json!({"source": source, "alignTables": true})));
+        assert_ne!(aligned.is_error, Some(true));
+        assert_eq!(
+            structured(&aligned),
+            json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false})
+        );
         let canonical = server.format(call(json!({"source": source, "alignTables": false})));
         assert_eq!(structured(&canonical)["value"], json!(source));
+    }
+
+    #[test]
+    fn align_tables_counts_non_breaking_space_escape_width() {
+        let server = CarveServer::new();
+        let source = "| a\\ b | x |\n| ccc | `y|z` |\n";
+        let aligned = server.format(call(json!({"source": source, "alignTables": true})));
+        assert_ne!(aligned.is_error, Some(true));
+        assert_eq!(
+            structured(&aligned)["value"],
+            json!("| a\\ b | x     |\n| ccc  | `y|z` |\n")
+        );
     }
 
     #[test]
@@ -5067,17 +5088,24 @@ mod tests {
             highlight: true,
             ..Default::default()
         };
-        for (source, dialect) in [("==marked==", Some(&highlight)), ("^[note]", None)] {
-            assert_eq!(
-                diagnostic(source, dialect),
-                (
-                    "fidelity-unverified".to_owned(),
-                    "dropped".to_owned(),
-                    "fallback".to_owned()
-                ),
-                "{source:?}"
-            );
-        }
+        assert_eq!(
+            diagnostic("==marked==", Some(&highlight)),
+            (
+                "fidelity-unverified".to_owned(),
+                "dropped".to_owned(),
+                "fallback".to_owned()
+            )
+        );
+        // With no dialect on, the escaped `^[` reads as Markdown text, so the
+        // input itself is assessed, as carve-js 0.1.13 does.
+        assert_eq!(
+            diagnostic("^[note]", None),
+            (
+                "markdown-paragraph".to_owned(),
+                "preserved".to_owned(),
+                "exact".to_owned()
+            )
+        );
         assert_eq!(
             diagnostic("Text", None),
             (
@@ -5147,9 +5175,9 @@ mod tests {
             ("a\n", "a\n"),
             ("# H\n", "# H\n"),
             ("- a\n- b\n", "- a\n- b\n"),
-            ("a\n\n", "a\n\n"),
-            ("a\n\n\n", "a\n\n"),
-            ("a\r\n\r\n", "a\n\n"),
+            ("a\n\n", "a\n"),
+            ("a\n\n\n", "a\n"),
+            ("a\r\n\r\n", "a\n"),
             ("\n\n", "\n"),
             (
                 "| A | B |\n| --- | --- |\n| a | b |\n",
