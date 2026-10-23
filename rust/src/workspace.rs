@@ -53,6 +53,17 @@ fn relative_string(path: &Path) -> String {
 /// Applied to the path as requested AND as resolved, so a symlink such as
 /// `docs/env.md -> ../.env` is refused by the second check.
 pub fn document_path_refusal(relative: &Path) -> Option<&'static str> {
+    if let Some(refusal) = hidden_path_refusal(relative) {
+        return Some(refusal);
+    }
+    if !supported(relative) {
+        return Some("Unsupported document extension.");
+    }
+    None
+}
+
+/// The part of the document policy that also binds a `@code` include of a source file.
+pub fn hidden_path_refusal(relative: &Path) -> Option<&'static str> {
     if relative.components().any(|part| {
         let value = part.as_os_str().to_string_lossy();
         value.starts_with('.') || matches!(value.as_ref(), "node_modules" | "vendor" | "target")
@@ -60,9 +71,6 @@ pub fn document_path_refusal(relative: &Path) -> Option<&'static str> {
         return Some(
             "Hidden paths and dependency directories are not readable workspace documents.",
         );
-    }
-    if !supported(relative) {
-        return Some("Unsupported document extension.");
     }
     None
 }

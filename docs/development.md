@@ -109,14 +109,18 @@ change lint-oriented `valid` or `warningCount` fields.
 
 ### Include expansion
 
-`{{ path }}` directives stay literal unless a call names a root. `carve_render`
-and `carve_parse` take `includeRootIndex`, an index into the roots configured
+`{{ path }}` directives stay literal unless a call names a root. `carve_render`,
+`carve_parse` and `carve_lint` take `includeRootIndex`, an index into the roots configured
 with `--root`, and expansion then runs under that root through the engine's
 contained filesystem resolver with its default depth, byte, file-size and
 resolver-call budgets. Includes follow the same document policy as `carve_read_file`, on
 the written and the resolved path: hidden paths, `node_modules`, `vendor`,
 `target` and unknown extensions are refused, and only regular files are read,
-so a FIFO cannot block the server. A containment root can only come from the server's own
+so a FIFO cannot block the server. A code-block include (`@code`) may name a file
+of any extension, so `{{ src/server.js @region:start @code:js }}` renders the
+region as a code block; the hidden-path and dependency-directory refusals still
+apply to it. A source file that the same document also includes as Carve text
+stays literal in both directives. A containment root can only come from the server's own
 configuration, never from document text and never from the process working
 directory, so the two options are advertised only on a server that was started
 with a root.
@@ -133,6 +137,13 @@ nodes `carve_parse` returns from an included file, and a warning
 never carries the resolver's own error text: a refused target, a missing one and
 one outside the root all report as `include-unresolved`, so the report cannot be
 used to probe the server's filesystem.
+
+`carve_lint` with a root also lints the content the includes pull in, as
+`carve lint --include-root` does. A finding inside an included file carries that
+file's root-relative `file` and an `includedBy` chain of the directives that
+reached it, top-level first; its `line`, `column`, `start` and `end` are in that
+file, with offsets in UTF-16 code units like every other lint offset. An include
+that does not expand is reported as its `include-*` rule.
 
 Add `--allow-write` to register `carve_write_file`. Writes default to dry runs,
 stay inside canonicalized roots, preserve existing file modes, and require the

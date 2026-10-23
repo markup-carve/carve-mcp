@@ -409,11 +409,11 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
   if (toolEnabled(toolProfile, 'carve_lint')) server.registerTool('carve_lint', {
     title: 'Lint Carve',
     description: 'Check Carve source for author-facing problems and silent degradation.',
-    inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]) }),
+    inputSchema: z.object({ source: sourceSchema, platforms: z.array(z.enum(KNOWN_LINT_PLATFORMS)).default([]), ...includeSettings }),
     outputSchema: lintOutput,
     annotations: readOnly,
-  }, safe('carve_lint', observe, ({ source: document, platforms }) => {
-    const output = lint(document, platforms);
+  }, safe('carve_lint', observe, ({ source: document, platforms, includeRootIndex, sourcePath }) => {
+    const output = lint(document, platforms, includeScope(workspace, { includeRootIndex, sourcePath }));
     return { ...output, warnings: output.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })) };
   }));
 

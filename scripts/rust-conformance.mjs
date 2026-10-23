@@ -485,6 +485,58 @@ async function includeWarning(command, args) {
   }
 }
 
+async function includeToolResults(command, args) {
+  const client = new Client({ name: 'include-tool-conformance', version: '0.1.0' });
+  await client.connect(new StdioClientTransport({ command, args, stderr: 'pipe' }));
+  try {
+    const calls = [
+      ['carve_render', { source: '{{ src/server.js @region:start @code:js }}\n', target: 'html', includeRootIndex: 0 }],
+      ['carve_render', { source: '{{ src/server.js }}\n', target: 'plain', includeRootIndex: 0 }],
+      ['carve_render', { source: '{{ src/server.js @code:js }}\n\n{{ src/server.js }}\n', target: 'plain', includeRootIndex: 0 }],
+      ['carve_render', { source: '{{ .secret.js @code }}\n', target: 'plain', includeRootIndex: 0 }],
+      ['carve_parse', { source: '{{ src/server.js @region:start @code:js }}\n', positions: false, includeRootIndex: 0 }],
+      ['carve_lint', { source: '\u{1F600} intro\n\n{{ docs/child.crv }}\n', includeRootIndex: 0, sourcePath: 'index.crv' }],
+      ['carve_lint', { source: '\u{1F600}\u{1F600} {{ absent.crv }}\n\n{{ docs/child.crv }}\n', includeRootIndex: 0 }],
+      ['carve_lint', { source: '{{ docs/child.crv @region:part }}\n', includeRootIndex: 0 }],
+      ['carve_lint', { source: '{{ docs/child.crv }}\n', includeRootIndex: 0, platforms: ['github'] }],
+      ['carve_lint', { source: '{{ src/server.js }}\n', includeRootIndex: 0 }],
+      ['carve_lint', { source: '{{ docs/child.crv }}\n' }],
+    ];
+    const output = [];
+    for (const [name, arguments_] of calls) {
+      const result = await client.callTool({ name, arguments: arguments_ });
+      const value = result.structuredContent ?? JSON.parse(result.content[0].text);
+      // Engine-owned lint wording differs between carve-js and carve-lang; the
+      // include and platform findings are worded by code both servers share.
+      for (const warning of name === 'carve_lint' ? value.warnings ?? [] : []) {
+        if (!/^(include|platform)-/.test(warning.rule)) { delete warning.message; delete warning.data; }
+      }
+      output.push({ name, isError: result.isError ?? false, value });
+    }
+    return output;
+  } finally {
+    await client.close();
+  }
+}
+
+const includeRoot = mkdtempSync(join(tmpdir(), 'carve-mcp-include-conformance-'));
+try {
+  mkdirSync(join(includeRoot, 'src'));
+  mkdirSync(join(includeRoot, 'docs'));
+  writeFileSync(join(includeRoot, 'src', 'server.js'), 'const hidden = 1;\n// #region start\nexport const shown = 2;\n// #endregion\n');
+  writeFileSync(join(includeRoot, '.secret.js'), 'SECRET\n');
+  writeFileSync(join(includeRoot, 'docs', 'child.crv'), '\u{1F600} x\n\n%% #region part\n\u{1F600} See [x][missing] and @someone.\n%% #endregion\n\n{{ nested-absent.crv }}\n');
+  const typescriptIncludes = await includeToolResults(process.execPath, ['dist/index.js', '--root', includeRoot]);
+  const rustIncludes = await includeToolResults(`${target}/debug/carve-mcp-rs`, ['--root', includeRoot]);
+  deepStrictEqual(rustIncludes, typescriptIncludes);
+  ok(typescriptIncludes[0].value.value.includes('export const shown = 2;'), 'A @code region of a source file stopped rendering.');
+  ok(typescriptIncludes[1].value.value.includes('{{ src/server.js }}'), 'A text include of a source file was spliced.');
+  ok(!typescriptIncludes[3].value.value.includes('SECRET'), 'A hidden source file was read for a @code include.');
+  ok(typescriptIncludes[5].value.warnings.some(({ rule, file }) => rule === 'unresolved-reference-link' && file === 'docs/child.crv'), 'carve_lint stopped linting included content.');
+} finally {
+  rmSync(includeRoot, { recursive: true, force: true });
+}
+
 for (const profile of ['review', 'convert', 'structure', 'workspace', 'all']) {
   deepStrictEqual(
     await profileToolNames(`${target}/debug/carve-mcp-rs`, [], profile),

@@ -1443,12 +1443,22 @@ struct DocumentSource {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 struct LintInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
     #[serde(default)]
     #[schemars(default = "empty_platforms")]
     platforms: Vec<LintPlatform>,
+    #[serde(default)]
+    #[schemars(
+        range(min = 0, max = 9007199254740991_u64),
+        description = "Configured root for includes; omitted, they stay literal."
+    )]
+    include_root_index: Option<usize>,
+    #[serde(default)]
+    #[schemars(length(min = 1), description = "Document path inside that root.")]
+    source_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1915,7 +1925,8 @@ pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value
         })
         .collect();
     if !platforms.is_empty() {
-        let mention = Regex::new(r"@[A-Za-z0-9_][A-Za-z0-9_.-]*").unwrap();
+        let mention =
+            Regex::new(r"@[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_][A-Za-z0-9_-]*)*").unwrap();
         let issue = Regex::new(r"#[0-9]+").unwrap();
         let mut offset = 0usize;
         let mut fenced: Option<char> = None;
@@ -2127,14 +2138,93 @@ fn render_carve_checked(document: &carve::Document) -> Result<String, String> {
 struct PolicyResolver {
     root: std::path::PathBuf,
     inner: carve::FileSystemResolver,
+    source_files: Option<SourceFilePolicy>,
 }
+
+/// Source files (any extension) the resolver may hand out for `@code` includes.
+///
+/// The resolver cannot see the directive's mode, so it admits a non-document
+/// file, records it in `admitted`, and the expansion is re-run with `denied`
+/// naming every such file the engine spliced as Carve instead.
+#[derive(Default)]
+struct SourceFilePolicy {
+    denied: std::collections::HashSet<String>,
+    admitted: std::cell::RefCell<std::collections::HashSet<String>>,
+}
+
+/// Re-runs allowed before a document's source-file includes all fall back to the plain document policy.
+const MAX_SOURCE_FILE_PASSES: usize = 4;
 
 impl PolicyResolver {
     fn new(root: &std::path::Path) -> std::io::Result<Self> {
         Ok(Self {
             root: std::fs::canonicalize(root)?,
             inner: carve::FileSystemResolver::new(root)?,
+            source_files: None,
         })
+    }
+
+    /// The resolver for `source`: the document policy, admitting a file of any
+    /// extension only as a `@code` block. A source file the document also
+    /// splices as Carve is refused in both modes, since the resolver cannot
+    /// tell the two directives apart.
+    fn admitting_code(
+        root: &std::path::Path,
+        source: &str,
+        options: &Options<'_>,
+        source_path: Option<&str>,
+    ) -> std::io::Result<Self> {
+        let mut denied = std::collections::HashSet::new();
+        let parse_options = Options {
+            positions: true,
+            extensions: options.extensions.clone(),
+            ..Options::default()
+        };
+        for pass in 0..=MAX_SOURCE_FILE_PASSES {
+            let mut resolver = Self::new(root)?;
+            if pass < MAX_SOURCE_FILE_PASSES {
+                resolver.source_files = Some(SourceFilePolicy {
+                    denied: denied.clone(),
+                    ..SourceFilePolicy::default()
+                });
+            } else {
+                return Ok(resolver);
+            }
+            let mut include_options = carve::IncludeOptions::new()
+                .with_resolver(&resolver)
+                .collecting_included();
+            if let Some(source_path) = source_path {
+                include_options = include_options.with_source_path(source_path);
+            }
+            let expanded = carve::expand_includes(
+                carve::parse_with_options(source, &parse_options),
+                source,
+                &include_options,
+            );
+            let admitted = resolver
+                .source_files
+                .as_ref()
+                .map(|policy| policy.admitted.borrow().clone())
+                .unwrap_or_default();
+            let spliced = expanded
+                .included
+                .iter()
+                .filter_map(|entry| match entry {
+                    carve::includes::AcceptedInclude::Carve { file, .. }
+                        if admitted.contains(file) =>
+                    {
+                        Some(file.clone())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            drop(include_options);
+            if spliced.is_empty() {
+                return Ok(resolver);
+            }
+            denied.extend(spliced);
+        }
+        unreachable!("the last pass admits no source file")
     }
 
     fn lexical(
@@ -2181,18 +2271,279 @@ impl carve::IncludeResolver for PolicyResolver {
         ) else {
             return self.inner.resolve(include_path, ctx);
         };
-        if crate::workspace::document_path_refusal(lexical).is_some()
-            || crate::workspace::document_path_refusal(canonical).is_some()
+        if crate::workspace::hidden_path_refusal(lexical).is_some()
+            || crate::workspace::hidden_path_refusal(canonical).is_some()
             || !std::fs::metadata(&real).is_ok_and(|metadata| metadata.is_file())
         {
             return Err(carve::IncludeDenial::Denied);
         }
-        self.inner.resolve(include_path, ctx)
+        let source_file = crate::workspace::document_path_refusal(lexical).is_some()
+            || crate::workspace::document_path_refusal(canonical).is_some();
+        if !source_file {
+            return self.inner.resolve(include_path, ctx);
+        }
+        let Some(policy) = &self.source_files else {
+            return Err(carve::IncludeDenial::Denied);
+        };
+        let real = real.to_string_lossy().into_owned();
+        if policy.denied.contains(&real) {
+            return Err(carve::IncludeDenial::Denied);
+        }
+        let resolved = self.inner.resolve(include_path, ctx)?;
+        if let Some(id) = &resolved.id {
+            if policy.denied.contains(id) {
+                return Err(carve::IncludeDenial::Denied);
+            }
+            policy.admitted.borrow_mut().insert(id.clone());
+        }
+        policy.admitted.borrow_mut().insert(real);
+        Ok(resolved)
     }
 
     fn unresolved_id(&self, include_path: &str, ctx: &carve::IncludeContext<'_>) -> Option<String> {
         self.inner.unresolved_id(include_path, ctx)
     }
+}
+
+/// UTF-16 span of the directive token at a 1-based line and codepoint column.
+///
+/// The engines disagree on the unit of an include site's offsets, so both
+/// servers derive them from the position and the file text instead.
+fn directive_span(text: &str, line: usize, column: usize) -> (usize, usize) {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    for _ in 1..line {
+        match bytes[index..]
+            .iter()
+            .position(|&b| b == b'\n' || b == b'\r')
+        {
+            Some(next) => {
+                index += next + 1;
+                if bytes[index - 1] == b'\r' && bytes.get(index) == Some(&b'\n') {
+                    index += 1;
+                }
+            }
+            None => {
+                index = text.len();
+                break;
+            }
+        }
+    }
+    for character in text[index..].chars().take(column.saturating_sub(1)) {
+        index += character.len_utf8();
+    }
+    let end = if text[index..].starts_with("{{") {
+        text[index + 2..]
+            .find("}}")
+            .map_or(index, |close| index + 2 + close + 2)
+    } else {
+        index
+    };
+    (utf16_offset(text, index), utf16_offset(text, end))
+}
+
+/// Lint `source` and the content its includes pull in, under the policy the render tools use.
+///
+/// Mirrors carve-js `lintIncludes`: a finding inside an included file carries
+/// that file's root-relative `file` and the directive chain that reached it,
+/// with positions in that file.
+fn lint_values_with_includes(
+    workspace: Option<&Workspace>,
+    root_index: Option<usize>,
+    source_path: Option<&str>,
+    source: &str,
+    platforms: &[LintPlatform],
+) -> Result<Vec<Value>, String> {
+    let Some(root_index) = root_index else {
+        if source_path.is_some() {
+            return Err(
+                "sourcePath requires includeRootIndex; without a root, includes stay literal."
+                    .into(),
+            );
+        }
+        return Ok(lint_values(source, platforms));
+    };
+    let workspace = workspace.ok_or(
+        "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
+    )?;
+    let (root, source_path) = workspace.include_scope(root_index, source_path)?;
+    let options = Options::default();
+    let resolver = PolicyResolver::admitting_code(&root, source, &options, source_path.as_deref())
+        .map_err(|_| "The configured workspace root cannot be used for includes.".to_owned())?;
+    let mut include_options = carve::IncludeOptions::new()
+        .with_resolver(&resolver)
+        .collecting_included();
+    if let Some(source_path) = &source_path {
+        include_options = include_options.with_source_path(source_path.clone());
+    }
+    let parse_options = Options {
+        positions: true,
+        ..Options::default()
+    };
+    let expanded = carve::expand_includes(
+        carve::parse_with_options(source, &parse_options),
+        source,
+        &include_options,
+    );
+    // CSV/TSV checks on a `@code` include come from the engine's own include lint.
+    let mut delimited = carve::lint::lint_carve_with_options(
+        source,
+        &Options::default().with_lint_includes(include_options.clone()),
+    )
+    .into_iter()
+    .filter(|finding| finding.rule.starts_with("delimited-table-"))
+    .collect::<Vec<_>>();
+
+    let canonical_root = resolver.root.clone();
+    let contained = |value: &str| -> Option<String> {
+        let path = std::path::Path::new(value);
+        if !path.is_absolute() {
+            return Some(value.to_owned());
+        }
+        path.strip_prefix(&canonical_root)
+            .ok()
+            .and_then(|relative| {
+                if relative.as_os_str().is_empty() {
+                    None
+                } else {
+                    Some(relative.to_string_lossy().replace('\\', "/"))
+                }
+            })
+    };
+    let texts: std::cell::RefCell<std::collections::HashMap<String, Option<String>>> =
+        Default::default();
+    let text_of = |id: Option<&str>| -> Option<String> {
+        let Some(id) = id.filter(|id| std::path::Path::new(id).is_absolute()) else {
+            return Some(source.to_owned());
+        };
+        contained(id)?;
+        texts
+            .borrow_mut()
+            .entry(id.to_owned())
+            .or_insert_with(|| std::fs::read_to_string(id).ok())
+            .clone()
+    };
+    let sites = |chain: &[carve::includes::IncludeSite]| -> Value {
+        Value::Array(
+            chain
+                .iter()
+                .map(|site| {
+                    let file = Some(site.file.as_str()).filter(|file| !file.is_empty());
+                    let (start, end) = text_of(file).map_or((0, 0), |text| {
+                        directive_span(&text, site.line, site.column)
+                    });
+                    let mut value = json!({"line": site.line, "column": site.column, "start": start, "end": end});
+                    if let Some(path) = file.and_then(&contained) {
+                        value["file"] = Value::String(path);
+                    }
+                    value
+                })
+                .collect(),
+        )
+    };
+
+    let mut warnings = lint_values(source, platforms);
+    let mut found = Vec::new();
+    for entry in &expanded.included {
+        match entry {
+            carve::includes::AcceptedInclude::Carve {
+                file,
+                included_by,
+                source: content,
+                first_line,
+                selected_lines,
+            } => {
+                let text = text_of(Some(file));
+                for mut finding in lint_values(content, platforms) {
+                    let line = finding["line"].as_u64().unwrap_or(1) as usize + first_line;
+                    if selected_lines.is_some_and(|(start, end)| line < start || line > end) {
+                        continue;
+                    }
+                    let column = finding["column"].as_u64().unwrap_or(1) as usize;
+                    let length = finding["end"].as_u64().unwrap_or(0)
+                        - finding["start"].as_u64().unwrap_or(0);
+                    let start = text.as_deref().map_or(0, |text| {
+                        let (start, _) = directive_span(text, line, column);
+                        start
+                    });
+                    finding["line"] = json!(line);
+                    finding["start"] = json!(start);
+                    finding["end"] = json!(start as u64 + length);
+                    if let Some(path) = contained(file) {
+                        finding["file"] = Value::String(path);
+                    }
+                    finding["includedBy"] = sites(included_by);
+                    found.push(finding);
+                }
+            }
+            carve::includes::AcceptedInclude::Code {
+                file, included_by, ..
+            } => {
+                let text = text_of(Some(file));
+                let (matching, rest): (Vec<_>, Vec<_>) =
+                    delimited.into_iter().partition(|finding| {
+                        finding.file.as_deref() == Some(file.as_str())
+                            && &finding.included_by == included_by
+                    });
+                delimited = rest;
+                for finding in matching {
+                    let (start, end) = text.as_deref().map_or((0, 0), |text| {
+                        (
+                            directive_span(text, finding.line, 1).0,
+                            directive_span(text, finding.line + 1, 1).0,
+                        )
+                    });
+                    let mut value = json!({
+                        "line": finding.line, "column": finding.column, "rule": finding.rule,
+                        "message": finding.message, "start": start, "end": end,
+                        "resourceUri": format!("carve://lint-rules/{}", finding.rule),
+                    });
+                    if let Some(path) = contained(file) {
+                        value["file"] = Value::String(path);
+                    }
+                    value["includedBy"] = sites(included_by);
+                    found.push(value);
+                }
+            }
+        }
+    }
+    for warning in &expanded.warnings {
+        if matches!(
+            warning.rule.as_str(),
+            "include-id-rename" | "include-footnote-rename" | "include-heading-clamp"
+        ) {
+            continue;
+        }
+        let nested = !warning.included_by.is_empty();
+        let file = warning.file.as_deref().filter(|_| nested);
+        let (start, end) = text_of(file).map_or((0, 0), |text| {
+            directive_span(&text, warning.line, warning.column)
+        });
+        let mut value = json!({
+            "line": warning.line, "column": warning.column, "rule": warning.rule,
+            "message": warning.message, "start": start, "end": end,
+            "resourceUri": format!("carve://lint-rules/{}", warning.rule),
+        });
+        if nested {
+            if let Some(path) = file.and_then(&contained) {
+                value["file"] = Value::String(path);
+            }
+            value["includedBy"] = sites(&warning.included_by);
+        }
+        found.push(value);
+    }
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|finding| {
+        finding.get("includedBy").is_none()
+            || seen.insert((
+                finding.get("file").cloned(),
+                finding["line"].clone(),
+                finding["column"].clone(),
+                finding["rule"].clone(),
+            ))
+    });
+    warnings.extend(found);
+    Ok(warnings)
 }
 
 /// Rewrite every `pos.file` to its root-relative path, dropping one outside the root.
@@ -2256,8 +2607,9 @@ fn prepare_includes(
         "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
     )?;
     let (root, source_path) = workspace.include_scope(root_index, source_path)?;
-    let resolver = PolicyResolver::new(&root)
-        .map_err(|_| "The configured workspace root cannot be used for includes.".to_owned())?;
+    let resolver =
+        PolicyResolver::admitting_code(&root, source, options, source_path.as_deref())
+            .map_err(|_| "The configured workspace root cannot be used for includes.".to_owned())?;
     let mut include_options = carve::IncludeOptions::new().with_resolver(&resolver);
     if let Some(source_path) = source_path {
         include_options = include_options.with_source_path(source_path);
@@ -2293,11 +2645,16 @@ fn include_report(
     };
     json!({
         "rootIndex": root_index,
-        "warnings": prepared.warnings.iter().map(|warning| json!({
-            "rule": warning.rule, "message": warning.message,
-            "line": warning.line, "column": warning.column,
-            "file": warning.file.as_deref().and_then(&contained),
-        })).collect::<Vec<_>>(),
+        "warnings": prepared.warnings.iter().map(|warning| {
+            let mut value = json!({
+                "rule": warning.rule, "message": warning.message,
+                "line": warning.line, "column": warning.column,
+            });
+            if let Some(file) = warning.file.as_deref().and_then(&contained) {
+                value["file"] = Value::String(file);
+            }
+            value
+        }).collect::<Vec<_>>(),
         "dependencies": prepared.dependencies.iter().filter_map(|dependency| contained(&dependency.id).map(|path| json!({
             "path": path, "resolved": dependency.resolved,
         }))).collect::<Vec<_>>(),
@@ -2400,7 +2757,7 @@ impl CarveServer {
             }
         }
         if workspace.is_none() {
-            for name in ["carve_render", "carve_parse"] {
+            for name in ["carve_render", "carve_parse", "carve_lint"] {
                 if let Some(route) = tools.map.get_mut(name)
                     && let Some(Value::Object(properties)) =
                         std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
@@ -3021,7 +3378,16 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
-        let warnings = lint_values(&input.source, &input.platforms);
+        let warnings = match lint_values_with_includes(
+            self.workspace.as_ref(),
+            input.include_root_index,
+            input.source_path.as_deref(),
+            &input.source,
+            &input.platforms,
+        ) {
+            Ok(warnings) => warnings,
+            Err(error) => return Self::error(error),
+        };
         Self::output(
             json!({"valid": warnings.is_empty(), "warningCount": warnings.len(), "warnings": warnings}),
         )
@@ -4742,6 +5108,110 @@ mod tests {
                 .unwrap()
                 .contains("Glossary text.")
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn code_include_root() -> (std::path::PathBuf, CarveServer) {
+        let root = include_test_root();
+        for (path, content) in [
+            (
+                "src/server.js",
+                "const hidden = 1;\n// #region start\nexport const shown = 2;\n// #endregion\n",
+            ),
+            ("node_modules/pkg/index.js", "SECRET=module\n"),
+            (".env", "SECRET=env\n"),
+            ("parts/child.crv", "\u{1F600} See [x][missing].\n"),
+            ("parts/mixed.crv", "{{ ../src/server.js }}\n"),
+        ] {
+            let target = root.join(path);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            std::fs::write(target, content).unwrap();
+        }
+        let workspace = Workspace::new(
+            std::slice::from_ref(&root),
+            false,
+            crate::workspace::ReviewConfiguration::default(),
+        )
+        .unwrap();
+        (root, CarveServer::with_workspace(Some(workspace)))
+    }
+
+    fn rendered_value(server: &CarveServer, source: &str, target: &str) -> String {
+        let rendered = server.render(call(
+            json!({"source": source, "target": target, "includeRootIndex": 0}),
+        ));
+        structured(&rendered)["value"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn code_includes_admit_source_files_and_text_includes_do_not() {
+        let (root, server) = code_include_root();
+        let html = rendered_value(
+            &server,
+            "{{ src/server.js @region:start @code:js }}\n",
+            "html",
+        );
+        assert!(
+            html.contains("<code class=\"language-js\">export const shown = 2;"),
+            "{html}"
+        );
+        assert!(!html.contains("hidden"), "{html}");
+        let text = rendered_value(&server, "{{ src/server.js }}\n", "plain");
+        assert!(text.contains("{{ src/server.js }}"), "{text}");
+        let both = rendered_value(
+            &server,
+            "{{ src/server.js @code:js }}\n\n{{ src/server.js }}\n",
+            "plain",
+        );
+        assert!(!both.contains("shown"), "{both}");
+        let nested = rendered_value(&server, "{{ parts/mixed.crv }}\n", "plain");
+        assert!(nested.contains("{{ ../src/server.js }}"), "{nested}");
+        for path in [".env", "node_modules/pkg/index.js"] {
+            let value = rendered_value(&server, &format!("{{{{ {path} @code }}}}\n"), "plain");
+            assert!(!value.contains("SECRET"), "{path}: {value}");
+        }
+        let parsed = server.parse(call(json!({
+            "source": "{{ src/server.js @region:start @code:js }}\n", "includeRootIndex": 0,
+        })));
+        assert!(
+            structured(&parsed)
+                .to_string()
+                .contains("export const shown = 2;")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lint_reports_findings_inside_included_files() {
+        let (root, server) = code_include_root();
+        let linted = server.lint(call(json!({
+            "source": "{{ parts/child.crv }}\n\n{{ absent.crv }}\n",
+            "includeRootIndex": 0, "sourcePath": "index.crv",
+        })));
+        let value = structured(&linted);
+        let warnings = value["warnings"].as_array().unwrap();
+        let child = warnings
+            .iter()
+            .find(|warning| warning["rule"] == "unresolved-reference-link")
+            .unwrap_or_else(|| panic!("{value}"));
+        assert_eq!(child["file"], "parts/child.crv");
+        assert_eq!(child["line"], 1);
+        assert_eq!(child["start"], 7);
+        assert_eq!(child["end"], 19);
+        assert_eq!(
+            child["includedBy"],
+            json!([{"file": "index.crv", "line": 1, "column": 1, "start": 0, "end": 21}])
+        );
+        assert!(warnings.iter().any(
+            |warning| warning["rule"] == "include-unresolved" && warning.get("file").is_none()
+        ));
+        assert!(
+            !value
+                .to_string()
+                .contains(&root.to_string_lossy().into_owned())
+        );
+        let literal = server.lint(call(json!({"source": "{{ parts/child.crv }}\n"})));
+        assert_eq!(structured(&literal)["warnings"], json!([]));
         std::fs::remove_dir_all(root).unwrap();
     }
 

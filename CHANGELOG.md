@@ -8,11 +8,14 @@ All notable changes to this project are documented in this file.
 
 - Every lint rule in the spec's validation table has a `carve://lint-rules/<rule>` resource on both servers, so a warning for an include rule, `continuation-marker-refused` or another id added in this wave no longer points at a missing resource (#113, #112).
 - The Rust server's Markdown `carve_migrate` matches carve-js 0.1.13: trailing blank lines end in one newline, and with no dialect option set, input holding `^[...]` or `[text]{...}` gets a per-construct assessment instead of `fidelity-unverified` (#112).
+- The Rust server's GitHub `platform-mention-token` check no longer counts a trailing period as part of the name, and its include warnings omit `file` instead of sending `null`, matching the Node server (#116).
 
 ### Improvements
 
 - `carve_format` takes an `alignTables` option on both servers and returns the aligned table layout (#111, #112).
 - Update to carve-js 0.1.13 and carve-lang 0.1.11 for Carve 0.1.11 syntax and lint rules (#112).
+- Code-block includes accept source files of any extension, so `{{ src/server.js @region:start @code:js }}` renders through `carve_render` and `carve_parse`; text includes keep the document policy (#114, #116).
+- `carve_lint` takes `includeRootIndex` and `sourcePath` and lints included content, reporting each finding with the included file's path and the directive chain that reached it (#115, #116).
 
 ## 0.1.9 - 2026-10-18
 

@@ -32,7 +32,7 @@ import {
 } from '@markup-carve/carve';
 import { AST_CHILD_FIELDS } from './ast-fields.js';
 import { createSourcePatch } from './source-patch.js';
-import { expandDocument, type IncludeReport, type IncludeScope } from './includes.js';
+import { expandDocument, lintWithIncludes, type IncludedLintWarning, type IncludeReport, type IncludeScope } from './includes.js';
 
 export const MAX_SOURCE_BYTES = 1_000_000;
 export const MAX_AST_PATCH_OPERATIONS = 1_000;
@@ -103,9 +103,11 @@ export function validateSource(source: string): void {
   }
 }
 
-export function lint(source: string, platforms: LintPlatform[] = []) {
+export function lint(source: string, platforms: LintPlatform[] = [], scope?: IncludeScope) {
   validateSource(source);
-  const warnings = lintCarve(source, { platforms });
+  const warnings: IncludedLintWarning[] = scope
+    ? lintWithIncludes(source, scope, (text, includes) => lintCarve(text, { platforms, includes }))
+    : lintCarve(source, { platforms });
   return { valid: warnings.length === 0, warningCount: warnings.length, warnings };
 }
 
