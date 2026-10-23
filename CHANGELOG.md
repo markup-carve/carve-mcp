@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.10 - 2026-10-23
+
+### Fixes
+
+- Every lint rule in the spec's validation table has a `carve://lint-rules/<rule>` resource on both servers, so a warning for an include rule, `continuation-marker-refused` or another id added in this wave no longer points at a missing resource (#113, #112).
+
+### Improvements
+
+- `carve_format` takes an `alignTables` option on both servers and returns the aligned table layout (#111, #112).
+- Update to carve-js 0.1.13 and carve-lang 0.1.11 for Carve 0.1.11 syntax and lint rules (#112).
+
 ## 0.1.9 - 2026-10-18
 
 ### Fixes

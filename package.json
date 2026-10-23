@@ -1,6 +1,6 @@
 {
   "name": "@markup-carve/carve-mcp",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Model Context Protocol server for authoring and converting Carve documents",
   "mcpName": "io.github.markup-carve/carve-mcp",
   "type": "module",
@@ -48,7 +48,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "git+https://github.com/markup-carve/carve-js.git#8ba8a84aa3dba46d619f56617d031d3593b6242f",
+    "@markup-carve/carve": "0.1.13",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "diff": "^8.0.4",

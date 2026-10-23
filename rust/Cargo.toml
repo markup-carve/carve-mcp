@@ -1,6 +1,6 @@
 [package]
 name = "carve-mcp"
-version = "0.1.9"
+version = "0.1.10"
 publish = false
 edition = "2024"
 rust-version = "1.88"
@@ -28,7 +28,3 @@ similar = "2.7.0"
 [[bin]]
 name = "carve-mcp-rs"
 path = "src/main.rs"
-
-# Draft until the wave releases: build against carve-rs main. At release delete this table; carve-lang = "=0.1.11" and CARVE_ENGINE_VERSION are already set.
-[patch.crates-io]
-carve-lang = { git = "https://github.com/markup-carve/carve-rs.git", rev = "64492bb209e11ab51d699b4bb89b015fa4a71a69" }

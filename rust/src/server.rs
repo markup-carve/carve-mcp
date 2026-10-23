@@ -2101,11 +2101,9 @@ fn format_carve_checked_with(
         return Err(writer_depth_error());
     }
     if align_tables {
-        let value = carve::try_to_carve_with_options(
-            source,
-            &Options::default().with_align_tables(true),
-        )
-        .map_err(|error| error.to_string())?;
+        let value =
+            carve::try_to_carve_with_options(source, &Options::default().with_align_tables(true))
+                .map_err(|error| error.to_string())?;
         return Ok(carve::RenderResult {
             value,
             losses: Vec::new(),
@@ -4908,7 +4906,10 @@ mod tests {
         let source = "| a | bb |\n| ccc | d |\n";
         let aligned = server.format(call(json!({"source": source, "alignTables": true})));
         assert_ne!(aligned.is_error, Some(true));
-        assert_eq!(structured(&aligned), json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false}));
+        assert_eq!(
+            structured(&aligned),
+            json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false})
+        );
         let canonical = server.format(call(json!({"source": source, "alignTables": false})));
         assert_eq!(structured(&canonical)["value"], json!(source));
     }
@@ -4919,7 +4920,10 @@ mod tests {
         let source = "| a\\ b | x |\n| ccc | `y|z` |\n";
         let aligned = server.format(call(json!({"source": source, "alignTables": true})));
         assert_ne!(aligned.is_error, Some(true));
-        assert_eq!(structured(&aligned)["value"], json!("| a\\ b | x     |\n| ccc  | `y|z` |\n"));
+        assert_eq!(
+            structured(&aligned)["value"],
+            json!("| a\\ b | x     |\n| ccc  | `y|z` |\n")
+        );
     }
 
     #[test]
