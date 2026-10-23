@@ -59,7 +59,7 @@ jobs:
             archive: carve-mcp-rs-x86_64-pc-windows-msvc.zip
             binary: carve-mcp-rs.exe
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || github.sha }}
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" -DestinationPath
           "${{ matrix.archive }}"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -109,7 +109,7 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
 
       - name: Save the verified native archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.target }}
           path: ${{ matrix.archive }}
@@ -119,9 +119,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -238,10 +238,10 @@ jobs:
     timeout-minutes: 35
     environment: release
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || github.sha }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -282,7 +282,7 @@ jobs:
           docker logs "$container"
           exit 1
         if: github.event_name == 'workflow_dispatch' && inputs.version != ''
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: native-*
           merge-multiple: true
@@ -485,11 +485,11 @@ jobs:
       - name: Skip current-only artifact for a legacy release
         if: matrix.current_only && needs.release-contract.outputs.full != 'true'
         run: echo 'This legacy release predates the expanded Linux artifact set.'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
         with:
           ref: main
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: ${{ !matrix.current_only || needs.release-contract.outputs.full == 'true' }}
         with:
           node-version: 24
@@ -548,10 +548,10 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
