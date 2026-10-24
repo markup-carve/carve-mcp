@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.11 - 2026-10-24
+
+MCP rule resources now match the released Carve specification.
+
+### Fixes
+
+- Rule resource links resolve for the current spec validation rules (#119).
+
+**Full Changelog**: https://github.com/markup-carve/carve-mcp/compare/0.1.10...0.1.11
+
 ## 0.1.10 - 2026-10-23
 
 ### Fixes
