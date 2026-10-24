@@ -71,8 +71,8 @@ export function ruleIndexMarkdown(): string {
   );
   return `# Normative Carve rule index
 
-This is an explicitly pinned development snapshot of the Carve ${SPEC_VERSION}
-language contract from markup-carve/carve commit \`${RULE_SOURCE_COMMIT}\`.
+This index is pinned to the released Carve ${SPEC_VERSION}
+language contract at markup-carve/carve commit \`${RULE_SOURCE_COMMIT}\`.
 The server engine is @markup-carve/carve ${LIB_VERSION}; those version lines are
 independent.
 

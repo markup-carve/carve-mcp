@@ -131,7 +131,7 @@ pub fn rule_index_markdown() -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "# Normative Carve rule index\n\nThis is an explicitly pinned development snapshot of the Carve {}\nlanguage contract from markup-carve/carve commit `{}`.\nThe server engine is carve-lang {}; those version lines are independent.\n\nThe categories below are different views of one language contract; they are\nnot optional conformance levels.\n\n{}\n\nRead `carve://rules/{{ruleId}}` for a stable normative `CARVE-*` rule's title\nand category. Linter names such as `unclosed-container-fence` belong to a\nseparate diagnostic namespace and are not normative rule IDs.\nThe complete human-readable index is at {DOCS_BASE}/rules/.\n",
+        "# Normative Carve rule index\n\nThis index is pinned to the released Carve {}\nlanguage contract at markup-carve/carve commit `{}`.\nThe server engine is carve-lang {}; those version lines are independent.\n\nThe categories below are different views of one language contract; they are\nnot optional conformance levels.\n\n{}\n\nRead `carve://rules/{{ruleId}}` for a stable normative `CARVE-*` rule's title\nand category. Linter names such as `unclosed-container-fence` belong to a\nseparate diagnostic namespace and are not normative rule IDs.\nThe complete human-readable index is at {DOCS_BASE}/rules/.\n",
         carve::SPEC_VERSION,
         rules.source_commit,
         env!("CARVE_LANG_VERSION"),
