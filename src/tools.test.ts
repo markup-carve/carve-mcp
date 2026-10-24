@@ -320,7 +320,7 @@ describe('table preservation in compatibility results', () => {
     expect(result).toMatchObject({ receiptVersion: 1, source: { format: 'carve', sha256: sha256Text(source) }, versions: { engine: LIB_VERSION, mcp: mcpVersion } });
     expect(result.compatible).toBe(false);
     expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
-    expect(result.targets[1]).toMatchObject({ lossCount: 2, preservation: { totalDiagnostics: 3, complete: false } });
+    expect(result.targets[1]).toMatchObject({ lossCount: 3, preservation: { totalDiagnostics: 3, complete: false } });
     expect(result.targets[3]?.assessmentScope.finalArtifact).toContain('HTML stage only');
   });
 });

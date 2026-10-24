@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.12 - 2026-10-24
+
+The MCP servers now use the published Carve 0.1.12 engines for parsing, rendering, linting, and Markdown export.
+
+### Improvements
+
+- Node and Rust tools follow the current table span, continuation marker, attribute, and Markdown loss behavior (markup-carve/carve#3445).
+
+**Full Changelog**: https://github.com/markup-carve/carve-mcp/compare/0.1.11...0.1.12
+
 ## 0.1.11 - 2026-10-24
 
 MCP rule resources now match the released Carve specification.
