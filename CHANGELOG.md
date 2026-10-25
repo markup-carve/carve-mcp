@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.12 - 2026-10-25
+
+Both MCP servers now use the published Carve engines with progress and blocked task states.
+
+### Fixes
+
+- Native compatibility receipts report the installed Carve engine version (#123).
+
+### Improvements
+
+- Parsing and formatting accept progress `[/]`, blocked `[!]`, and open alias `[_]` task markers (#123).
+
+**Full Changelog**: https://github.com/markup-carve/carve-mcp/compare/0.1.11...0.1.12
+
 ## 0.1.11 - 2026-10-24
 
 MCP rule resources match the released Carve specification, and both servers use the published Carve 0.1.12 engines for parsing, rendering, linting, and Markdown export.
