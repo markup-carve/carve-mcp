@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { carveToAstJson } from '@markup-carve/carve';
-import { assessTablePreservation } from './table-preservation.js';
+import { assessTablePreservation, carveToAstJson } from '@markup-carve/carve';
 
 describe('table-structure-v1 assessment', () => {
   it.each([

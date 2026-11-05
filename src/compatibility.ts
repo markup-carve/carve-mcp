@@ -1,7 +1,6 @@
-import { carveToAstJson, LIB_VERSION } from '@markup-carve/carve';
+import { assessTablePreservation, carveToAstJson, LIB_VERSION } from '@markup-carve/carve';
 import { createRequire } from 'node:module';
 import { sha256Text } from './blocks.js';
-import { assessTablePreservation } from './table-preservation.js';
 import type { LintPlatform } from '@markup-carve/carve';
 import { lint, render, validateSource, type RenderTarget } from './tools.js';
 

@@ -31,3 +31,13 @@ describe('a denied destination scheme', () => {
     expect(verdict('plain')).toStrictEqual({ status: 'compatible', lossCount: 0, codes: [] });
   });
 });
+
+// carve-js #3525: a header's default alignment covers only its starting
+// column, so the cell under a colspan placeholder renders unaligned.
+describe('a header colspan with alignment', () => {
+  it('reports only the merge, not an alignment loss in the covered column', () => {
+    const [result] = compatibilityMatrix('|=> Wide|<|=~ Last|\n|a|b|c|\n', ['markdown']).targets;
+    expect(result!.preservation.diagnostics.map(({ path, field }) => `${path} ${field}`))
+      .toStrictEqual(['/children/0/rows/0/cells/0 colspan']);
+  });
+});

@@ -137,17 +137,16 @@ pub(crate) fn assess(ast: &Value, target: &str) -> Value {
                 for row in rows.iter().take(header_end) {
                     if let Some(cells) = row["cells"].as_array() {
                         for (c, cell) in cells.iter().enumerate() {
-                            if cell.get("span").is_some() {
+                            if cell["header"] != true
+                                || cell.get("span").is_some_and(|span| span != "colspan")
+                            {
                                 continue;
                             }
                             if let Some(align) = cell.get("align") {
-                                let extent = cell["colspan"].as_u64().unwrap_or(1) as usize;
-                                if column_aligns.len() < c + extent {
-                                    column_aligns.resize(c + extent, None);
+                                if column_aligns.len() <= c {
+                                    column_aligns.resize(c + 1, None);
                                 }
-                                for slot in &mut column_aligns[c..c + extent] {
-                                    *slot = Some(align);
-                                }
+                                column_aligns[c] = Some(align);
                             }
                         }
                     }
