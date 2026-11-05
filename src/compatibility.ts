@@ -37,7 +37,8 @@ export function compatibilityMatrix(source: string, targets: CompatibilityTarget
     return { target, renderTarget: profile.render, status, note: profile.note,
       preservation,
       assessmentScope: { renderLosses: 'Only events in the engine render-loss schema.', tablePreservation: 'Declared table fields only; a clean report is not a general preservation guarantee.', finalArtifact: target === 'pdf' ? 'Not assessed: HTML stage only.' : 'Host behavior is not assessed.' },
-      warningCount: diagnosed.warningCount, warnings: diagnosed.warnings,
+      warningCount: diagnosed.warningCount,
+      warnings: diagnosed.warnings.map((warning) => ({ ...warning, resourceUri: `carve://lint-rules/${warning.rule}` })),
       lossCount: rendered.totalLosses, losses: rendered.losses, lossesTruncated: rendered.truncated, suggestions };
   });
   return { receiptVersion: 1, source: { format: 'carve' as const, sha256: sha256Text(source) },
