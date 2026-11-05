@@ -67,6 +67,7 @@ const calls = [
   ['carve_check_targets', { source: '|=> A |= B |\n|=< C |= D |\n| 1 | 2 |\n', targets:['markdown'] }],
   ['carve_check_targets', { source: '|= A |= B |\n| 1 | 2 |\n', targets:['ansi'] }],
   ['carve_check_targets', { source: '|=> Wide|<|=~ Last|\n|a|b|c|\n', targets:['markdown'] }],
+  ['carve_check_targets', { source: 'é\n:::', targets:['markdown', 'github'] }],
 
   ['carve_format', { source: '# Hello' }],
   ['carve_render', { source: '# Héllo', target: 'html', preset: 'portable' }],

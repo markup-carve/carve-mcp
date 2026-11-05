@@ -41,3 +41,11 @@ describe('a header colspan with alignment', () => {
       .toStrictEqual(['/children/0/rows/0/cells/0 colspan']);
   });
 });
+
+describe('target warnings', () => {
+  it('link each warning to its lint rule resource, as carve_lint does', () => {
+    const [result] = compatibilityMatrix('[x](#nope)\n', ['markdown']).targets;
+    expect(result!.warnings).toEqual([expect.objectContaining({
+      rule: 'broken-fragment-link', resourceUri: 'carve://lint-rules/broken-fragment-link' })]);
+  });
+});
