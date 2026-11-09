@@ -31,6 +31,14 @@ export function assertRegistryRustDependencies(manifest, lock) {
   }
 }
 
+export function assertExactEnginePin(manifest, lock) {
+  const locked = cargoLockPackages(lock).find(({ name }) => name === 'carve-lang');
+  if (!locked) throw new Error('Cargo.lock has no carve-lang package.');
+  if (!new RegExp(`^carve-lang = "=${locked.version.replaceAll('.', '\\.')}"`, 'm').test(manifest)) {
+    throw new Error(`Rust release must pin carve-lang = "=${locked.version}" in Cargo.toml.`);
+  }
+}
+
 export function immutableGithubPin(source) {
   if (!source.startsWith('git+')) throw new Error('Rust engine source is not a registry or Git source.');
   const hashAt = source.lastIndexOf('#');

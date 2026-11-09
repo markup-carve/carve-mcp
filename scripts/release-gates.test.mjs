@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cargoPackage, cargoLockPackages, assertRegistryRustDependencies, immutableGithubPin } from './rust-release-contract.mjs';
+import { cargoPackage, cargoLockPackages, assertRegistryRustDependencies, assertExactEnginePin, immutableGithubPin } from './rust-release-contract.mjs';
 import { validateBudgetScenario, assertBudgetToolNames } from './schema-budget-contract.mjs';
 
 const sha = 'a'.repeat(40);
@@ -34,6 +34,13 @@ describe('Rust release gates', () => {
   });
   it('rejects alternate registries rather than comparing their versions with crates.io', () => {
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', 'registry+https://example.com/index'))).toThrow('alternate registry');
+  });
+  it('requires the exact Cargo.toml pin of the locked engine', () => {
+    const lock = root + entry('carve-lang', 'registry+https://github.com/rust-lang/crates.io-index');
+    expect(() => assertExactEnginePin(`${manifest}carve-lang = "=0.1.7"\n`, lock)).not.toThrow();
+    expect(() => assertExactEnginePin(`${manifest}carve-lang = "0.1.7"\n`, lock)).toThrow('carve-lang = "=0.1.7"');
+    expect(() => assertExactEnginePin(`${manifest}carve-lang = "=0.1.70"\n`, lock)).toThrow('carve-lang = "=0.1.7"');
+    expect(() => assertExactEnginePin(`${manifest}carve-lang = { git = "https://github.com/markup-carve/carve-rs", rev = "${sha}" }\n`, lock)).toThrow('carve-lang = "=0.1.7"');
   });
   it('accepts an explicit immutable Git commit for ancestry verification', () => {
     expect(immutableGithubPin(`git+https://github.com/markup-carve/carve-rs.git?rev=${sha}#${sha}`))

@@ -723,12 +723,24 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // A git pin of a merged engine commit is allowed outside a release;
+    // scripts/release-check.mjs requires the exact registry pin at publish time.
     #[test]
-    fn reported_engine_version_matches_the_exact_cargo_pin() {
-        assert!(
-            include_str!("../Cargo.toml")
-                .contains(&format!("carve-lang = \"={CARVE_ENGINE_VERSION}\""))
-        );
+    fn reported_engine_version_matches_the_locked_engine() {
+        let lock = include_str!("../Cargo.lock");
+        let block = lock
+            .split("[[package]]")
+            .find(|block| block.contains("\nname = \"carve-lang\"\n"))
+            .expect("Cargo.lock has a carve-lang package");
+        assert!(block.contains(&format!("\nversion = \"{CARVE_ENGINE_VERSION}\"\n")));
+        let manifest = include_str!("../Cargo.toml");
+        let line = manifest
+            .lines()
+            .find(|line| line.starts_with("carve-lang = "))
+            .expect("Cargo.toml declares carve-lang");
+        if !line.contains("git = ") {
+            assert_eq!(line, format!("carve-lang = \"={CARVE_ENGINE_VERSION}\""));
+        }
     }
 
     fn temporary_root() -> PathBuf {

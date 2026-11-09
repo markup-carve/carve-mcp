@@ -59,7 +59,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: node scripts/check-rust-package.mjs
+      # check-rust-package.mjs runs in release.yml: a git pin of a merged engine
+      # commit is allowed here and refused only at publish time.
       - run: npm run check:rust-resources
       - run: npm run test:rust-conformance
 

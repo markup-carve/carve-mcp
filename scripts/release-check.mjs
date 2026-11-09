@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { DOCUMENT_TOOLS } from '../dist/tool-profile.js';
 import { describeContractDrift } from './release-contract.mjs';
-import { cargoPackage, assertRegistryRustDependencies } from './rust-release-contract.mjs';
+import { cargoPackage, assertRegistryRustDependencies, assertExactEnginePin } from './rust-release-contract.mjs';
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const registry = JSON.parse(await readFile(new URL('../server.json', import.meta.url), 'utf8'));
@@ -26,9 +26,11 @@ if (releaseRun) {
   if (nonRegistryDependencies.length > 0) {
     throw new Error(`Release dependencies must use registry versions: ${nonRegistryDependencies.join(', ')}.`);
   }
-
+  // Main and pull requests may pin a merged engine commit; only a publish run
+  // requires the released crates.
+  assertRegistryRustDependencies(cargo, cargoLock);
+  assertExactEnginePin(cargo, cargoLock);
 }
-assertRegistryRustDependencies(cargo, cargoLock);
 if (releaseVersion && releaseVersion !== pkg.version) {
   throw new Error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${pkg.version}.`);
 }

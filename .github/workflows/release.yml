@@ -256,6 +256,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
           REQUIRE_RELEASE_TAG: "1"
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Verify the Rust package resolves from crates.io
+        run: node scripts/check-rust-package.mjs
       - name: Verify prepared release notes before tagging
         env:
           GH_TOKEN: ${{ github.token }}
