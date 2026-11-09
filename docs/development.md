@@ -450,6 +450,14 @@ manually with `npm run check:engine-current`. When either engine moves, update
 both pins as needed and rerun the Node, Rust, and cross-engine conformance tests
 below before accepting the new versions.
 
+Between releases, `main` may pin a merged engine commit instead of a release:
+`github:markup-carve/carve-js#<sha>` in `package.json` and a `git` + `rev`
+dependency for `carve-lang` in `rust/Cargo.toml`. Pull request CI accepts those
+pins, and still requires crates.io sources for every other Rust dependency. The publish job in `release.yml` refuses them: `release:check` with
+`REQUIRE_RELEASE_TAG=1` requires registry versions and the exact
+`carve-lang = "=X.Y.Z"` pin, and `scripts/check-rust-package.mjs` requires
+crates.io sources before `cargo package`.
+
 ```sh
 npm run check
 npm test

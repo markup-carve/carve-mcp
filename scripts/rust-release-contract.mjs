@@ -21,13 +21,31 @@ export function cargoLockPackages(lock) {
   });
 }
 
-export function assertRegistryRustDependencies(manifest, lock) {
+// allowEngineGit admits only an immutable GitHub commit of carve-lang, which
+// main may carry between releases; publish runs never pass it.
+export function assertRegistryRustDependencies(manifest, lock, { allowEngineGit = false } = {}) {
   const root = cargoPackage(manifest);
+  const enginePin = (name, source) => {
+    if (!allowEngineGit || name !== 'carve-lang' || !source?.startsWith('git+')) return false;
+    if (immutableGithubPin(source).repository !== 'markup-carve/carve-rs') {
+      throw new Error('Rust engine Git source must be markup-carve/carve-rs.');
+    }
+    return true;
+  };
   const nonRegistry = cargoLockPackages(lock)
-    .filter(({ name, source }) => name !== root.name && source !== CRATES_IO_SOURCE)
+    .filter(({ name, source }) => name !== root.name && source !== CRATES_IO_SOURCE && !enginePin(name, source))
     .map(({ name, source }) => `${name} (${source?.startsWith('git+') ? 'git' : source ? 'alternate registry' : 'path'})`);
   if (nonRegistry.length > 0) {
     throw new Error(`Rust release dependencies must use crates.io registry versions: ${nonRegistry.join(', ')}.`);
+  }
+}
+
+export function assertExactEnginePin(manifest, lock) {
+  const locked = cargoLockPackages(lock).find(({ name }) => name === 'carve-lang');
+  if (!locked) throw new Error('Cargo.lock has no carve-lang package.');
+  const dependencies = /^\[dependencies\][ \t]*(?:#.*)?\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(manifest)?.[1] ?? '';
+  if (!new RegExp(`^carve-lang = "=${locked.version.replaceAll('.', '\\.')}"`, 'm').test(dependencies)) {
+    throw new Error(`Rust release must pin carve-lang = "=${locked.version}" in Cargo.toml.`);
   }
 }
 

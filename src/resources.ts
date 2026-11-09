@@ -50,7 +50,8 @@ Use one more colon for each nested container.
 ## Tables and captions
 
 Pipe tables need no delimiter row. Attach \`=\` to the pipe, then add a space,
-to make a header cell: \`|= Name |= Value |\`. Put a line beginning with \`^\`
+to make a header cell: \`|= Name |= Value |\`. Alignment goes in braces glued
+to the marker: \`|={>} Price |\` or \`|{~} 12 |\`. Put a line beginning with \`^\`
 after an image, quote, table, or code block to add a caption.
 
 ## Good defaults

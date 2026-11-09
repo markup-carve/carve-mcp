@@ -67,9 +67,10 @@ function schemaFixture(maximum = 10) {
   return directory;
 }
 function run(directory, script, environment = {}) {
-  const env = { ...process.env, ...environment };
+  const env = { ...process.env };
   delete env.REQUIRE_RELEASE_TAG;
   delete env.RELEASE_TAG;
+  Object.assign(env, environment);
   return spawnSync(process.execPath, ['--import', join(directory, 'stub.mjs'), join(directory, 'scripts', script)], {
     encoding: 'utf8', env, timeout: 10000,
   });
@@ -120,13 +121,67 @@ describe('release gate subprocess regressions', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('no published carve-lang version');
   });
-  it.each([undefined, `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`])('rejects non-registry dependencies outside tag-time runs: %s', (source) => {
+  function releaseRun(directory) {
+    const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+    pkg.dependencies['@markup-carve/carve'] = '0.1.9';
+    writeFileSync(join(directory, 'package.json'), JSON.stringify(pkg));
+    return { REQUIRE_RELEASE_TAG: '1', RELEASE_TAG: `v${pkg.version}` };
+  }
+  it.each([undefined, `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`])('rejects non-registry Rust dependencies in a release run: %s', (source) => {
     const directory = fixture();
     writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', source));
-    const result = run(directory, 'release-check.mjs');
+    const result = run(directory, 'release-check.mjs', releaseRun(directory));
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Rust release dependencies must use crates.io registry versions');
     expect(result.stderr).not.toContain('REACHED_EXTERNAL_COMMAND');
+  });
+  it.each([undefined, `git+https://github.com/rust-lang/regex?rev=${sha}#${sha}`])('rejects a non-registry non-engine Rust dependency outside a release run: %s', (source) => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry) + entry('regex', source));
+    const result = run(directory, 'release-check.mjs');
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Rust release dependencies must use crates.io registry versions: regex');
+    expect(result.stderr).not.toContain('REACHED_EXTERNAL_COMMAND');
+  });
+  it('allows a git engine pin outside a release run', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`));
+    const result = run(directory, 'release-check.mjs');
+    expect(result.stderr).not.toContain('crates.io registry versions');
+    expect(result.stderr).toContain('REACHED_EXTERNAL_COMMAND');
+  });
+  it('rejects a registry engine without the exact Cargo.toml pin in a release run', () => {
+    const directory = fixture();
+    const manifest = readFileSync(join(directory, 'rust', 'Cargo.toml'), 'utf8')
+      .replace(/^carve-lang = .*$/m, 'carve-lang = "0.1.7"');
+    writeFileSync(join(directory, 'rust', 'Cargo.toml'), manifest);
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry));
+    const result = run(directory, 'release-check.mjs', releaseRun(directory));
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('carve-lang = "=0.1.7"');
+  });
+  it('a release run rejects the committed manifests whenever they carry a git pin', () => {
+    const directory = fixture();
+    copyFileSync(join(repository, 'rust', 'Cargo.lock'), join(directory, 'rust', 'Cargo.lock'));
+    writeFileSync(join(directory, 'package.json'), readFileSync(join(repository, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
+    const result = run(directory, 'release-check.mjs', { REQUIRE_RELEASE_TAG: '1', RELEASE_TAG: `v${pkg.version}` });
+    const gitPinned = Object.values(pkg.dependencies).some((spec) => /^(github:|git\+|git:)/.test(spec))
+      || /^carve-lang = \{[^}]*git = /m.test(readFileSync(join(repository, 'rust', 'Cargo.toml'), 'utf8'));
+    if (gitPinned) {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/must use (crates\.io )?registry versions/);
+    } else {
+      expect(result.stderr).not.toMatch(/must use (crates\.io )?registry versions/);
+    }
+  });
+  it('only the publish workflow runs the registry gates', () => {
+    const release = readFileSync(join(repository, '.github', 'workflows', 'release.yml'), 'utf8');
+    const ci = readFileSync(join(repository, '.github', 'workflows', 'ci.yml'), 'utf8');
+    expect(release).toMatch(/run: npm run release:check\n\s+env:\n(?:\s+.*\n)*?\s+REQUIRE_RELEASE_TAG: "1"/);
+    expect(release).toContain('run: node scripts/check-rust-package.mjs');
+    expect(ci).not.toContain('run: node scripts/check-rust-package.mjs');
+    expect(ci).not.toContain('REQUIRE_RELEASE_TAG');
   });
   it('rejects a package-version mismatch even when a dependency matches npm', () => {
     const directory = fixture();
@@ -142,6 +197,30 @@ describe('release gate subprocess regressions', () => {
     const result = run(directory, 'release-check.mjs');
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Rust and npm package versions must match');
+  });
+  const jsLock = (version, resolved) => JSON.stringify({ packages: { 'node_modules/@markup-carve/carve': { version, resolved } } });
+  const jsGit = `git+ssh://git@github.com/markup-carve/carve-js.git#${sha}`;
+  it('accepts a JavaScript git pin ahead of the newest release and checks it is on main', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'package-lock.json'), jsLock('0.1.10', jsGit));
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry));
+    const result = run(directory, 'check-engine-current.mjs');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`ANCESTRY_CHECK https://api.github.com/repos/markup-carve/carve-js/compare/main...${sha}`);
+  });
+  it.each([['0.1.8', jsGit], ['0.1.10', undefined], ['0.1.10', 'git+ssh://git@github.com/markup-carve/carve-js.git#main']])('rejects a stale or mutable JavaScript engine pin: %s %s', (version, resolved) => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'package-lock.json'), jsLock(version, resolved));
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry));
+    const result = run(directory, 'check-engine-current.mjs');
+    expect(result.status).not.toBe(0);
+  });
+  it('rejects a Rust git pin that a release has overtaken', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`));
+    const result = run(directory, 'check-engine-current.mjs', { GATE_REGISTRY: '{"crate":{"default_version":"0.1.8"}}' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('carve-lang 0.1.8 is published');
   });
   it('rejects a path engine source in the current-engine gate', () => {
     const directory = fixture();
