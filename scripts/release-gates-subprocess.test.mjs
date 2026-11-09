@@ -190,6 +190,30 @@ describe('release gate subprocess regressions', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('Rust and npm package versions must match');
   });
+  const jsLock = (version, resolved) => JSON.stringify({ packages: { 'node_modules/@markup-carve/carve': { version, resolved } } });
+  const jsGit = `git+ssh://git@github.com/markup-carve/carve-js.git#${sha}`;
+  it('accepts a JavaScript git pin ahead of the newest release and checks it is on main', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'package-lock.json'), jsLock('0.1.10', jsGit));
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry));
+    const result = run(directory, 'check-engine-current.mjs');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`ANCESTRY_CHECK https://api.github.com/repos/markup-carve/carve-js/compare/main...${sha}`);
+  });
+  it.each([['0.1.8', jsGit], ['0.1.10', undefined], ['0.1.10', 'git+ssh://git@github.com/markup-carve/carve-js.git#main']])('rejects a stale or mutable JavaScript engine pin: %s %s', (version, resolved) => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'package-lock.json'), jsLock(version, resolved));
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry));
+    const result = run(directory, 'check-engine-current.mjs');
+    expect(result.status).not.toBe(0);
+  });
+  it('rejects a Rust git pin that a release has overtaken', () => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`));
+    const result = run(directory, 'check-engine-current.mjs', { GATE_REGISTRY: '{"crate":{"default_version":"0.1.8"}}' });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('carve-lang 0.1.8 is published');
+  });
   it('rejects a path engine source in the current-engine gate', () => {
     const directory = fixture();
     writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', undefined));

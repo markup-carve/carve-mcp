@@ -34,7 +34,8 @@ export function assertRegistryRustDependencies(manifest, lock) {
 export function assertExactEnginePin(manifest, lock) {
   const locked = cargoLockPackages(lock).find(({ name }) => name === 'carve-lang');
   if (!locked) throw new Error('Cargo.lock has no carve-lang package.');
-  if (!new RegExp(`^carve-lang = "=${locked.version.replaceAll('.', '\\.')}"`, 'm').test(manifest)) {
+  const dependencies = /^\[dependencies\][ \t]*(?:#.*)?\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(manifest)?.[1] ?? '';
+  if (!new RegExp(`^carve-lang = "=${locked.version.replaceAll('.', '\\.')}"`, 'm').test(dependencies)) {
     throw new Error(`Rust release must pin carve-lang = "=${locked.version}" in Cargo.toml.`);
   }
 }

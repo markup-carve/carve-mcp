@@ -40,6 +40,7 @@ describe('Rust release gates', () => {
     expect(() => assertExactEnginePin(`${manifest}carve-lang = "=0.1.7"\n`, lock)).not.toThrow();
     expect(() => assertExactEnginePin(`${manifest}carve-lang = "0.1.7"\n`, lock)).toThrow('carve-lang = "=0.1.7"');
     expect(() => assertExactEnginePin(`${manifest}carve-lang = "=0.1.70"\n`, lock)).toThrow('carve-lang = "=0.1.7"');
+    expect(() => assertExactEnginePin(`${manifest}carve-lang = "0.1"\n\n[dev-dependencies]\ncarve-lang = "=0.1.7"\n`, lock)).toThrow('carve-lang = "=0.1.7"');
     expect(() => assertExactEnginePin(`${manifest}carve-lang = { git = "https://github.com/markup-carve/carve-rs", rev = "${sha}" }\n`, lock)).toThrow('carve-lang = "=0.1.7"');
   });
   it('accepts an explicit immutable Git commit for ancestry verification', () => {
