@@ -39,6 +39,7 @@ describe('Rust release gates', () => {
     const allow = { allowEngineGit: true };
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`), allow)).not.toThrow();
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?branch=main#${sha}`), allow)).toThrow('immutable rev');
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', `git+https://github.com/someone/carve-rs?rev=${sha}#${sha}`), allow)).toThrow('markup-carve/carve-rs');
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', undefined), allow)).toThrow('carve-lang (path)');
     expect(() => assertRegistryRustDependencies(manifest, root + entry('regex', `git+https://github.com/rust-lang/regex?rev=${sha}#${sha}`), allow)).toThrow('regex (git)');
   });

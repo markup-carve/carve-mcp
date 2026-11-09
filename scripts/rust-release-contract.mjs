@@ -27,7 +27,9 @@ export function assertRegistryRustDependencies(manifest, lock, { allowEngineGit 
   const root = cargoPackage(manifest);
   const enginePin = (name, source) => {
     if (!allowEngineGit || name !== 'carve-lang' || !source?.startsWith('git+')) return false;
-    immutableGithubPin(source);
+    if (immutableGithubPin(source).repository !== 'markup-carve/carve-rs') {
+      throw new Error('Rust engine Git source must be markup-carve/carve-rs.');
+    }
     return true;
   };
   const nonRegistry = cargoLockPackages(lock)
