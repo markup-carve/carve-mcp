@@ -26,10 +26,12 @@ if (releaseRun) {
   if (nonRegistryDependencies.length > 0) {
     throw new Error(`Release dependencies must use registry versions: ${nonRegistryDependencies.join(', ')}.`);
   }
-  // Main and pull requests may pin a merged engine commit; only a publish run
-  // requires the released crates.
   assertRegistryRustDependencies(cargo, cargoLock);
   assertExactEnginePin(cargo, cargoLock);
+} else {
+  // Main and pull requests may pin a merged engine commit; only a publish run
+  // requires the released crate.
+  assertRegistryRustDependencies(cargo, cargoLock, { allowEngineGit: true });
 }
 if (releaseVersion && releaseVersion !== pkg.version) {
   throw new Error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${pkg.version}.`);

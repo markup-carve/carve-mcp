@@ -35,6 +35,13 @@ describe('Rust release gates', () => {
   it('rejects alternate registries rather than comparing their versions with crates.io', () => {
     expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', 'registry+https://example.com/index'))).toThrow('alternate registry');
   });
+  it('admits only an immutable carve-lang Git commit outside a release', () => {
+    const allow = { allowEngineGit: true };
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`), allow)).not.toThrow();
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?branch=main#${sha}`), allow)).toThrow('immutable rev');
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('carve-lang', undefined), allow)).toThrow('carve-lang (path)');
+    expect(() => assertRegistryRustDependencies(manifest, root + entry('regex', `git+https://github.com/rust-lang/regex?rev=${sha}#${sha}`), allow)).toThrow('regex (git)');
+  });
   it('requires the exact Cargo.toml pin of the locked engine', () => {
     const lock = root + entry('carve-lang', 'registry+https://github.com/rust-lang/crates.io-index');
     expect(() => assertExactEnginePin(`${manifest}carve-lang = "=0.1.7"\n`, lock)).not.toThrow();

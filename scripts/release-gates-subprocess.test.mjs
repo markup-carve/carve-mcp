@@ -135,6 +135,14 @@ describe('release gate subprocess regressions', () => {
     expect(result.stderr).toContain('Rust release dependencies must use crates.io registry versions');
     expect(result.stderr).not.toContain('REACHED_EXTERNAL_COMMAND');
   });
+  it.each([undefined, `git+https://github.com/rust-lang/regex?rev=${sha}#${sha}`])('rejects a non-registry non-engine Rust dependency outside a release run: %s', (source) => {
+    const directory = fixture();
+    writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', registry) + entry('regex', source));
+    const result = run(directory, 'release-check.mjs');
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('Rust release dependencies must use crates.io registry versions: regex');
+    expect(result.stderr).not.toContain('REACHED_EXTERNAL_COMMAND');
+  });
   it('allows a git engine pin outside a release run', () => {
     const directory = fixture();
     writeFileSync(join(directory, 'rust', 'Cargo.lock'), root + entry('carve-lang', `git+https://github.com/markup-carve/carve-rs?rev=${sha}#${sha}`));

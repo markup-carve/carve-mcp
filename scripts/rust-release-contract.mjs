@@ -21,10 +21,17 @@ export function cargoLockPackages(lock) {
   });
 }
 
-export function assertRegistryRustDependencies(manifest, lock) {
+// allowEngineGit admits only an immutable GitHub commit of carve-lang, which
+// main may carry between releases; publish runs never pass it.
+export function assertRegistryRustDependencies(manifest, lock, { allowEngineGit = false } = {}) {
   const root = cargoPackage(manifest);
+  const enginePin = (name, source) => {
+    if (!allowEngineGit || name !== 'carve-lang' || !source?.startsWith('git+')) return false;
+    immutableGithubPin(source);
+    return true;
+  };
   const nonRegistry = cargoLockPackages(lock)
-    .filter(({ name, source }) => name !== root.name && source !== CRATES_IO_SOURCE)
+    .filter(({ name, source }) => name !== root.name && source !== CRATES_IO_SOURCE && !enginePin(name, source))
     .map(({ name, source }) => `${name} (${source?.startsWith('git+') ? 'git' : source ? 'alternate registry' : 'path'})`);
   if (nonRegistry.length > 0) {
     throw new Error(`Rust release dependencies must use crates.io registry versions: ${nonRegistry.join(', ')}.`);
