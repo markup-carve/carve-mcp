@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## 0.1.13 - 2026-11-11
+
+Both MCP servers move to the Carve 0.1.14 wave: carve-js 0.1.16, carve-rs 0.1.14 and the 0.1.14 rule index.
+
+### Breaking
+
+- Lint rule resources follow the engines' rule ids: `fence-delimiter-indentation` and `raw-block-syntax` are retired, `table-alignment-run-padding` and `table-cell-attribute-before-marker` report as `table-marker-run-padding`, and the new ids such as `thematic-break-spelling` and `deprecated-cell-alignment` have resources (#128).
+- `carve_format` writes native `|=` header cells and `***` thematic breaks, and reads the 0.1.14 spec readings, such as one attach rule for `+` and braced cell alignment (#128).
+- The rule index follows Carve 0.1.14; retired clauses such as CARVE-P10-020 (`data-djot-` importer carriers, markup-carve/carve#5735) point at their replacement.
+
+### Fixes
+
+- TypeScript `carve_check_targets` warnings link to their lint rule resource, like the Rust server (#127).
+- `carve_check_targets` no longer reports an alignment loss under a header colspan's `<` placeholder (#126).
+
+### Improvements
+
+- The authoring guide shows braced cell alignment (`|={>}`, `|{~}`) (#128).
+
+**Full Changelog**: https://github.com/markup-carve/carve-mcp/compare/0.1.12...0.1.13
+
 ## 0.1.12 - 2026-10-25
 
 Both MCP servers now use the published Carve engines with progress and blocked task states.
