@@ -2,15 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
-## 0.1.13 - 2026-11-11
+## 0.1.13 - 2026-11-12
 
-Both MCP servers move to the Carve 0.1.14 wave: carve-js 0.1.16, carve-rs 0.1.14 and the 0.1.14 rule index.
+Both MCP servers move to the published Carve 0.1.14 wave: carve-js 0.1.16 from npm, carve-rs 0.1.14 from crates.io and the 0.1.14 rule index (#130).
 
 ### Breaking
 
 - Lint rule resources follow the engines' rule ids: `fence-delimiter-indentation` and `raw-block-syntax` are retired, `table-alignment-run-padding` and `table-cell-attribute-before-marker` report as `table-marker-run-padding`, and the new ids such as `thematic-break-spelling` and `deprecated-cell-alignment` have resources (#128).
 - `carve_format` writes native `|=` header cells and `***` thematic breaks, and reads the 0.1.14 spec readings, such as one attach rule for `+` and braced cell alignment (#128).
-- The rule index follows Carve 0.1.14; retired clauses such as CARVE-P10-020 (`data-djot-` importer carriers, markup-carve/carve#5735) point at their replacement.
+- The rule index follows the Carve 0.1.14 release; retired clauses such as CARVE-P10-020 (`data-djot-` importer carriers, markup-carve/carve#5735) point at their replacement (#130).
 
 ### Fixes
 
