@@ -3622,36 +3622,42 @@ impl CarveServer {
                     return match target {
                         CarveRenderTarget::Html => {
                             carve::render_html_with_options(&prepared.doc, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Markdown => {
                             carve::render_markdown_with_options(&prepared.doc, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Plain => {
                             carve::render_plain_text_with_options(&prepared.doc, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Ansi => {
                             carve::render_ansi_with_options(&prepared.doc, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Carve => unreachable!(),
-                    }
-                    .map_err(|error| error.to_string());
+                    };
                 }
                 match target {
                     CarveRenderTarget::Html => {
                         carve::try_to_html_with_options(&input.source, &options)
+                            .map_err(|error| error.to_string())
                     }
                     CarveRenderTarget::Markdown => {
                         carve::try_to_markdown_with_options(&input.source, &options)
+                            .map_err(|error| error.to_string())
                     }
                     CarveRenderTarget::Plain => {
                         carve::try_to_plain_text_with_options(&input.source, &options)
+                            .map_err(|error| error.to_string())
                     }
                     CarveRenderTarget::Ansi => {
                         carve::try_to_ansi_with_options(&input.source, &options)
+                            .map_err(|error| error.to_string())
                     }
                     CarveRenderTarget::Carve => unreachable!(),
                 }
-                .map_err(|error| error.to_string())
             });
         match checked {
             Ok(result) => match result.value {
@@ -3778,15 +3784,19 @@ impl CarveServer {
                     match render_target {
                         CarveRenderTarget::Html => {
                             carve::try_to_html_with_options(&input.source, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Markdown => {
                             carve::try_to_markdown_with_options(&input.source, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Plain => {
                             carve::try_to_plain_text_with_options(&input.source, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Ansi => {
                             carve::try_to_ansi_with_options(&input.source, &options)
+                                .map_err(|error| error.to_string())
                         }
                         CarveRenderTarget::Carve => unreachable!(),
                     }

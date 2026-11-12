@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "a610f775af20e92fd08bf988416b91721fd2954c",
+  "sourceCommit": "51c5631541efb60faad51f81ac7dbf881150b757",
   "index": {
     "version": 1,
     "scopes": [
@@ -61,12 +61,6 @@
         "scope": "parsing"
       },
       {
-        "id": "CARVE-P0-004",
-        "part": "0",
-        "title": "ONE AUTHORED BLOCK BASE",
-        "scope": "parsing"
-      },
-      {
         "id": "CARVE-P0-005",
         "part": "0",
         "title": "COMMENTS ARE CLASSIFIED BEFORE BLOCK OWNERSHIP",
@@ -82,24 +76,6 @@
         "id": "CARVE-P0-007",
         "part": "0",
         "title": "THE MARKER LINE'S CONTENT IS THE ITEM'S FIRST BLOCK",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P0-008",
-        "part": "0",
-        "title": "A FLOATING ATTRIBUTE BLOCK DOES NOT CHANGE THE CONTENT COLUMN",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P0-009",
-        "part": "0",
-        "title": "A QUOTE'S LAST BLOCK MAY ITSELF BE A QUOTE",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P0-010",
-        "part": "0",
-        "title": "A DEFINITION AT THE CONTENT COLUMN ENDS THE PARAGRAPH, NOT THE CONTAINER",
         "scope": "parsing"
       },
       {
@@ -133,21 +109,9 @@
         "scope": "parsing"
       },
       {
-        "id": "CARVE-P0-016",
-        "part": "0",
-        "title": "A REAL DIV IS A CONTAINER LIKE ANY OTHER",
-        "scope": "parsing"
-      },
-      {
         "id": "CARVE-P0-017",
         "part": "0",
         "title": "CONTAINER KIND DOES NOT DETERMINE CONTAINER REACH",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P0-018",
-        "part": "0",
-        "title": "DEFINITION BODIES FOLLOW THE SAME CONTAINER REACH RULE",
         "scope": "parsing"
       },
       {
@@ -160,12 +124,6 @@
         "id": "CARVE-P0-020",
         "part": "0",
         "title": "AT OR PAST MEANS THE DEEPEST COLUMN THE LINE REACHES",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P0-021",
-        "part": "0",
-        "title": "A BLOCK OPENER IN THE BAND FOLDS ON THE SAME TERMS",
         "scope": "parsing"
       },
       {
@@ -217,6 +175,24 @@
         "scope": "imports-security-extensions"
       },
       {
+        "id": "CARVE-P2-032",
+        "part": "2",
+        "title": "UNRESOLVED MARKDOWN REFERENCES KEEP THEIR SYNTAX ON IMPORT",
+        "scope": "imports-security-extensions"
+      },
+      {
+        "id": "CARVE-P2-033",
+        "part": "2",
+        "title": "A GITHUB ALERT IMPORTS AS AN ADMONITION",
+        "scope": "imports-security-extensions"
+      },
+      {
+        "id": "CARVE-P2-034",
+        "part": "2",
+        "title": "A MARKDOWN HTML COMMENT IMPORTS AS A CARVE COMMENT",
+        "scope": "imports-security-extensions"
+      },
+      {
         "id": "CARVE-P2-006",
         "part": "2",
         "title": "COLUMN-EXACT DELIMITERS",
@@ -253,15 +229,9 @@
         "scope": "parsing"
       },
       {
-        "id": "CARVE-P2-028",
-        "part": "2",
-        "title": "A TERM HAS NO CONTENT COLUMN",
-        "scope": "parsing"
-      },
-      {
         "id": "CARVE-P2-010",
         "part": "2",
-        "title": "A LEADING CONTENT TAB FOLLOWS NORMAL INDENTATION",
+        "title": "A LEADING CONTENT TAB IS CONTENT",
         "scope": "parsing"
       },
       {
@@ -297,13 +267,7 @@
       {
         "id": "CARVE-P2-016",
         "part": "2",
-        "title": "INDENTATION IS COLUMNS, NOT CHARACTERS",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P2-017",
-        "part": "2",
-        "title": "BELOW THE BODY'S COLUMN THE BODY ENDS",
+        "title": "DEFINITION SEPARATOR SETS THE BODY COLUMN",
         "scope": "parsing"
       },
       {
@@ -352,6 +316,12 @@
         "id": "CARVE-P2-025",
         "part": "2",
         "title": "NO TRAILING WHITESPACE",
+        "scope": "parsing"
+      },
+      {
+        "id": "CARVE-P2-035",
+        "part": "2",
+        "title": "A BLOCK BRACE RUN CONTINUES PAST ITS OPENER",
         "scope": "parsing"
       },
       {
@@ -439,12 +409,6 @@
         "scope": "parsing"
       },
       {
-        "id": "CARVE-P3-015",
-        "part": "3",
-        "title": "INDENTATION IS COLUMNS, NOT CHARACTERS",
-        "scope": "parsing"
-      },
-      {
         "id": "CARVE-P3-016",
         "part": "3",
         "title": "EDITORIAL COMMENT CONTENT IS LITERAL",
@@ -527,12 +491,6 @@
         "part": "4",
         "title": "A `class` KEY-VALUE IS A SPELLING OF THE CLASS SLOT",
         "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P4-008",
-        "part": "4",
-        "title": "AN IMPORTER READS A BRACE RUN'S CONTINUATION ONLY WHERE IT IS INDENTED",
-        "scope": "imports-security-extensions"
       },
       {
         "id": "CARVE-P6-001",
@@ -621,13 +579,13 @@
       {
         "id": "CARVE-P9-007",
         "part": "9",
-        "title": "T10 CELL ATTRIBUTES BIND LAST",
+        "title": "T10 ALIGNMENT LEADS THE CELL ATTRIBUTE BLOCK",
         "scope": "parsing"
       },
       {
         "id": "CARVE-P9-008",
         "part": "9",
-        "title": "T11 A MARKER RUN ENDS AT A SPACE",
+        "title": "T11 A CELL PREFIX ENDS AT A SPACE",
         "scope": "parsing"
       },
       {
@@ -657,7 +615,7 @@
       {
         "id": "CARVE-P9-013",
         "part": "9",
-        "title": "AN INVISIBLE LINE IS ONE CLASSIFICATION",
+        "title": "A BLOCK-LEVEL INVISIBLE LINE IS ONE CLASSIFICATION",
         "scope": "parsing"
       },
       {
@@ -671,18 +629,6 @@
         "part": "9",
         "title": "BLOCK RENDERING",
         "scope": "resolution-rendering"
-      },
-      {
-        "id": "CARVE-P9-016",
-        "part": "9",
-        "title": "A COLON-FENCE LINE THAT FAILS THE OPENER TEST LEAVES THE PARAGRAPH EXPECTING A CLOSER",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-017",
-        "part": "9",
-        "title": "ABSORPTION REACHES A PARAGRAPH'S OWN LINES ONLY",
-        "scope": "parsing"
       },
       {
         "id": "CARVE-P9-018",
@@ -769,39 +715,9 @@
         "scope": "resolution-rendering"
       },
       {
-        "id": "CARVE-P9-029",
-        "part": "9",
-        "title": "L1a THE ITEM'S FIRST BLOCK DOES NOT MATTER",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-030",
-        "part": "9",
-        "title": "L1b AN INVISIBLE LINE DOES NOT CANCEL THE SEPARATION",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-031",
-        "part": "9",
-        "title": "CONTINUATION-MARKER REACHES ITS OWN COLUMN",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-032",
-        "part": "9",
-        "title": "ONE IS A COUNT AND THE BOUNDARY IS NOT",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-033",
-        "part": "9",
-        "title": "THE MARKER IS ONE OPERATION IN EVERY CONTAINER",
-        "scope": "parsing"
-      },
-      {
         "id": "CARVE-P9-067",
         "part": "9",
-        "title": "EVERY CONTAINER THAT TAKES THE MARKER TAKES THE FIRST-BLOCK FORM",
+        "title": "ONE ATTACH RULE FOR EVERY HOST",
         "scope": "resolution-rendering"
       },
       {
@@ -815,12 +731,6 @@
         "part": "9",
         "title": "THE CANONICAL WRITER MAY TAKE THE REFUSE ARM PAST THE CAP",
         "scope": "resolution-rendering"
-      },
-      {
-        "id": "CARVE-P9-034",
-        "part": "9",
-        "title": "L6 A COLLECTED DEFINITION LEAVES NO TRACE",
-        "scope": "parsing"
       },
       {
         "id": "CARVE-P9-035",
@@ -873,7 +783,7 @@
       {
         "id": "CARVE-P9-043",
         "part": "9",
-        "title": "FORCED EMPHASIS AND EXPLICIT SAME-TYPE NESTING",
+        "title": "INLINE PAIRING",
         "scope": "parsing"
       },
       {
@@ -885,13 +795,13 @@
       {
         "id": "CARVE-P9-045",
         "part": "9",
-        "title": "A BACKSLASH BREAK IS NOT ADDITIVE",
+        "title": "AN EXISTING HARD BREAK",
         "scope": "parsing"
       },
       {
         "id": "CARVE-P9-046",
         "part": "9",
-        "title": "AN INLINE CONSTRUCT IS NOT A DEPTH THE RULE STOPS AT",
+        "title": "AT ANY INLINE DEPTH",
         "scope": "parsing"
       },
       {
@@ -927,13 +837,7 @@
       {
         "id": "CARVE-P9-052",
         "part": "9",
-        "title": "AN INVISIBLE LINE FOLDS LIKE ANY OTHER",
-        "scope": "parsing"
-      },
-      {
-        "id": "CARVE-P9-053",
-        "part": "9",
-        "title": "A COMMENT IS THE ONE EXCEPTION",
+        "title": "A NOTE DEFINITION OR ATTRIBUTE LINE BELOW THE COLUMN INTERRUPTS",
         "scope": "parsing"
       },
       {
@@ -1161,7 +1065,7 @@
       {
         "id": "CARVE-P11-005",
         "part": "11",
-        "title": "WRAPPER LOSS IS THE ONLY EQUALITY CARVE-OUT",
+        "title": "WRAPPER LOSS IS THE ONLY STRUCTURAL EQUALITY CARVE-OUT",
         "scope": "canonical-writing"
       },
       {
@@ -1245,7 +1149,7 @@
       {
         "id": "CARVE-P11-018",
         "part": "11",
-        "title": "AN EMPTY CONTAINER BODY IS A BLANK LINE HERE TOO",
+        "title": "AN EMPTY COLON FENCE BODY IS A BLANK LINE",
         "scope": "canonical-writing"
       },
       {
@@ -1281,13 +1185,13 @@
       {
         "id": "CARVE-P11-024",
         "part": "11",
-        "title": "M1e `<` IS ESCAPED WHEN THE EMITTED LINE WOULD READ IT AS MARKUP",
+        "title": "M1f `<` IS ESCAPED WHEN THE EMITTED LINE WOULD READ IT AS MARKUP",
         "scope": "canonical-writing"
       },
       {
         "id": "CARVE-P11-044",
         "part": "11",
-        "title": "M1f `#` IS ESCAPED WHERE THE EMITTED LINE WOULD OPEN OR CLOSE AN ATX HEADING",
+        "title": "M1h `#` IS ESCAPED WHERE THE EMITTED LINE WOULD OPEN OR CLOSE AN ATX HEADING",
         "scope": "canonical-writing"
       },
       {
@@ -1485,7 +1389,7 @@
       {
         "id": "CARVE-P11-066",
         "part": "11",
-        "title": "A TABLE'S SEPARATOR ROW IS WRITTEN WHERE THE AUTHOR WROTE ONE",
+        "title": "CANONICAL HEADERS ARE NATIVE AND ROUNDTRIP PRESERVES A SEPARATOR ROW",
         "scope": "canonical-writing"
       },
       {
@@ -1504,6 +1408,12 @@
         "id": "CARVE-P11-069",
         "part": "11",
         "title": "THE MARKDOWN TARGET KEEPS AN AUTOLINK'S ANGLE SPELLING",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-075",
+        "part": "11",
+        "title": "THE MARKDOWN TARGET ENCODES LINK AND IMAGE DESTINATIONS",
         "scope": "canonical-writing"
       },
       {
@@ -1579,6 +1489,48 @@
         "scope": "canonical-writing"
       },
       {
+        "id": "CARVE-P11-076",
+        "part": "11",
+        "title": "REPEATED EMPHASIS KINDS ARE WRITTEN BRACED",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-077",
+        "part": "11",
+        "title": "A PARAGRAPH LINE OF DASHES ALONE IS WRITTEN WITH THE GLYPH",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-078",
+        "part": "11",
+        "title": "A VERBATIM VALUE LINE THAT OPENS A BLOCK IS SPELLED OR REFUSED",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-079",
+        "part": "11",
+        "title": "A COLLECTED DEFINITION, A COMMENT AND A BLOCK BELOW A BODY HAVE ONE LAYOUT",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-080",
+        "part": "11",
+        "title": "A CLI INPUT OR USAGE ERROR EXITS WITH STATUS 2",
+        "scope": "imports-security-extensions"
+      },
+      {
+        "id": "CARVE-P11-081",
+        "part": "11",
+        "title": "THE FORMATTER CHECK NAMES THE FIRST CHANGED LINE",
+        "scope": "canonical-writing"
+      },
+      {
+        "id": "CARVE-P11-082",
+        "part": "11",
+        "title": "THE PLAIN-TEXT TARGET WRITES NOTHING FOR A COVERED CELL",
+        "scope": "canonical-writing"
+      },
+      {
         "id": "CARVE-P12-001",
         "part": "12",
         "title": "AST TYPE NAMES FOLLOW THE PROFILE VOCABULARY",
@@ -1588,12 +1540,6 @@
         "id": "CARVE-P12-002",
         "part": "12",
         "title": "ADJACENT TEXT RUNS ARE COALESCED",
-        "scope": "ast-interchange"
-      },
-      {
-        "id": "CARVE-P12-003",
-        "part": "12",
-        "title": "TEXT COALESCING OCCURS DURING `parse(x)`, NOT SERIALIZATION",
         "scope": "ast-interchange"
       },
       {
@@ -1731,7 +1677,7 @@
       {
         "id": "CARVE-P12-026",
         "part": "12",
-        "title": "AN ABBREVIATION DEFINITION IS RECOGNIZED ONLY AT DOCUMENT LEVEL",
+        "title": "AN ABBREVIATION DEFINITION IS A DEFINITION IN EVERY CONTAINER",
         "scope": "ast-interchange"
       },
       {
@@ -1815,7 +1761,7 @@
       {
         "id": "CARVE-P12-040",
         "part": "12",
-        "title": "TABLE ALIGNMENT RUNS CARRY TWO INDEPENDENT AXES",
+        "title": "TABLE CELL ALIGNMENT SYMBOLS CARRY TWO INDEPENDENT AXES",
         "scope": "parsing"
       },
       {
@@ -1993,6 +1939,12 @@
         "scope": "ast-interchange"
       },
       {
+        "id": "CARVE-P12-070",
+        "part": "12",
+        "title": "FOOTNOTE, LINK REFERENCE AND ABBREVIATION DEFINITIONS HOIST TO THE DOCUMENT",
+        "scope": "ast-interchange"
+      },
+      {
         "id": "CARVE-P9-076",
         "part": "9",
         "title": "A MARKER IN A TOC BODY RETAINS ITS CONTAINER SCOPE",
@@ -2015,12 +1967,6 @@
         "part": "10",
         "title": "A MATCHING RAW BLOCK KEEPS ITS PLACEMENT SLOT",
         "scope": "resolution-rendering"
-      },
-      {
-        "id": "CARVE-P0-022",
-        "part": "0",
-        "title": "AN OPAQUE MARKER-LINE QUOTE PRESERVES THE BAND AS TEXT",
-        "scope": "parsing"
       },
       {
         "id": "CARVE-P10-013",
@@ -2065,12 +2011,6 @@
         "scope": "resolution-rendering"
       },
       {
-        "id": "CARVE-P10-020",
-        "part": "10",
-        "title": "AN IMPORTER READS THE DEPRECATED `data-djot-` SPELLING",
-        "scope": "imports-security-extensions"
-      },
-      {
         "id": "CARVE-P10-021",
         "part": "10",
         "title": "EVERY IMPORT MODE CONSUMES THE INVENTORY AND WRITES NO RESERVED NAME BACK",
@@ -2095,6 +2035,18 @@
         "scope": "parsing"
       },
       {
+        "id": "CARVE-P3-026",
+        "part": "3",
+        "title": "GENERIC EXTENSION CONTENT IS INLINE CONTENT",
+        "scope": "parsing"
+      },
+      {
+        "id": "CARVE-P3-027",
+        "part": "3",
+        "title": "AN INERT MENTION OR TAG RENDERS ITS FULL SPELLING IN STRONG",
+        "scope": "resolution-rendering"
+      },
+      {
         "id": "CARVE-P9-080",
         "part": "9",
         "title": "A STRUCTURAL-ONLY LINE RESETS CAPTION SCOPE",
@@ -2111,9 +2063,57 @@
         "part": "9",
         "title": "A CELL SLOT IS COUNTED, NOT WEIGHED",
         "scope": "parsing"
+      },
+      {
+        "id": "CARVE-P9-083",
+        "part": "9",
+        "title": "C3 MARKER-BODY COLUMN AND EXTENT",
+        "scope": "parsing"
+      },
+      {
+        "id": "CARVE-P9-084",
+        "part": "9",
+        "title": "ONE COLON-FENCE FRAME",
+        "scope": "parsing"
+      },
+      {
+        "id": "CARVE-P9-086",
+        "part": "9",
+        "title": "SOURCE OUTPUT ON THE MARKDOWN TARGET IS AN OPTIONAL FEATURE",
+        "scope": "canonical-writing"
       }
     ],
     "retired": [
+      {
+        "id": "CARVE-P2-036",
+        "part": "2",
+        "title": "AN ATTRIBUTE BLOCK SETS THE CELL'S ATTRIBUTES",
+        "replacement": "CARVE-P9-007"
+      },
+      {
+        "id": "CARVE-P9-029",
+        "part": "9",
+        "title": "L1a THE ITEM'S FIRST VISIBLE BLOCK MAY BE ANY KIND",
+        "replacement": "CARVE-P9-013"
+      },
+      {
+        "id": "CARVE-P9-030",
+        "part": "9",
+        "title": "L1b AN INVISIBLE LINE DOES NOT CANCEL THE SEPARATION",
+        "replacement": "CARVE-P9-013"
+      },
+      {
+        "id": "CARVE-P9-034",
+        "part": "9",
+        "title": "L6 A COLLECTED DEFINITION LEAVES NO TRACE",
+        "replacement": "CARVE-P9-013"
+      },
+      {
+        "id": "CARVE-P0-008",
+        "part": "0",
+        "title": "A FLOATING ATTRIBUTE BLOCK DOES NOT CHANGE THE CONTENT COLUMN",
+        "replacement": "CARVE-P9-083"
+      },
       {
         "id": "CARVE-P9-028",
         "part": "9",
@@ -2143,6 +2143,126 @@
         "part": "9",
         "title": "A QUOTE'S DIRECTION IS DECIDED ON THE RENDERED TEXT",
         "replacement": "CARVE-P3-023"
+      },
+      {
+        "id": "CARVE-P12-003",
+        "part": "12",
+        "title": "TEXT COALESCING OCCURS DURING `parse(x)`, NOT SERIALIZATION",
+        "replacement": "CARVE-P12-002"
+      },
+      {
+        "id": "CARVE-P0-016",
+        "part": "0",
+        "title": "A REAL DIV IS A CONTAINER LIKE ANY OTHER",
+        "replacement": "CARVE-P9-084"
+      },
+      {
+        "id": "CARVE-P0-018",
+        "part": "0",
+        "title": "DEFINITION BODIES FOLLOW THE SAME CONTAINER REACH RULE",
+        "replacement": "CARVE-P9-083"
+      },
+      {
+        "id": "CARVE-P2-017",
+        "part": "2",
+        "title": "BELOW THE BODY'S COLUMN THE BODY ENDS",
+        "replacement": "CARVE-P9-083"
+      },
+      {
+        "id": "CARVE-P3-015",
+        "part": "3",
+        "title": "INDENTATION IS COLUMNS, NOT CHARACTERS",
+        "replacement": "CARVE-P9-083"
+      },
+      {
+        "id": "CARVE-P0-004",
+        "part": "0",
+        "title": "ONE AUTHORED BLOCK BASE",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P0-009",
+        "part": "0",
+        "title": "A QUOTE'S LAST BLOCK MAY ITSELF BE A QUOTE",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P0-021",
+        "part": "0",
+        "title": "A BLOCK OPENER IN THE BAND FOLDS ON THE SAME TERMS",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P0-022",
+        "part": "0",
+        "title": "AN OPAQUE MARKER-LINE QUOTE PRESERVES THE BAND AS TEXT",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P2-028",
+        "part": "2",
+        "title": "A TERM HAS NO CONTENT COLUMN",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P9-031",
+        "part": "9",
+        "title": "CONTINUATION-MARKER REACHES ITS OWN COLUMN",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P9-032",
+        "part": "9",
+        "title": "ONE IS A COUNT AND THE BOUNDARY IS NOT",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P9-033",
+        "part": "9",
+        "title": "THE MARKER IS ONE OPERATION IN EVERY CONTAINER",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P9-053",
+        "part": "9",
+        "title": "A COMMENT IS THE ONE EXCEPTION",
+        "replacement": "CARVE-P0-024"
+      },
+      {
+        "id": "CARVE-P0-010",
+        "part": "0",
+        "title": "A DEFINITION AT THE CONTENT COLUMN ENDS THE PARAGRAPH, NOT THE CONTAINER",
+        "replacement": "CARVE-P0-005"
+      },
+      {
+        "id": "CARVE-P4-008",
+        "part": "4",
+        "title": "AN IMPORTER READS A BRACE RUN'S CONTINUATION ONLY WHERE IT IS INDENTED",
+        "replacement": "CARVE-P2-035"
+      },
+      {
+        "id": "CARVE-P9-016",
+        "part": "9",
+        "title": "A COLON-FENCE LINE THAT FAILS THE OPENER TEST LEAVES THE PARAGRAPH EXPECTING A CLOSER",
+        "replacement": "CARVE-P9-084"
+      },
+      {
+        "id": "CARVE-P9-017",
+        "part": "9",
+        "title": "ABSORPTION REACHES A PARAGRAPH'S OWN LINES ONLY",
+        "replacement": "CARVE-P9-084"
+      },
+      {
+        "id": "CARVE-P9-085",
+        "part": "9",
+        "title": "A REFUSED `+` IS A PLAIN LETTER",
+        "replacement": "CARVE-P9-067"
+      },
+      {
+        "id": "CARVE-P10-020",
+        "part": "10",
+        "title": "AN IMPORTER READS THE DEPRECATED `data-djot-` SPELLING",
+        "replacement": "CARVE-P10-016"
       }
     ]
   }
