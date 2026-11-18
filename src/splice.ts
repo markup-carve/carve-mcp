@@ -120,7 +120,7 @@ export function replaceSource(source: string, selector: AstSelector, text: strin
   if (selected.length === 0) throw new Error('Selector did not match any AST node.');
   if (selected.length > 1) throw new Error(`Selector matched ${selected.length} AST nodes; refine it before editing.`);
   const { path, node } = selected[0]!;
-  const range = nodeRange(ast, path, node, scope);
+  const range = nodeRange(ast, path, node, scope, offsets);
   const original = offsets.slice(range.start, range.end);
   if (original === text) throw new Error('The replacement equals the selected source; nothing would change.');
   const result = source.slice(0, offsets.unit(range.start)) + text + source.slice(offsets.unit(range.end));

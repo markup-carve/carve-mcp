@@ -51,9 +51,27 @@ export interface SourceRange { start: number; end: number; startLine: number; en
 // A section runs from its heading to the last node before the next heading of
 // the same or a higher level in the same container. Trailing blank lines and a
 // following heading's attribute line stay outside it.
-export function nodeRange(ast: Record<string, unknown>, path: string, node: Record<string, unknown>, scope: BlockScope): SourceRange {
-  const own = position(node);
-  if (!own) throw new Error(`The selected ${String(node.type)} has no source position.`);
+/**
+ * A 0.2 block position starts at its attribute lines; the block's own source
+ * starts after them, so a replacement keeps the attributes.
+ */
+function withoutAttributeLines(pos: Position, node: Record<string, unknown>, offsets: SourceOffsets): Position {
+  if (!node.attrs) return pos;
+  let start = pos.startOffset;
+  let line = pos.startLine;
+  for (;;) {
+    const rest = offsets.source.slice(offsets.unit(start), offsets.unit(pos.endOffset));
+    const match = /^[ \t]*\{[^\n]*\}[ \t]*\r?\n/.exec(rest);
+    if (!match || match[0].length >= rest.length) return { ...pos, startOffset: start, startLine: line };
+    start += Buffer.byteLength(match[0], 'utf8');
+    line += 1;
+  }
+}
+
+export function nodeRange(ast: Record<string, unknown>, path: string, node: Record<string, unknown>, scope: BlockScope, offsets: SourceOffsets): SourceRange {
+  const positioned = position(node);
+  if (!positioned) throw new Error(`The selected ${String(node.type)} has no source position.`);
+  const own = withoutAttributeLines(positioned, node, offsets);
   if (scope === 'node') return { start: own.startOffset, end: own.endOffset, startLine: own.startLine, endLine: own.endLine };
   if (node.type !== 'heading') throw new Error('scope "section" requires a heading.');
   const location = parentArrayLocation(ast as never, path);
@@ -88,7 +106,7 @@ function identityField(node: Record<string, unknown>) {
 export function getBlocks(source: string, selector: AstSelector, options: { scope?: BlockScope; includeAst?: boolean; sha256?: string } = {}) {
   const scope = options.scope ?? 'node';
   const { ast, offsets, selected } = resolveSourceBlocks(source, selector);
-  const blocks = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => ({ path, node, range: nodeRange(ast, path, node, scope) })).map(({ path, node, range }) => ({
+  const blocks = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => ({ path, node, range: nodeRange(ast, path, node, scope, offsets) })).map(({ path, node, range }) => ({
     path, type: String(node.type), ...identityField(node),
     start: offsets.byte(range.start), end: offsets.byte(range.end), startLine: range.startLine, endLine: range.endLine,
     source: offsets.slice(range.start, range.end),
