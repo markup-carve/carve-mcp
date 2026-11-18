@@ -1,36 +1,10 @@
+import { childEntries } from './ast-fields.js';
 import {
-  carveToAnsiWithReport,
-  carveToAstJson,
-  carveToCarveWithReport,
-  carveToHtmlWithReport,
-  carveToMarkdownWithReport,
-  carveToPlainTextWithReport,
-  applyAstPatch,
-  autolink,
-  createAstPatch,
-  fromAstJson,
-  renderCarve,
-  renderDocumentWithReport,
-  resolve as resolveDocument,
-  toAstJson,
-  semanticSpan,
-  wikilinks,
-  lintCarve,
-  migrateDjot,
-  migrateBbcode,
-  migrateHtml,
-  migrateMarkdown,
-  parse as parseCarve,
-  type LintPlatform,
-  type MigrationResult,
-  type RenderResult,
-  type SmartTypographyOption,
-  type CarveExtension,
-  type MarkdownDialect,
-  type AstJsonDocument,
-  type AstPatchOperation,
-} from '@markup-carve/carve';
-import { AST_CHILD_FIELDS } from './ast-fields.js';
+  CarveRenderError, assertTree, extensionOptions, formatSource, importHtml, lintDiagnostics, parseTree, renderHtml,
+  runCarve2, toWarning, treeJson, writeCarve, writeTarget,
+  type Diagnostic, type DocumentNode, type ExtensionName, type HeadingIds, type LintPlatform, type RegistryTarget, type Warning,
+} from './engine.js';
+import { applyAstPatch, createAstPatch, POSITION_KEYS, withoutPositions as stripPositions, type AstPatchOperation } from './ast-patch.js';
 import { createSourcePatch } from './source-patch.js';
 import { expandDocument, lintWithIncludes, type IncludedLintWarning, type IncludeReport, type IncludeScope } from './includes.js';
 
@@ -45,55 +19,55 @@ export const MAX_AST_SELECTOR_MATCHES = 100;
  * real document comes close; the Rust server enforces the same bound.
  */
 export const MAX_WRITER_DEPTH = 256;
-export type RenderTarget = 'html' | 'markdown' | 'plain' | 'ansi';
-export type SourceFormat = 'html' | 'markdown' | 'djot' | 'bbcode';
+export type RenderTarget = 'html' | RegistryTarget;
+export type SourceFormat = 'html' | 'markdown' | 'gfm' | 'djot' | 'bbcode';
 export type RenderPreset = 'default' | 'portable' | 'static-html';
-export type ExtensionName = 'autolink' | 'semantic-spans' | 'wikilinks';
-type AsciiHeadingIdMode = boolean | 'fold' | 'strict';
+export type { ExtensionName };
+/** A tree of contract 2.0 as JSON. */
+export type AstJsonDocument = Record<string, unknown> & { type: string; children: unknown[] };
 export interface RenderSettings {
   preset?: RenderPreset;
-  asciiHeadingIds?: AsciiHeadingIdMode;
-  lowercaseHeadingIds?: boolean;
+  headingIds?: HeadingIds;
   strictLosses?: boolean;
   maxRenderLosses?: number;
-  smartTypography?: SmartTypographyOption;
+  smartTypography?: boolean;
   extensions?: ExtensionName[];
   allowRawHtml?: boolean;
   sanitizeUrls?: boolean;
 }
 
-function extensionInstances(names: ExtensionName[] = []): CarveExtension[] {
-  return names.map((name) => {
-    switch (name) {
-      case 'autolink': return autolink();
-      case 'semantic-spans': return semanticSpan();
-      case 'wikilinks': return wikilinks();
-    }
-  });
+export interface RenderResult {
+  value: string;
+  losses: Diagnostic[];
+  totalLosses: number;
+  truncated: boolean;
+  diagnostics: Diagnostic[];
 }
 
-function renderOptions(settings: RenderSettings) {
-  const portable = settings.preset === 'portable';
+function htmlOptions(settings: RenderSettings) {
+  const { extensions, renderers } = extensionOptions(settings.extensions);
   return {
-    asciiHeadingIds: settings.asciiHeadingIds ?? (portable ? 'fold' : undefined),
-    lowercaseHeadingIds: settings.lowercaseHeadingIds ?? (portable ? true : undefined),
-    strictLosses: settings.strictLosses,
-    maxRenderLosses: settings.maxRenderLosses,
-    smartTypography: settings.smartTypography,
-    extensions: extensionInstances(settings.extensions),
-    allowRawHtml: settings.allowRawHtml ?? false,
-    // Never the caller's value: neither server may be asked to emit a denied
-    // scheme (#78). `sanitizeUrls: false` selects whether the denial is
-    // reported, which `reportedLosses` applies to the result.
-    sanitizeUrls: true,
+    headingIds: settings.headingIds ?? (settings.preset === 'portable' ? 'ascii-lower' as const : undefined),
+    strictLosses: settings.strictLosses ?? false,
+    ...(settings.smartTypography !== undefined ? { smartTypography: settings.smartTypography } : {}),
+    extensions, renderers,
+    rawHtml: settings.allowRawHtml ?? false,
+    ...(settings.preset === 'static-html' ? { mode: 'static' as const } : {}),
   };
 }
 
-function reportedLosses<T>(result: RenderResult<T>, settings: RenderSettings): RenderResult<T> {
-  if (settings.sanitizeUrls !== false) return result;
-  const losses = result.losses.filter((loss) => loss.code !== 'destination-denied');
-  const denied = result.lossCounts?.['destination-denied'] ?? result.losses.length - losses.length;
-  return { ...result, losses, totalLosses: result.totalLosses - denied, truncated: result.truncated && losses.length < result.totalLosses - denied };
+/**
+ * Split the engine diagnostics into the render losses this server reports.
+ *
+ * The URL policy always blanks a denied scheme (#78); `sanitizeUrls: false`
+ * only stops that denial being reported.
+ */
+function renderResult(value: string, diagnostics: Diagnostic[], suppressed: number, settings: RenderSettings): RenderResult {
+  const all = diagnostics.filter((entry) => entry.channel === 'render-loss'
+    && (settings.sanitizeUrls !== false || entry.code !== 'destination-denied'));
+  const limit = settings.maxRenderLosses ?? all.length;
+  const losses = all.slice(0, limit);
+  return { value, losses, totalLosses: all.length, truncated: losses.length < all.length || suppressed > 0, diagnostics };
 }
 
 export function validateSource(source: string): void {
@@ -105,9 +79,9 @@ export function validateSource(source: string): void {
 
 export function lint(source: string, platforms: LintPlatform[] = [], scope?: IncludeScope) {
   validateSource(source);
-  const warnings: IncludedLintWarning[] = scope
-    ? lintWithIncludes(source, scope, (text, includes) => lintCarve(text, { platforms, includes }))
-    : lintCarve(source, { platforms });
+  const warnings: Array<Warning | IncludedLintWarning> = scope
+    ? lintWithIncludes(source, scope, platforms)
+    : lintDiagnostics(source, platforms).map((diagnostic) => toWarning(diagnostic, source));
   return { valid: warnings.length === 0, warningCount: warnings.length, warnings };
 }
 
@@ -136,8 +110,9 @@ export function assertWriterDepth(value: unknown): void {
 
 export function format(source: string, options: { alignTables?: boolean } = {}): RenderResult {
   validateSource(source);
-  assertWriterDepth(parseCarve(source));
-  return carveToCarveWithReport(source, options.alignTables ? { alignTables: true } : {});
+  assertWriterDepth(parseTree(source, { positions: false }));
+  const formatted = formatSource(source, options.alignTables === true);
+  return renderResult(formatted.source, formatted.diagnostics, 0, {});
 }
 
 export function render(source: string, target: RenderTarget, settings: RenderSettings = {}, scope?: IncludeScope): RenderResult & { includes?: IncludeReport } {
@@ -145,33 +120,25 @@ export function render(source: string, target: RenderTarget, settings: RenderSet
   if (settings.preset === 'static-html' && target !== 'html') {
     throw new Error('The static-html preset is only valid for the HTML target.');
   }
-  if (settings.extensions?.includes('semantic-spans') && target !== 'html') {
-    throw new Error('The semantic-spans extension is only valid for the HTML target.');
+  const options = htmlOptions(settings);
+  // The expanded tree is rendered as it stands, so an include cannot change
+  // meaning on the way back through the source form.
+  const expanded = scope ? expandDocument(source, options.extensions, scope) : undefined;
+  const includes = expanded ? { includes: expanded.includes } : {};
+  if (target === 'html') {
+    const html = renderHtml(expanded?.doc ?? source, options);
+    return { ...renderResult(html.html, html.diagnostics, html.suppressedDiagnostics, settings), ...includes };
   }
-  const options = renderOptions(settings);
-  const html = settings.preset === 'static-html' ? { ...options, mode: 'static' as const } : options;
-  if (scope) {
-    // The document seam rather than a second parse of flattened source: the
-    // expanded tree is rendered as it stands, so an include cannot change
-    // meaning on the way back through the source form.
-    const { doc, includes } = expandDocument(source, options.extensions, scope);
-    return { ...reportedLosses(renderDocumentWithReport(doc, { ...(target === 'html' ? html : options), target }), settings), includes };
-  }
-  switch (target) {
-    case 'html': return reportedLosses(carveToHtmlWithReport(source, html), settings);
-    case 'markdown': return reportedLosses(carveToMarkdownWithReport(source, options), settings);
-    case 'plain': return reportedLosses(carveToPlainTextWithReport(source, options), settings);
-    case 'ansi': return reportedLosses(carveToAnsiWithReport(source, options), settings);
-  }
+  const tree = expanded?.doc ?? parseTree(source, { extensions: options.extensions });
+  const written = writeTarget(target, tree, { strictLosses: options.strictLosses });
+  return { ...renderResult(written.output, written.diagnostics, 0, settings), ...includes };
 }
 
 export function parse(source: string, scope?: IncludeScope): AstJsonDocument & { includes?: IncludeReport } {
   validateSource(source);
-  if (!scope) return carveToAstJson(source);
-  // Reproduces the composition `carveToAstJson` runs with no extensions and no
-  // profile, over the expanded document instead of a fresh parse.
+  if (!scope) return treeJson(parseTree(source)) as AstJsonDocument;
   const { doc, includes } = expandDocument(source, [], scope);
-  return { ...toAstJson(resolveDocument(doc, { asciiHeadingIds: false })), includes };
+  return { ...(treeJson(doc) as AstJsonDocument), includes };
 }
 
 /** Largest `carve_parse` result returned, in JSON bytes. */
@@ -214,9 +181,10 @@ export function validateStructuredPayload(value: unknown, label: string): number
 }
 
 function validateAst(value: unknown, label: string): AstJsonDocument {
-  const bytes = validateStructuredPayload(value, label);
-  fromAstJson(value as AstJsonDocument, bytes);
-  return value as AstJsonDocument;
+  validateStructuredPayload(value, label);
+  try { assertTree(value); }
+  catch (error) { throw new Error(`${label} is not a Carve 0.2 tree: ${error instanceof Error ? error.message : String(error)}`); }
+  return value as unknown as AstJsonDocument;
 }
 
 export type AstSelector = { kind: 'id' | 'heading-id' | 'footnote-label' | 'node-type' | 'ast-path'; value: string };
@@ -247,7 +215,7 @@ function nodeText(value: unknown, maximum = 121): string {
     }
     const record = item as Record<string, unknown>;
     if (record.type === 'text' && typeof record.value === 'string') append(record.value);
-    for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(record, field)) visit(record[field]);
+    for (const [, child] of childEntries(record)) visit(child);
   };
   visit(value);
   return output;
@@ -261,14 +229,16 @@ function nodeIdentity(record: Record<string, unknown>): string | undefined {
   if (record.type === 'heading') {
     const attrs = record.attrs as Record<string, unknown> | undefined;
     if (typeof attrs?.id === 'string') return attrs.id;
+    if (typeof record.generatedId === 'string') return record.generatedId;
   }
-  if (record.type === 'footnote' && typeof record.label === 'string') return record.label;
+  if (record.type === 'footnote' && typeof record.key === 'string') return record.key;
   return undefined;
 }
 
 function attributeId(record: Record<string, unknown>): string | undefined {
   const attrs = record.attrs as Record<string, unknown> | undefined;
-  return typeof attrs?.id === 'string' ? attrs.id : undefined;
+  if (typeof attrs?.id === 'string') return attrs.id;
+  return record.type === 'heading' && typeof record.generatedId === 'string' ? record.generatedId : undefined;
 }
 
 export function astNodes(ast: AstJsonDocument) {
@@ -278,7 +248,7 @@ export function astNodes(ast: AstJsonDocument) {
     if (Array.isArray(value)) { value.forEach((child, index) => visit(child, pointer(path, String(index)))); return; }
     const record = value as Record<string, unknown>;
     if (typeof record.type === 'string') nodes.push({ path, node: record });
-    for (const key of AST_CHILD_FIELDS) if (Object.hasOwn(record, key)) visit(record[key], pointer(path, key));
+    for (const [keys, child] of childEntries(record)) visit(child, keys.reduce(pointer, path));
   };
   visit(ast, '');
   return nodes;
@@ -352,14 +322,13 @@ export function planSemanticAstEdit(source: string, selector: AstSelector, edit:
   if (semanticAstEqual(before, after)) throw new Error('The requested semantic edit would not change the document.');
   for (const step of resolved.filter(({ edit, match }) => edit.kind === 'delete-node' && match.node.type === 'footnote')) {
     const label = nodeIdentity(step.match.node);
-    const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.label === label);
+    const referenced = astNodes(after).some(({ node }) => node.type === 'footnote_ref' && node.key === label);
     if (referenced) throw new Error(`Cannot delete footnote “${humanText(label ?? '')}” while references remain.`);
   }
   const semanticAfter = semanticAst(after) as AstJsonDocument;
-  semanticAfter.srcByteLength = 0;
-  const editedBytes = validateStructuredPayload(semanticAfter, 'Edited AST');
+  validateStructuredPayload(semanticAfter, 'Edited AST');
   assertWriterDepth(semanticAfter);
-  const rendered = renderCarve(fromAstJson(semanticAfter, editedBytes));
+  const rendered = writeCarve(validateAst(semanticAfter, 'Edited AST') as unknown as DocumentNode);
   const canonicalAfter = parse(rendered);
   const reversiblePatch = createReversibleStructuredAstPatch(before, canonicalAfter);
   if (reversiblePatch.forward.length === 0) throw new Error('The requested semantic edit would not change the document.');
@@ -443,7 +412,11 @@ function applySemanticEdit(ast: AstJsonDocument, path: string, edit: SemanticAst
     if (Buffer.byteLength(edit.text, 'utf8') > MAX_SOURCE_BYTES) throw new Error(`Replacement text exceeds the ${MAX_SOURCE_BYTES}-byte limit.`);
     if (/[\r\n\u2028\u2029]/u.test(edit.text)) throw new Error('replace-text accepts one text block and must not contain line breaks.');
     if (node.type !== 'heading' && node.type !== 'paragraph') throw new Error('replace-text supports heading and paragraph nodes.');
+    const unchanged = nodeText(node.children, Infinity) === edit.text;
     node.children = [{ type: 'text', value: edit.text }];
+    // A 0.2 heading derives its ID from its text; keep the old one explicit.
+    const id = nodeIdentity(node);
+    if (node.type === 'heading' && id !== undefined && !unchanged) node.attrs = { ...(node.attrs as Record<string, unknown> | undefined), id };
     return;
   }
   if (edit.kind === 'rename-heading-id') {
@@ -520,7 +493,7 @@ function semanticAstEqual(left: unknown, right: unknown): boolean {
       && left.every((value, index) => semanticAstEqual(value, right[index]));
   }
   if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
-  const ignored = new Set(['pos', 'srcByteLength']);
+  const ignored = POSITION_KEYS;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   const leftKeys = Object.keys(leftRecord).filter((key) => !ignored.has(key)).sort();
@@ -565,7 +538,7 @@ function semanticAst(value: unknown, stripMetadata = true): unknown {
   if (!value || typeof value !== 'object') return value;
   const record = value as Record<string, unknown>;
   return Object.fromEntries(Object.keys(value as Record<string, unknown>).sort()
-    .filter((key) => !stripMetadata || (key !== 'pos' && key !== 'srcByteLength'))
+    .filter((key) => !stripMetadata || !POSITION_KEYS.has(key))
     .map((key) => [key, semanticAst(record[key], stripMetadata && key !== 'keyValues')]));
 }
 
@@ -620,10 +593,10 @@ export function applyStructuredAstPatch(ast: unknown, operations: unknown[]) {
   validateStructuredPayload(operations, 'Patch operations');
   validatePatchOperations(operations);
   const base = validateAst(ast, 'AST');
-  const patched = applyAstPatch(base, operations);
-  const normalized = fromAstJson(patched, Buffer.byteLength(JSON.stringify(patched), 'utf8'));
-  assertWriterDepth(normalized);
-  return { ast: toAstJson(normalized), source: renderCarve(normalized) };
+  const patched = stripPositions(applyAstPatch(base, operations));
+  validateAst(patched, 'Patched AST');
+  assertWriterDepth(patched);
+  return { ast: patched, source: writeCarve(patched as unknown as DocumentNode) };
 }
 
 function validateReversiblePatch(value: unknown): ReversibleStructuredAstPatch {
@@ -673,15 +646,49 @@ export function applyReversibleStructuredAstPatch(source: string, value: unknown
   };
 }
 
-export function migrate(source: string, format: SourceFormat, dialect?: MarkdownDialect): MigrationResult {
+export interface MigrationDiagnostic { code: string; message: string; severity: 'info' | 'warning' | 'error'; path?: string; line?: number; column?: number }
+export interface MigrationResult { value: string; report: { schemaVersion: 3; sourceFormat: SourceFormat; diagnostics: MigrationDiagnostic[] } }
+
+const SEVERITY: Record<string, MigrationDiagnostic['severity']> = { error: 'error', warning: 'warning', hint: 'info', info: 'info' };
+
+export function migrate(source: string, format: SourceFormat): MigrationResult {
   validateSource(source);
-  if (dialect && format !== 'markdown') {
-    throw new Error('markdownDialect is only valid when format is markdown.');
+  if (format === 'bbcode') throw new Error('BBCode import is not carried over to Carve 0.2.');
+  if (format === 'html') {
+    const imported = importHtml(source);
+    const diagnostics = imported.diagnostics.map((entry) => {
+      const record = entry as unknown as Record<string, unknown>;
+      return { code: String(record.code), message: String(record.message), severity: SEVERITY[String(record.severity)] ?? 'warning',
+        ...(typeof record.path === 'string' ? { path: record.path } : {}) };
+    });
+    return { value: imported.source, report: { schemaVersion: 3, sourceFormat: format, diagnostics } };
   }
-  switch (format) {
-    case 'html': return migrateHtml(source);
-    case 'markdown': return migrateMarkdown(source, { dialect });
-    case 'djot': return migrateDjot(source);
-    case 'bbcode': return migrateBbcode(source);
-  }
+  // Markdown, GFM and Djot import are outside the 0.2 specification (C2-T-003);
+  // the engine ships them only as `carve2 import`.
+  const run = runCarve2(['import', '--from', format], source);
+  if (run.status !== 0) throw new Error(`carve2 import --from ${format} failed: ${run.stderr.trim() || `exit ${run.status}`}`);
+  const diagnostics = run.stderr.split('\n').filter((line) => line.trim() !== '').map((line) => {
+    const match = /^carve\[([^\]]+)\]:\s*(.*)$/.exec(line);
+    return { code: match?.[1] ?? 'import-note', message: match?.[2] ?? line, severity: 'warning' as const };
+  });
+  return { value: run.stdout, report: { schemaVersion: 3, sourceFormat: format, diagnostics } };
+}
+
+export interface UpgradeRecord { [field: string]: unknown }
+export interface UpgradeResult { value: string; changed: boolean; check: string; writable: boolean; records: UpgradeRecord[]; engine01: string }
+
+/** `carve_upgrade`: rewrite Carve 0.1 source as 0.2 with `carve2 upgrade`. */
+export function upgrade(source: string): UpgradeResult {
+  validateSource(source);
+  const output = runCarve2(['upgrade'], source);
+  const report = runCarve2(['upgrade', '--json'], source);
+  if (output.status === 2 || report.status === 2) throw new Error(`carve2 upgrade failed: ${(output.stderr || report.stderr).trim()}`);
+  let parsed: { engine01?: string; files?: Array<{ changed?: boolean; check?: string; records?: UpgradeRecord[] }> };
+  try { parsed = JSON.parse(report.stdout) as typeof parsed; }
+  catch { throw new Error('carve2 upgrade returned no JSON report.'); }
+  const file = parsed.files?.[0];
+  if (!file) throw new Error('carve2 upgrade returned an empty report.');
+  const check = String(file.check ?? 'unknown');
+  return { value: output.stdout, changed: file.changed === true, check, writable: check === 'pass' || check === 'explained',
+    records: file.records ?? [], engine01: String(parsed.engine01 ?? '') };
 }

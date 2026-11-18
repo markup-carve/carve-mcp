@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { KNOWN_LINT_PLATFORMS, type LintPlatform } from '@markup-carve/carve';
+import { LINT_PLATFORMS as KNOWN_LINT_PLATFORMS, type LintPlatform } from './engine.js';
 
 export interface ReviewConfiguration {
   maxDepth?: number;

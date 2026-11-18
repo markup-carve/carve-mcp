@@ -15,35 +15,34 @@ function position(node: Record<string, unknown>): Position | undefined {
   return pos as Position;
 }
 
-// Engine positions count Unicode code points over the source as given, with
-// CRLF and a leading BOM intact. Slicing and patches need UTF-16 indexes and
-// UTF-8 bytes, so every offset passes through here.
+// 0.2 engine positions are UTF-8 byte offsets over the source as given, with
+// CRLF and a leading BOM intact. Slicing needs UTF-16 indexes, so every offset
+// passes through here.
 export class SourceOffsets {
-  private readonly units: number[] = [];
-  private readonly bytes: number[] = [];
+  private readonly units = new Map<number, number>();
+  private readonly length: number;
 
   constructor(readonly source: string) {
     let unit = 0;
     let byte = 0;
     for (const character of source) {
-      this.units.push(unit);
-      this.bytes.push(byte);
+      this.units.set(byte, unit);
       const point = character.codePointAt(0)!;
       unit += character.length;
       byte += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
     }
-    this.units.push(unit);
-    this.bytes.push(byte);
+    this.units.set(byte, unit);
+    this.length = byte;
   }
 
-  get codePoints(): number { return this.units.length - 1; }
-  unit(point: number): number { return this.units[this.checked(point)]!; }
-  byte(point: number): number { return this.bytes[this.checked(point)]!; }
+  get codePoints(): number { return this.length; }
+  unit(offset: number): number { return this.units.get(this.checked(offset))!; }
+  byte(offset: number): number { return this.checked(offset); }
   slice(start: number, end: number): string { return this.source.slice(this.unit(start), this.unit(end)); }
 
-  private checked(point: number): number {
-    if (!Number.isInteger(point) || point < 0 || point > this.codePoints) throw new Error('AST position lies outside the source.');
-    return point;
+  private checked(offset: number): number {
+    if (!Number.isInteger(offset) || !this.units.has(offset)) throw new Error('AST position lies outside the source.');
+    return offset;
   }
 }
 

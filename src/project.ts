@@ -3,8 +3,9 @@ import GithubSlugger from 'github-slugger';
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfm } from 'micromark-extension-gfm';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
-import type { LintPlatform, LintWarning } from '@markup-carve/carve';
-import { AST_CHILD_FIELDS } from './ast-fields.js';
+import type { LintPlatform, Warning as LintWarning } from './engine.js';
+import { childEntries } from './ast-fields.js';
+import { stringOffsetOfByte } from '@markup-carve/carve/v2';
 import { expandDocument } from './includes.js';
 import { lint, parse } from './tools.js';
 import { formatWorkspaceSource } from './edits.js';
@@ -95,22 +96,22 @@ function headingText(nodes: MarkdownNode[]): string {
 function documentLinks(path: string, source: string): Array<{ raw: string; line: number; column: number }> {
   if (CARVE_EXTENSIONS.has(extname(path).toLowerCase())) {
     const links: Array<{ raw: string; line: number; column: number }> = [];
-    const codepoints = Array.from(source);
     const walk = (value: unknown): void => {
       if (Array.isArray(value)) { value.forEach(walk); return; }
       if (!value || typeof value !== 'object') return;
       const node = value as Record<string, unknown>;
       if (node.type === 'link' && typeof node.href === 'string') {
         const pos = node.pos as { startOffset?: number; endOffset?: number; startLine?: number; startColumn?: number } | undefined;
-        const start = pos?.startOffset ?? 0;
-        const segment = codepoints.slice(start, pos?.endOffset).join('');
-        const marker = node.ref ? -1 : segment.indexOf('](');
+        // Positions are UTF-8 byte offsets in 0.2.
+        const start = stringOffsetOfByte(source, pos?.startOffset ?? 0);
+        const segment = source.slice(start, pos?.endOffset === undefined ? undefined : stringOffsetOfByte(source, pos.endOffset));
+        const marker = node.key ? -1 : segment.indexOf('](');
         const hrefAt = marker < 0 ? -1 : segment.indexOf(node.href, marker + 2);
         const location = hrefAt < 0 ? { line: pos?.startLine ?? 1, column: pos?.startColumn ?? 1 }
-          : lineColumn(source, codepoints.slice(0, start).join('').length + hrefAt);
+          : lineColumn(source, start + hrefAt);
         links.push({ raw: node.href, ...location });
       }
-      for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
+      for (const [, child] of childEntries(node)) walk(child);
     };
     walk(parse(source));
     return links;
@@ -159,7 +160,8 @@ function anchorIdsFromTree(tree: unknown, fold: boolean): Set<string> {
       const id = (node.attrs as Record<string, unknown>).id;
       if (typeof id === 'string') ids.add(fold ? id.toLowerCase() : id);
     }
-    for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
+    if (node.type === 'heading' && typeof node.generatedId === 'string') ids.add(fold ? node.generatedId.toLowerCase() : node.generatedId);
+    for (const [, child] of childEntries(node)) walk(child);
   };
   walk(tree);
   return ids;
@@ -255,7 +257,7 @@ export async function reviewWorkspace(
         if (includeWarningKeys.has(key)) continue;
         includeWarningKeys.add(key);
         projectWarnings.push(projectWarning('include-warning', { path: warning.file ?? path, line: warning.line, column: warning.column,
-          message: warning.rule === 'include-unresolved'
+          message: warning.rule === 'include-unresolved' || warning.rule === 'include-not-found'
             ? `${warning.rule}: ${warning.message} Check the path and review scope (depth, limit, exclusions).`
             : `${warning.rule}: ${warning.message}` }));
       }
