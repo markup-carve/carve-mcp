@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileSystemResolver } from '@markup-carve/carve/node';
 import type { ExtensionDefinition, IncludeConfig, IncludeResolver } from '@markup-carve/carve';
 import { includeDependencies } from '@markup-carve/carve';
-import { lintDiagnostics, parseTreeWithDiagnostics, toWarning, type Diagnostic, type DocumentNode, type LintPlatform, type Warning } from './engine.js';
+import { lintDiagnostics, lineColumn, parseTreeWithDiagnostics, stringOffsetOfByte, toWarning, type Diagnostic, type DocumentNode, type LintPlatform, type Warning } from './engine.js';
 import { documentPathRefusal, hiddenPathRefusal, type Workspace } from './workspace.js';
 
 export interface IncludeRequest { includeRootIndex?: number; sourcePath?: string }
@@ -157,7 +157,7 @@ export function expandDocument(source: string, extensions: readonly ExtensionDef
   return { doc: document, includes: { rootIndex: scope.rootIndex, warnings, dependencies, suppressedWarnings: suppressedDiagnostics } };
 }
 
-export type IncludedLintWarning = Warning;
+export type IncludedLintWarning = Warning & { includedBy?: Array<{ file?: string; line: number; column: number; start: number; end: number }> };
 
 /**
  * UTF-16 span of the directive token at a 1-based line and codepoint column.
@@ -195,9 +195,17 @@ export function lintWithIncludes(source: string, scope: IncludeScope, platforms:
   return diagnostics.map((diagnostic) => {
     const warning = toWarning(diagnostic, read(diagnostic.file));
     const positioned = warning.rule.startsWith('include') ? { ...warning, ...directiveSpan(read(diagnostic.file) ?? '', warning.line, warning.column) } : warning;
-    if (diagnostic.file === undefined) return positioned;
+    const includedBy = diagnostic.includedBy?.map((site) => {
+      const text = read(site.file);
+      const start = text === undefined ? 0 : stringOffsetOfByte(text, site.range.startOffset);
+      const end = text === undefined ? 0 : stringOffsetOfByte(text, site.range.endOffset);
+      const file = site.file === undefined ? scope.sourcePath : contained(scope.root, resolve(scope.root, site.file));
+      return { ...(file === undefined ? {} : { file }), ...(text === undefined ? { line: 1, column: 1 } : lineColumn(text, start)), start, end };
+    });
+    const withChain = includedBy === undefined ? positioned : { ...positioned, includedBy };
+    if (diagnostic.file === undefined) return withChain;
     const file = contained(scope.root, resolve(scope.root, diagnostic.file));
-    const { file: _dropped, ...rest } = positioned;
+    const { file: _dropped, ...rest } = withChain;
     return file ? { ...rest, file } : rest;
   });
 }

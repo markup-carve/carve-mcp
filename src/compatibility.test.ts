@@ -31,7 +31,7 @@ describe('a denied destination scheme', () => {
     expect(verdict('plain')).toMatchObject({ lossCount: 0, codes: [] });
   });
 
-  it.skip('is compatible where no destination is emitted (lint reads the denied autolink as bare-html-tag, markup-carve/carve-js#5081)', () => {
+  it('is compatible where no destination is emitted', () => {
     expect(verdict('plain')).toStrictEqual({ status: 'compatible', lossCount: 0, codes: [] });
   });
 });
