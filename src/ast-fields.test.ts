@@ -8,7 +8,7 @@ import { astNodes, parse, type AstJsonDocument } from './tools.js';
  * under it from `carve_select_ast_nodes`, `carve_plan_ast_edit` and the node
  * previews (carve-mcp#60). Both checks read the installed 0.2 engine.
  */
-const NODE_TYPES = new URL('../node_modules/@markup-carve/carve/dist/v2/types/v2/src/ast-nodes.d.ts', import.meta.url);
+const NODE_TYPES = new URL('../node_modules/@markup-carve/carve/dist/types/src/ast-nodes.d.ts', import.meta.url);
 
 function engineNodeFields(): string[] {
   const fields = new Set<string>();

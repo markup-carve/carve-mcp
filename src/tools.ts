@@ -1,7 +1,7 @@
 import { childEntries } from './ast-fields.js';
 import {
   CarveRenderError, assertTree, extensionOptions, formatSource, importHtml, lintDiagnostics, parseTree, renderHtml,
-  runCarve2, toWarning, treeJson, writeCarve, writeTarget,
+  importFormat, lineColumn, runCarve, stringOffsetOfByte, toWarning, treeJson, writeCarve, writeTarget,
   type Diagnostic, type DocumentNode, type ExtensionName, type HeadingIds, type LintPlatform, type RegistryTarget, type Warning,
 } from './engine.js';
 import { applyAstPatch, createAstPatch, POSITION_KEYS, withoutPositions as stripPositions, type AstPatchOperation } from './ast-patch.js';
@@ -130,7 +130,10 @@ export function render(source: string, target: RenderTarget, settings: RenderSet
     return { ...renderResult(html.html, html.diagnostics, html.suppressedDiagnostics, settings), ...includes };
   }
   const tree = expanded?.doc ?? parseTree(source, { extensions: options.extensions });
-  const written = writeTarget(target, tree, { strictLosses: options.strictLosses });
+  const written = writeTarget(target, tree, {
+    strictLosses: options.strictLosses,
+    ...(settings.smartTypography !== undefined ? { smartTypography: settings.smartTypography } : {}),
+  });
   return { ...renderResult(written.output, written.diagnostics, 0, settings), ...includes };
 }
 
@@ -653,48 +656,42 @@ export interface MigrationResult { value: string; report: { schemaVersion: 3; so
 
 const SEVERITY: Record<string, MigrationDiagnostic['severity']> = { error: 'error', warning: 'warning', hint: 'info', info: 'info' };
 
+function migrationDiagnostics(entries: readonly unknown[], input: string | undefined): MigrationDiagnostic[] {
+  return entries.map((entry) => {
+    const record = entry as Record<string, unknown>;
+    const range = record.range as { startOffset?: number } | undefined;
+    const position = input !== undefined && typeof range?.startOffset === 'number'
+      ? lineColumn(input, stringOffsetOfByte(input, range.startOffset)) : undefined;
+    return { code: String(record.code), message: String(record.message), severity: SEVERITY[String(record.severity)] ?? 'warning',
+      ...(typeof record.path === 'string' ? { path: record.path } : {}), ...(position ?? {}) };
+  });
+}
+
 export function migrate(source: string, format: SourceFormat): MigrationResult {
   validateSource(source);
-  if (format === 'bbcode') throw new Error('BBCode import is not carried over to Carve 0.2.');
   if (format === 'html') {
     const imported = importHtml(source);
-    const diagnostics = imported.diagnostics.map((entry) => {
-      const record = entry as unknown as Record<string, unknown>;
-      return { code: String(record.code), message: String(record.message), severity: SEVERITY[String(record.severity)] ?? 'warning',
-        ...(typeof record.path === 'string' ? { path: record.path } : {}) };
-    });
-    return { value: imported.source, report: { schemaVersion: 3, sourceFormat: format, diagnostics } };
+    return { value: imported.source, report: { schemaVersion: 3, sourceFormat: format, diagnostics: migrationDiagnostics(imported.diagnostics, undefined) } };
   }
-  // Markdown, GFM and Djot import are outside the 0.2 specification (C2-T-003);
-  // the engine ships them only as `carve2 import`.
-  const run = runCarve2(['import', '--from', format], source);
-  if (run.status !== 0) throw new Error(`carve2 import --from ${format} failed: ${run.stderr.trim() || `exit ${run.status}`}`);
-  // `carve2 import` writes `<stdin>:LINE:COLUMN: SEVERITY CODE MESSAGE` per diagnostic, also on success.
-  const diagnostics = run.stderr.split('\n').filter((line) => line.trim() !== '').map((line) => {
-    const entry = /^<stdin>:(\d+):(\d+): (error|warning|hint|info) (\S+) (.*)$/.exec(line);
-    if (entry) {
-      return { code: entry[4]!, message: entry[5]!, severity: SEVERITY[entry[3]!] ?? 'warning', line: Number(entry[1]), column: Number(entry[2]) };
-    }
-    const failure = /^carve\[([^\]]+)\]:\s*(.*)$/.exec(line);
-    return { code: failure?.[1] ?? 'import-note', message: failure?.[2] ?? line, severity: 'warning' as const };
-  });
-  return { value: run.stdout, report: { schemaVersion: 3, sourceFormat: format, diagnostics } };
+  // Markdown, GFM, Djot and BBCode import are outside the 0.2 specification (C2-T-003).
+  const imported = importFormat(source, format);
+  return { value: imported.source, report: { schemaVersion: 3, sourceFormat: format, diagnostics: migrationDiagnostics(imported.diagnostics, source) } };
 }
 
 export interface UpgradeRecord { [field: string]: unknown }
 export interface UpgradeResult { value: string; changed: boolean; check: string; writable: boolean; records: UpgradeRecord[]; engine01: string }
 
-/** `carve_upgrade`: rewrite Carve 0.1 source as 0.2 with `carve2 upgrade`. */
+/** `carve_upgrade`: rewrite Carve 0.1 source as 0.2 with `carve upgrade`. */
 export function upgrade(source: string): UpgradeResult {
   validateSource(source);
-  const output = runCarve2(['upgrade'], source);
-  const report = runCarve2(['upgrade', '--json'], source);
-  if (output.status === 2 || report.status === 2) throw new Error(`carve2 upgrade failed: ${(output.stderr || report.stderr).trim()}`);
+  const output = runCarve(['upgrade'], source);
+  const report = runCarve(['upgrade', '--json'], source);
+  if (output.status === 2 || report.status === 2) throw new Error(`carve upgrade failed: ${(output.stderr || report.stderr).trim()}`);
   let parsed: { engine01?: string; files?: Array<{ changed?: boolean; check?: string; records?: UpgradeRecord[] }> };
   try { parsed = JSON.parse(report.stdout) as typeof parsed; }
-  catch { throw new Error('carve2 upgrade returned no JSON report.'); }
+  catch { throw new Error('carve upgrade returned no JSON report.'); }
   const file = parsed.files?.[0];
-  if (!file) throw new Error('carve2 upgrade returned an empty report.');
+  if (!file) throw new Error('carve upgrade returned an empty report.');
   const check = String(file.check ?? 'unknown');
   return { value: output.stdout, changed: file.changed === true, check, writable: check === 'pass' || check === 'explained',
     records: file.records ?? [], engine01: String(parsed.engine01 ?? '') };
