@@ -181,10 +181,8 @@ can. Callers can also choose heading-ID behavior, loss policy, smart typography,
 and extensions. On Carve 0.2 smart typography is a boolean (`true` substitutes
 quotes, ellipses and dashes, `false` keeps what the author typed); the 0.1
 `glyph`, `source` and `{ "quotes": false }` shapes are gone. The `tabs`
-extension, and the `semantic-spans` and `wikilinks` bundles of
-`@markup-carve/carve/extensions`, work. `autolink` stays in the schema but is
-refused with a clear error until carve-js ports it to the provisional 0.2
-extension API (markup-carve/carve-js#5073).
+extension, the `autolink` extension and the `semantic-spans` and `wikilinks`
+bundles of `@markup-carve/carve/extensions` work.
 
 `carve_migrate` imports HTML through the core entry and Markdown, GFM, Djot and
 BBCode through `@markup-carve/carve/import`, since 0.2 specifies no importer for
