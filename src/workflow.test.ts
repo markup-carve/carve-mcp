@@ -67,7 +67,8 @@ describe('writer project workflow', () => {
 
   it('keeps BOM bytes and link syntax through read, preview, write, and undo', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-bom-'));
-    const unchanged = '\uFEFF# Title\n';
+    // C2-W-035: canonical 0.2 headings use `=`, so this file is already formatted.
+    const unchanged = '\uFEFF= Title\n';
     const formatted = '\uFEFF# Title\r\n\r\n\\[a](https://example.com) \\<https://example.com>   \r\n\r\n[link](https://example.com){.keep #link-id}\r\n\r\n{#next}\r\n# Next\r\n';
     await writeFile(join(root, 'unchanged.crv'), unchanged);
     await writeFile(join(root, 'formatted.crv'), formatted);
@@ -122,10 +123,12 @@ describe('writer project workflow', () => {
 
       if (changed) {
         expect(preview.proposedContent).toContain('\\[a](https://example.com) \\<https://example.com>');
-        expect(preview.proposedContent).toContain('[link](https://example.com){.keep #link-id}');
+        // C2-W-076, C2-W-048: the 0.2 writer puts the id before the classes in an attribute block.
+        expect(preview.proposedContent).toContain('[link](https://example.com){#link-id .keep}');
         const html = render(preview.proposedContent, 'html').value;
         expect(html).toContain('[a](https://example.com) &lt;https://example.com&gt;');
-        expect(html).toContain('class="keep" id="link-id"');
+        // C2-H-009: 0.2 HTML writes id before class.
+        expect(html).toContain('id="link-id" class="keep"');
         expect(html).toContain('id="next"');
       }
 

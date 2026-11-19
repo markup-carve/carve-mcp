@@ -6,8 +6,9 @@
   },
   {
     "name": "attributes spans and empty cells",
-    "canonical": "|={.total} Total |={>} Qty |\n| 長い | 7 |\n| ^ | < |\n| | |\n",
-    "aligned": "|={.total} Total |={>} Qty |\n| 長い           | 7       |\n| ^              | <       |\n|                |         |\n"
+    "canonical": "|={.total} Total |={>} Qty |\n| 長い | 7 |\n| ^ | \\< |\n| | |\n",
+    "aligned": "|={.total} Total |={>} Qty |\n| 長い           | 7       |\n| ^              | \\<      |\n|                |         |\n",
+    "note": "Carve 0.2: a lone < in a cell is a span mark, so the writer escapes text < (C2-W-063)."
   },
   {
     "name": "authored separator",
@@ -22,8 +23,9 @@
   },
   {
     "name": "rowspan continuation",
-    "canonical": "| a | longer |\n| ^ | c |\n+ x | y |\n",
-    "aligned": "| a | longer |\n| ^ | c      |\n+ x | y      |\n"
+    "canonical": "| a x | longer |\n| ^ | c |\n+ | y |\n",
+    "aligned": "| a x | longer |\n| ^   | c      |\n+     | y      |\n",
+    "note": "Carve 0.2: a continuation fragment under a span mark joins the spanning cell (C2-B-184)."
   },
   {
     "name": "graphemes escaped pipe row attributes and caption",

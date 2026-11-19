@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+The TypeScript server moves to the unreleased Carve 0.2 engine, pinned by commit from carve-js `next2` (#131). The native Rust server stays on Carve 0.1 until carve-rs offers the 0.2 calls it needs (#132).
+
+### Breaking
+
+- Trees are Carve 2.0 trees: list, table and definition children sit in `children`, `keyValues` is a list of pairs, and positions count UTF-8 bytes (#131).
+- `carve_render` and `carve_check_targets` answer "writer not available yet" for the `markdown`, `plain` and `ansi` targets until the engine registers those writers; `carve_check_targets` reports such a target as `unavailable` in a version 2 receipt (#131).
+- The `autolink`, `semantic-spans` and `wikilinks` extensions are refused until 0.2 defines them; `tabs` still works (#131).
+- `smartTypography` takes a boolean only (#131).
+- `carve_migrate` returns a version 3 report, adds GFM, drops the Markdown dialect switches and refuses BBCode, which has no 0.2 importer (#131).
+- `carve://rules` serves the 0.2 clauses by `C2-*` ID; the `CARVE-*` IDs are gone (#131).
+- `carve_format` and every source-writing tool write canonical 0.2 source, such as `=` headings (#131).
+
+### Fixes
+
+- `carve_replace_source` and `carve_reviewed_edit` measure their edits in UTF-8 bytes and keep a block's attribute lines out of the replaced range (#131).
+
+### Improvements
+
+- New `carve_upgrade` tool rewrites Carve 0.1 source as 0.2 and returns the upgrade records (#131).
+- New `carve://spec` and `carve://upgrade-map` resources serve the vendored 0.2 specification and the 0.1-to-0.2 upgrade map (#131).
+
 ## 0.1.13 - 2026-11-12
 
 Both MCP servers move to the published Carve 0.1.14 wave: carve-js 0.1.16 from npm, carve-rs 0.1.14 from crates.io and the 0.1.14 rule index (#130).

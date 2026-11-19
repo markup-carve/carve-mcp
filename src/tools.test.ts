@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LIB_VERSION } from '@markup-carve/carve';
+import { ENGINE_VERSION as LIB_VERSION } from './engine.js';
 import { createRequire } from 'node:module';
 import { sha256Text } from './blocks.js';
 const { version: mcpVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, validateSource } from './tools.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, planSemanticAstEdit, render, selectAstNodes, upgrade, validateSource } from './tools.js';
 import { diagnoseAndFix } from './diagnostics.js';
 import { compatibilityMatrix } from './compatibility.js';
 
@@ -39,29 +39,59 @@ describe('Carve operations', () => {
     expect(() => diagnoseAndFix('See </#missing>.', [], [preview.fixes[0]!.id])).toThrow(/writer review/);
   });
   it('formats source canonically', () => expect(format('# Hello').value).toContain('Hello'));
-  it('renders every supported target', () => {
-    expect(render('# Hello', 'html').value).toContain('<h1');
-    expect(render('# Hello', 'markdown').value).toContain('# Hello');
-    expect(render('# Hello', 'plain').value).toContain('Hello');
-    expect(render('# Hello', 'ansi').value).toContain('Hello');
+  it('renders HTML', () => {
+    expect(render('= Hello', 'html').value).toContain('<h1');
+  });
+  it('refuses the writer targets 0.2 has not registered yet', () => {
+    for (const [target, writer] of [['markdown', 'markdown'], ['plain', 'plain-text'], ['ansi', 'ansi']] as const) {
+      expect(() => render('= Hello', target)).toThrow(new RegExp(`The ${writer} writer is not available yet`));
+    }
+  });
+  // The 0.1 Markdown, plain-text and ANSI writers return through the 0.2 writer registry.
+  it.skip('renders Markdown through the markdown writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+    expect(render('= Hello', 'markdown').value).toContain('Hello');
+  });
+  it.skip('renders plain text through the plain-text writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+    expect(render('= Hello', 'plain').value).toContain('Hello');
+  });
+  it.skip('renders ANSI through the ansi writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+    expect(render('= Hello', 'ansi').value).toContain('Hello');
   });
   it('reports target-specific warnings and rendering losses', () => {
+    // The github target renders through the markdown writer, unavailable until markup-carve/carve-js#5057;
+    // a raw fence names its format after a space (C2-B-225).
     const github = compatibilityMatrix('Contact @person', ['github']);
-    expect(github).toMatchObject({ compatible: false, summary: { warning: 1 }, targets: [{ target: 'github', status: 'warning', warningCount: 1 }] });
-    const lossy = compatibilityMatrix('```=latex\nx\n```', ['plain', 'pdf']);
+    expect(github).toMatchObject({ compatible: false, summary: { unavailable: 1 }, targets: [{ target: 'github', status: 'unavailable', warningCount: 1 }] });
+    const lossy = compatibilityMatrix('``` =latex\nx\n```', ['plain', 'pdf']);
     expect(lossy.summary.lossy).toBeGreaterThan(0);
     expect(lossy.targets.find(({ target }) => target === 'pdf')?.status).toBe('lossy');
     expect(lossy.targets.some(({ suggestions }) => suggestions.length > 0)).toBe(true);
     expect(() => compatibilityMatrix('# Hello', [])).toThrow(/between 1 and 7/);
   });
   it('applies named presets and extensions', () => {
-    expect(render('# Héllo', 'html', { preset: 'portable' }).value).toContain('id="hello"');
-    expect(render('Visit https://example.com', 'html', { extensions: ['autolink'] }).value).toContain('<a href=');
-    expect(() => render('# Hello', 'markdown', { preset: 'static-html' })).toThrow(/HTML target/);
-    expect(() => render('[x]{samp}', 'markdown', { extensions: ['semantic-spans'] })).toThrow(/HTML target/);
+    expect(render('= Héllo', 'html', { preset: 'portable' }).value).toContain('id="hello"');
+    expect(render('= Héllo', 'html', { headingIds: 'keep-case' }).value).toContain('id="Héllo"');
+    expect(() => render('= Hello', 'markdown', { preset: 'static-html' })).toThrow(/HTML target/);
+    const tabs = ':::: tabs\n::: tab "Install"\nRun.\n:::\n::::\n';
+    expect(render(tabs, 'html', { extensions: ['tabs'] }).value).toContain('Install');
   });
-  it('keeps typed quotes while substituting other glyphs', () => {
-    expect(render('"Wait..." -- it\'s fine', 'html', { smartTypography: { quotes: false } }).value).toContain('<p>"Wait…" – it\'s fine</p>');
+  it('refuses the 0.1 extensions that have no 0.2 definition', () => {
+    for (const name of ['autolink', 'semantic-spans', 'wikilinks'] as const) {
+      expect(() => render('Visit https://example.com', 'html', { extensions: [name] })).toThrow(new RegExp(`The ${name} extension is not available in Carve 0.2 yet`));
+    }
+  });
+  it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet, markup-carve/carve#6070)', () => {
+    expect(render('Visit https://example.com', 'html', { extensions: ['autolink'] }).value).toContain('<a href=');
+  });
+  it.skip('renders semantic spans with the semantic-spans extension (no 0.2 semantic-spans extension yet, markup-carve/carve#6070)', () => {
+    expect(render('[x]{samp}', 'html', { extensions: ['semantic-spans'] }).value).toContain('<samp>');
+  });
+  it.skip('links wiki targets with the wikilinks extension (no 0.2 wikilinks extension yet, markup-carve/carve-js#5047)', () => {
+    expect(render('[[Page]]', 'html', { extensions: ['wikilinks'] }).value).toContain('<a href=');
+  });
+  // UPGRADING (smartTypography): 0.2 takes a boolean only, so the 0.1 `{ quotes: false }` shape is gone.
+  it('substitutes typographic glyphs on request', () => {
+    expect(render('"Wait..." -- it\'s fine', 'html', { smartTypography: true }).value).toContain('<p>“Wait…” – it’s fine</p>');
   });
   it('blanks a denied destination at either sanitizeUrls setting', () => {
     const source = '[x](javascript:alert(1))\n';
@@ -79,19 +109,21 @@ describe('Carve operations', () => {
   });
   it('returns a position-aware AST', () => expect(parse('# Hello')).toMatchObject({ type: 'document' }));
   it('creates and applies position-independent AST patches', () => {
-    const before = parse('# Before');
-    const after = parse('# After');
+    const before = parse('= Before');
+    const after = parse('= After');
     const patch = createStructuredAstPatch(before, after);
     expect(patch.operationCount).toBeGreaterThan(0);
     expect(patch.changes).toEqual(expect.arrayContaining([expect.objectContaining({ summary: expect.stringContaining('heading') })]));
     expect(patch.operations).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'replace' })]));
+    // C2-A-010: a 0.2 tree carries srcByteLength only for measured source, so positions and lengths stay out of patches.
+    expect(JSON.stringify(patch.operations)).not.toContain('"pos"');
     const applied = applyStructuredAstPatch(before, patch.operations);
-    expect(applied.ast).toEqual(expect.objectContaining({ type: 'document', srcByteLength: 0 }));
+    expect(applied.ast).toEqual(expect.objectContaining({ type: 'document', astVersion: '2.0' }));
+    expect(JSON.stringify(applied.ast)).not.toContain('"pos"');
     expect(applied.source).toContain('After');
-    expect(before).toMatchObject({ srcByteLength: 8 });
   });
   it('selects stable semantic nodes and reports ambiguous type matches', () => {
-    const ast = parse('# First\n\nText\n\n# Second\n\n[^n]: Note');
+    const ast = parse('= First\n\nText\n\n= Second\n\n[^n]: Note');
     expect(selectAstNodes(ast, { kind: 'heading-id', value: 'First' })).toMatchObject({ matchCount: 1, matches: [{ type: 'heading', identity: 'First', preview: 'First' }] });
     expect(selectAstNodes(ast, { kind: 'footnote-label', value: 'n' })).toMatchObject({ matchCount: 1, matches: [{ type: 'footnote', identity: 'n' }] });
     expect(selectAstNodes(ast, { kind: 'node-type', value: 'heading' }).matchCount).toBe(2);
@@ -103,7 +135,7 @@ describe('Carve operations', () => {
       expect(selectAstNodes(ast, { kind: 'id', value: id })).toMatchObject({ matchCount: 1, matches: [{ path, type, identity: id }] });
       expect(selectAstNodes(ast, { kind: 'heading-id', value: id }).matchCount).toBe(0);
     }
-    expect(selectAstNodes(parse('# Title'), { kind: 'id', value: 'Title' })).toMatchObject({ matchCount: 1, matches: [{ type: 'heading' }] });
+    expect(selectAstNodes(parse('= Title'), { kind: 'id', value: 'Title' })).toMatchObject({ matchCount: 1, matches: [{ type: 'heading' }] });
     expect(selectAstNodes(ast, { kind: 'id', value: 'missing' }).matchCount).toBe(0);
     const plan = planSemanticAstEdit(source, { kind: 'id', value: 'intro' }, { kind: 'replace-text', text: 'Rewritten.' });
     expect(plan.match).toMatchObject({ path: '/children/0', identity: 'intro' });
@@ -128,11 +160,12 @@ describe('Carve operations', () => {
     expect(patch.changes.every(({ target, summary }) => !target.includes('\n') && !summary.includes('\n'))).toBe(true);
     const mixed = createStructuredAstPatch(parse('- a\n- b'), parse('- x\n- b\n- c'));
     expect(mixed.changes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'replace', summary: expect.stringMatching(/^Changed items on/) }),
+      // C2-A-053: list items are `children` in 0.2.
+      expect.objectContaining({ kind: 'replace', summary: expect.stringMatching(/^Changed children on list/) }),
     ]));
   });
   it('plans exact, reversible semantic edits without writing', () => {
-    const source = '# Before\n\nBody';
+    const source = '= Before\n\nBody';
     const plan = planSemanticAstEdit(source, { kind: 'heading-id', value: 'Before' }, { kind: 'replace-text', text: 'After' });
     expect(plan).toMatchObject({
       edit: { kind: 'replace-text' }, match: { type: 'heading', identity: 'Before', preview: 'Before' },
@@ -140,36 +173,36 @@ describe('Carve operations', () => {
       sourcePatch: { sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) },
     });
     const applied = applyReversibleStructuredAstPatch(source, plan.reversiblePatch);
-    expect(applied.source).toContain('# After');
+    expect(applied.source).toContain('= After');
     expect(applied.source).toContain('{#Before}');
-    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('# Before');
+    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('= Before');
     expect(plan.notices).toEqual(expect.arrayContaining([expect.stringContaining('Preserved heading ID'), expect.stringContaining('inline formatting')]));
 
     const renamed = planSemanticAstEdit(source, { kind: 'heading-id', value: 'Before' }, { kind: 'rename-heading-id', id: 'intro' });
     const renamedSource = applyReversibleStructuredAstPatch(source, renamed.reversiblePatch).source;
     expect(renamedSource).toContain('{#intro}');
-    expect(applyReversibleStructuredAstPatch(renamedSource, renamed.reversiblePatch, true).source).toContain('# Before');
+    expect(applyReversibleStructuredAstPatch(renamedSource, renamed.reversiblePatch, true).source).toContain('= Before');
   });
   it('plans structural semantic edits and rejects unsafe selection', () => {
     const paragraph = { type: 'paragraph', children: [{ type: 'text', value: 'New' }] };
-    const deleted = planSemanticAstEdit('# Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'delete-node' });
-    expect(applyReversibleStructuredAstPatch('# Title\n\nBody', deleted.reversiblePatch).source).not.toContain('Body');
-    const replaced = planSemanticAstEdit('# Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-node', node: paragraph });
-    expect(applyReversibleStructuredAstPatch('# Title\n\nBody', replaced.reversiblePatch).source).toContain('New');
-    const inserted = planSemanticAstEdit('# Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-after', node: paragraph });
-    expect(applyReversibleStructuredAstPatch('# Title', inserted.reversiblePatch).source).toContain('New');
-    const insertedBefore = planSemanticAstEdit('# Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-before', node: paragraph });
-    expect(applyReversibleStructuredAstPatch('# Title', insertedBefore.reversiblePatch).source.startsWith('New')).toBe(true);
-    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'node-type', value: 'heading' }, { kind: 'delete-node' })).toThrow(/matched 2/);
-    const byPath = planSemanticAstEdit('# A\n\n# B', { kind: 'ast-path', value: '/children/1' }, { kind: 'delete-node' });
-    expect(applyReversibleStructuredAstPatch('# A\n\n# B', byPath.reversiblePatch).source).not.toContain('# B');
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'missing' }, { kind: 'delete-node' })).toThrow(/did not match/);
-    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'B' })).toThrow(/already in use/);
+    const deleted = planSemanticAstEdit('= Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'delete-node' });
+    expect(applyReversibleStructuredAstPatch('= Title\n\nBody', deleted.reversiblePatch).source).not.toContain('Body');
+    const replaced = planSemanticAstEdit('= Title\n\nBody', { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-node', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('= Title\n\nBody', replaced.reversiblePatch).source).toContain('New');
+    const inserted = planSemanticAstEdit('= Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-after', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('= Title', inserted.reversiblePatch).source).toContain('New');
+    const insertedBefore = planSemanticAstEdit('= Title', { kind: 'heading-id', value: 'Title' }, { kind: 'insert-before', node: paragraph });
+    expect(applyReversibleStructuredAstPatch('= Title', insertedBefore.reversiblePatch).source.startsWith('New')).toBe(true);
+    expect(() => planSemanticAstEdit('= A\n\n= B', { kind: 'node-type', value: 'heading' }, { kind: 'delete-node' })).toThrow(/matched 2/);
+    const byPath = planSemanticAstEdit('= A\n\n= B', { kind: 'ast-path', value: '/children/1' }, { kind: 'delete-node' });
+    expect(applyReversibleStructuredAstPatch('= A\n\n= B', byPath.reversiblePatch).source).not.toContain('= B');
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'missing' }, { kind: 'delete-node' })).toThrow(/did not match/);
+    expect(() => planSemanticAstEdit('= A\n\n= B', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'B' })).toThrow(/already in use/);
     expect(() => planSemanticAstEdit('Text[^a]\n\n[^a]: Note\n', { kind: 'footnote-label', value: 'a' }, { kind: 'delete-node' })).toThrow(/references remain/);
     expect(() => planSemanticAstEdit('Body', { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'a\n\nb' })).toThrow(/line breaks/);
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node', text: 'ignored' } as never)).toThrow(/does not accept text/);
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'A' })).toThrow(/would not change/);
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'bad\nid' })).toThrow(/control characters/);
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node', text: 'ignored' } as never)).toThrow(/does not accept text/);
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'A' })).toThrow(/would not change/);
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'A' }, { kind: 'rename-heading-id', id: 'bad\nid' })).toThrow(/control characters/);
   });
   it('plans edits for source documents larger than their positioned AST limit', () => {
     const source = 'a'.repeat(200_000);
@@ -177,7 +210,7 @@ describe('Carve operations', () => {
     expect(plan.sourcePatch.sourceBytes).toBe(200_000);
   });
   it('plans multiple semantic edits atomically against the original source', () => {
-    const source = '# A\n\n# B';
+    const source = '= A\n\n= B';
     const plan = planSemanticAstEdit(source, { kind: 'heading-id', value: 'B' }, { kind: 'rename-heading-id', id: 'A' }, [
       { selector: { kind: 'heading-id', value: 'A' }, edit: { kind: 'rename-heading-id', id: 'C' } },
     ]);
@@ -188,14 +221,14 @@ describe('Carve operations', () => {
     const applied = applyReversibleStructuredAstPatch(source, plan.reversiblePatch);
     expect(applied.source).toContain('{#A}');
     expect(applied.source).toContain('{#C}');
-    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('# A');
+    expect(applyReversibleStructuredAstPatch(applied.source, plan.reversiblePatch, true).source).toContain('= A');
   });
   it('keeps single-edit output compatible and tolerates existing heading ID collisions', () => {
-    const source = '{#same}\n# A\n\n{#same}\n# B\n\nBody';
+    const source = '{#same}\n= A\n\n{#same}\n= B\n\nBody';
     const plan = planSemanticAstEdit(source, { kind: 'node-type', value: 'paragraph' }, { kind: 'replace-text', text: 'Updated' });
     expect(plan).toMatchObject({ editCount: 1, steps: [{ edit: { kind: 'replace-text' } }] });
     expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toContain('Updated');
-    expect(() => planSemanticAstEdit('# A\n\n# B', { kind: 'heading-id', value: 'B' }, { kind: 'rename-heading-id', id: 'A' })).toThrow(/already in use/);
+    expect(() => planSemanticAstEdit('= A\n\n= B', { kind: 'heading-id', value: 'B' }, { kind: 'rename-heading-id', id: 'A' })).toThrow(/already in use/);
   });
   it('orders structural steps safely and rejects overlapping targets', () => {
     const source = 'One\n\nTwo\n\nThree';
@@ -203,11 +236,11 @@ describe('Carve operations', () => {
       { selector: { kind: 'ast-path', value: '/children/2' }, edit: { kind: 'delete-node' } },
     ]);
     expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source.trim()).toBe('Two');
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'B' }, [
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'A' }, { kind: 'replace-text', text: 'B' }, [
       { selector: { kind: 'ast-path', value: '/children/0/children/0' }, edit: { kind: 'delete-node' } },
     ])).toThrow(/overlapping/);
     const tooMany = Array.from({ length: MAX_SEMANTIC_EDIT_STEPS }, () => ({ selector: { kind: 'heading-id', value: 'A' } as const, edit: { kind: 'delete-node' } as const }));
-    expect(() => planSemanticAstEdit('# A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node' }, tooMany)).toThrow(/at most 100/);
+    expect(() => planSemanticAstEdit('= A', { kind: 'heading-id', value: 'A' }, { kind: 'delete-node' }, tooMany)).toThrow(/at most 100/);
   });
   it('applies text edits before structural edits resolved against the original AST', () => {
     const source = 'One\n\nTwo\n\nThree';
@@ -225,7 +258,7 @@ describe('Carve operations', () => {
     expect(applyReversibleStructuredAstPatch(source, plan.reversiblePatch).source).toBe('Text\n');
   });
   it('rejects malformed or excessive AST patches', () => {
-    const ast = parse('# Hello');
+    const ast = parse('= Hello');
     expect(() => applyStructuredAstPatch(ast, [{ op: 'replace', path: '/nope', value: true }])).toThrow(/does not exist/);
     expect(() => createStructuredAstPatch({ type: 'doc' }, ast)).toThrow(/document/);
     expect(() => applyStructuredAstPatch(ast, [{ op: 'move', path: '/children/0', value: true }])).toThrow(/unknown patch operation/);
@@ -236,32 +269,34 @@ describe('Carve operations', () => {
   it('orders patch paths deterministically by code point', () => {
     const before = parse('[x]{Foo="1" bar="2"}');
     const after = parse('[x]{Foo="9" bar="8"}');
+    // C2-A-032: keyValues is a list of [key, value] pairs, so a value is addressed by index.
     expect(createStructuredAstPatch(before, after).operations.map(({ path }) => path)).toEqual([
-      '/children/0/children/0/attrs/keyValues/Foo',
-      '/children/0/children/0/attrs/keyValues/bar',
+      '/children/0/children/0/attrs/keyValues/0/1',
+      '/children/0/children/0/attrs/keyValues/1/1',
     ]);
   });
   it('normalizes the returned AST to match its rendered source', () => {
     const ast = parse('Body');
-    const footnote = { type: 'footnote', label: 'note', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Note' }] }] };
+    // C2-A-179: 0.2 renames the footnote `label` to `key`.
+    const footnote = { type: 'footnote', key: 'note', namespace: 'footnote', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Note' }] }] };
     const applied = applyStructuredAstPatch(ast, [{ op: 'replace', path: '/children', value: [footnote, ...ast.children] }]);
     expect(createStructuredAstPatch(applied.ast, parse(applied.source)).operationCount).toBe(0);
   });
   it('creates, applies, and reverses stale-guarded AST patches as source edits', () => {
-    const beforeSource = '# Before\n\nBody   \n';
+    const beforeSource = '= Before\n\nBody   \n';
     const before = parse(beforeSource);
-    const after = parse('# After\n\nBody   \n');
+    const after = parse('= After\n\nBody   \n');
     const patch = createReversibleStructuredAstPatch(before, after);
     expect(patch).toMatchObject({ version: 1, beforeFingerprint: expect.stringMatching(/^fnv1a64:/), forward: expect.any(Array), inverse: expect.any(Array) });
     const applied = applyReversibleStructuredAstPatch(beforeSource, patch);
-    expect(applied).toMatchObject({ direction: 'forward', source: expect.stringContaining('# After'), sourcePatch: { sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) } });
+    expect(applied).toMatchObject({ direction: 'forward', source: expect.stringContaining('= After'), sourcePatch: { sourceFingerprint: expect.stringMatching(/^fnv1a64:/), edits: expect.any(Array) } });
     const reverted = applyReversibleStructuredAstPatch(applied.source, patch, true);
-    expect(reverted.source).toContain('# Before');
-    expect(() => applyReversibleStructuredAstPatch('# Stale', patch)).toThrow(/precondition/);
+    expect(reverted.source).toContain('= Before');
+    expect(() => applyReversibleStructuredAstPatch('= Stale', patch)).toThrow(/precondition/);
     expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, forward: [] })).toThrow(/postcondition/);
     expect(() => applyReversibleStructuredAstPatch(beforeSource, { ...patch, inverse: [] })).toThrow(/reverse direction/);
     const { changes: _changes, ...legacyPatch } = patch;
-    expect(applyReversibleStructuredAstPatch(beforeSource, legacyPatch).source).toContain('# After');
+    expect(applyReversibleStructuredAstPatch(beforeSource, legacyPatch).source).toContain('= After');
   });
   it('fingerprints author keyValues without treating their type as an AST node', () => {
     const first = parse('[x]{type=widget pos=1}');
@@ -271,56 +306,62 @@ describe('Carve operations', () => {
     const patch = createReversibleStructuredAstPatch(first, parse('[y]{type=widget pos=1}'));
     expect(() => applyReversibleStructuredAstPatch('[x]{type=widget pos=2}', patch)).toThrow(/precondition/);
   });
-  it('migrates each input format', () => {
+  // UPGRADING (migrate helpers): 0.2 imports HTML in the library and Markdown, GFM and Djot through
+  // `carve2 import`; the report is schema 3 and the writer spells strong with one `*` pair.
+  it('imports each 0.2 input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({
-      value: expect.stringContaining('Hello'),
-      report: { schemaVersion: 2, sourceFormat: 'html', diagnostics: expect.any(Array) },
+      value: expect.stringContaining('*Hello*'),
+      report: { schemaVersion: 3, sourceFormat: 'html', diagnostics: expect.any(Array) },
     });
-    // Markdown import assesses each construct against the published fidelity contract.
-    expect(migrate('**Hello**', 'markdown')).toMatchObject({
-      value: expect.stringContaining('Hello'),
-      report: {
-        schemaVersion: 2,
-        sourceFormat: 'markdown',
-        diagnostics: [
-          expect.objectContaining({ code: 'markdown-paragraph', severity: 'info', fidelity: 'preserved' }),
-          expect.objectContaining({ code: 'markdown-strong', severity: 'info', fidelity: 'preserved' }),
-        ],
-      },
-    });
-    for (const [format, source] of [['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']] as const) {
-      expect(migrate(source, format)).toMatchObject({
-        value: expect.stringContaining('Hello'),
-        report: {
-          schemaVersion: 2,
-          sourceFormat: format,
-          diagnostics: [expect.objectContaining({
-            code: 'fidelity-unverified',
-            severity: 'warning',
-            fidelity: 'dropped',
-            confidence: 'fallback',
-          })],
-        },
+    for (const [format, source] of [['markdown', '**Hello**'], ['gfm', '**Hello** ~~gone~~'], ['djot', '*Hello*']] as const) {
+      expect(migrate(source, format), format).toMatchObject({
+        value: expect.stringContaining('*Hello*'),
+        report: { schemaVersion: 3, sourceFormat: format, diagnostics: expect.any(Array) },
       });
     }
+    expect(() => migrate('[b]Hello[/b]', 'bbcode')).toThrow(/not carried over to Carve 0.2/);
   });
-  it('opts into Markdown dialect constructs explicitly', () => {
-    expect(migrate('==marked==', 'markdown').value).toBe('==marked==');
-    expect(migrate('==marked==', 'markdown', { highlight: true }).value).toContain('=marked=');
-    expect(() => migrate('<b>x</b>', 'html', { highlight: true })).toThrow(/only valid/);
+  // UPGRADING (migrateBbcode): BBCode has no 0.2 importer.
+  it.skip('migrates BBCode (no 0.2 BBCode importer, see spec/0.2 UPGRADING migrateBbcode)', () => {
+    expect(migrate('[b]Hello[/b]', 'bbcode').value).toContain('Hello');
+  });
+  it.skip('reports per-construct Markdown import fidelity (importer is CLI-only in 0.2, markup-carve/carve-js#5055)', () => {
+    expect(migrate('**Hello**', 'markdown').report.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
+    ]));
+  });
+  it('keeps the warnings of a successful Markdown import', () => {
+    expect(migrate('[x](javascript:foo)\n', 'markdown').report.diagnostics).toEqual([
+      expect.objectContaining({ code: 'import-degraded', severity: 'warning', line: 1, column: 1 }),
+    ]);
+  });
+  it('returns the patched tree as its written source reads back', () => {
+    const before = parse('= Old\n');
+    const applied = applyStructuredAstPatch(before, [{ op: 'replace', path: '/children/0/children/0/value', value: 'New' }]);
+    expect(applied.source).toBe('= New\n');
+    expect(applied.ast.children[0]).toMatchObject({ type: 'heading', generatedId: 'New' });
+  });
+  it('upgrades Carve 0.1 source to 0.2', () => {
+    const result = upgrade('Some text\n# Heading\n');
+    expect(result).toMatchObject({ changed: true, value: 'Some text\n\n# Heading\n', writable: true });
+    expect(result.records).toEqual(expect.arrayContaining([expect.objectContaining({ entry: 'U-001' })]));
+    expect(upgrade('Plain text.\n')).toMatchObject({ changed: false, writable: true });
   });
   it('rejects oversized input', () => expect(() => validateSource('x'.repeat(MAX_SOURCE_BYTES + 1))).toThrow(/limit/));
 });
 
 
-describe('table preservation in compatibility results', () => {
-  it('rejects flattened spans with render and preservation losses', () => {
+describe('compatibility receipts', () => {
+  it.skip('rejects flattened spans with render and preservation losses (markdown writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
     const source = '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n';
     const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
-    expect(result).toMatchObject({ receiptVersion: 1, source: { format: 'carve', sha256: sha256Text(source) }, versions: { engine: LIB_VERSION, mcp: mcpVersion } });
-    expect(result.compatible).toBe(false);
     expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
-    expect(result.targets[1]).toMatchObject({ lossCount: 3, preservation: { totalDiagnostics: 3, complete: false } });
+  });
+  it('reports the 0.2 engine and marks unregistered writers unavailable', () => {
+    const source = '|= System |= Limit |\n| A | 20 |\n^ Limits\n';
+    const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
+    expect(result).toMatchObject({ receiptVersion: 2, source: { format: 'carve', sha256: sha256Text(source) }, versions: { engine: LIB_VERSION, mcp: mcpVersion } });
+    expect(result.targets.map(target => target.status)).toEqual(['compatible', 'unavailable', 'unavailable', 'compatible']);
     expect(result.targets[3]?.assessmentScope.finalArtifact).toContain('HTML stage only');
   });
 });

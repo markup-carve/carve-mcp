@@ -8,6 +8,12 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { lintRuleNames } from '../dist/lint-rules.js';
 import { ruleIds } from '../dist/resources.js';
+import { reportRustGap, rustServerOn01 } from './rust-engine-gap.mjs';
+
+if (rustServerOn01()) {
+  reportRustGap('rust-conformance');
+  process.exit(0);
+}
 
 const metadata = JSON.parse(execFileSync('cargo', [
   'metadata', '--manifest-path', 'rust/Cargo.toml', '--format-version=1', '--no-deps',

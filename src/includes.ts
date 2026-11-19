@@ -1,7 +1,9 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { expandIncludes, parse, type CarveExtension, type Document, type IncludeResolver, type IncludeResult, type IncludeSite, type LintWarning } from '@markup-carve/carve';
-import { fileSystemResolver } from '@markup-carve/carve/node';
+import { fileSystemResolver } from '@markup-carve/carve/v2/node';
+import type { ExtensionDefinition, IncludeConfig, IncludeResolver } from '@markup-carve/carve/v2';
+import { includeDependencies } from '@markup-carve/carve/v2';
+import { lintDiagnostics, parseTreeWithDiagnostics, toWarning, type Diagnostic, type DocumentNode, type LintPlatform, type Warning } from './engine.js';
 import { documentPathRefusal, hiddenPathRefusal, type Workspace } from './workspace.js';
 
 export interface IncludeRequest { includeRootIndex?: number; sourcePath?: string }
@@ -66,104 +68,96 @@ function contained(root: string, id: string): string | undefined {
  * absolute) is left to it so its denial classes stay intact.
  */
 /**
- * Source files (any extension) a resolver may hand out for `@code` includes.
+ * The engine resolver behind the same document policy `carve_read_file` applies.
  *
- * The resolver cannot see the directive's mode, so it admits a non-document
- * file, records it in `admitted`, and the expansion is re-run with `denied`
- * naming every such file the engine spliced as Carve instead.
+ * The policy is checked on the path as written and on the canonical target,
+ * and only a regular file is opened: reading a FIFO would block the process.
+ * A file of any other extension is handed out only to a `@code` include.
  */
-interface SourceFilePolicy { denied: ReadonlySet<string>; admitted: Set<string> }
-
-export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>, replacements?: ReadonlyMap<string, string>, sourceFiles?: SourceFilePolicy): IncludeResolver {
+export function policyResolver(root: string, allowedPaths?: ReadonlySet<string>, replacements?: ReadonlyMap<string, string>): IncludeResolver {
   const inner = fileSystemResolver(root);
-  return (includePath, ctx) => {
-    if (isAbsolute(includePath)) return inner(includePath, ctx);
-    const parent = ctx.stack[ctx.stack.length - 1];
-    const base = parent ? dirname(resolve(root, parent)) : root;
-    const requested = resolve(base, includePath);
+  return (request) => {
+    if (isAbsolute(request.path)) return { error: 'outside_root' };
+    const base = request.from ? dirname(resolve(root, request.from)) : root;
+    const requested = resolve(base, request.path);
     let real: string;
     try { real = realpathSync(requested); }
-    catch { return inner(includePath, ctx); }
+    catch { return inner(request); }
     const lexical = contained(root, requested);
     const canonical = contained(root, real);
-    if (lexical === undefined || canonical === undefined) return inner(includePath, ctx);
-    if (allowedPaths && (!allowedPaths.has(lexical) || !allowedPaths.has(canonical))) return { source: null, id: includePath, denial: 'denied' };
-    if (hiddenPathRefusal(lexical) || hiddenPathRefusal(canonical)) return { source: null, id: includePath, denial: 'denied' };
+    if (lexical === undefined || canonical === undefined) return inner(request);
+    if (allowedPaths && (!allowedPaths.has(lexical) || !allowedPaths.has(canonical))) return { error: 'outside_root' };
+    if (hiddenPathRefusal(lexical) || hiddenPathRefusal(canonical)) return { error: 'outside_root' };
     const sourceFile = documentPathRefusal(lexical) !== undefined || documentPathRefusal(canonical) !== undefined;
-    if (sourceFile && (!sourceFiles || sourceFiles.denied.has(real))) return { source: null, id: includePath, denial: 'denied' };
-    try { if (!statSync(real).isFile()) return { source: null, id: includePath, denial: 'denied' }; }
-    catch { return { source: null, id: includePath, denial: 'denied' }; }
-    if (sourceFile) sourceFiles!.admitted.add(real);
-    const resolved = inner(includePath, ctx);
+    if (sourceFile && request.options.code === undefined) return { error: 'outside_root' };
+    try { if (!statSync(real).isFile()) return { error: 'unreadable' }; }
+    catch { return { error: 'unreadable' }; }
+    const resolved = inner(request);
     const replacement = replacements?.get(real);
-    if (replacement === undefined || resolved === null) return resolved;
-    if (typeof resolved === 'string') return replacement;
-    return resolved.source === null ? resolved : { ...resolved, source: replacement };
+    if (replacement === undefined || 'error' in resolved) return resolved;
+    return { ...resolved, text: replacement };
   };
 }
 
-/** Rewrite every `pos.file` to its root-relative path, dropping one outside the root. */
-function relativizePositions(doc: Document, root: string): void {
+export function includeConfig(scope: IncludeScope): IncludeConfig {
+  return { resolver: policyResolver(scope.root, scope.allowedPaths, scope.replacements), ...(scope.sourcePath ? { file: scope.sourcePath } : {}) };
+}
+
+/** Rewrite every `pos.file` and include `file` to its root-relative path, dropping one outside the root. */
+function relativizePositions(doc: unknown, root: string): void {
   const pending: unknown[] = [doc];
   while (pending.length > 0) {
     const value = pending.pop();
     if (!value || typeof value !== 'object') continue;
     if (Array.isArray(value)) { pending.push(...value); continue; }
     const record = value as Record<string, unknown>;
-    const pos = record.pos as Record<string, unknown> | undefined;
-    if (pos && typeof pos === 'object' && typeof pos.file === 'string') {
-      const file = contained(root, pos.file);
-      if (file === undefined) delete pos.file;
-      else pos.file = file;
+    for (const holder of [record.pos, record.type === 'include' ? record : undefined]) {
+      if (holder && typeof holder === 'object' && typeof (holder as Record<string, unknown>).file === 'string') {
+        const owner = holder as Record<string, unknown>;
+        const file = contained(root, owner.file as string);
+        if (file === undefined) delete owner.file;
+        else owner.file = file;
+      }
     }
     for (const [key, child] of Object.entries(record)) if (key !== 'pos' && child && typeof child === 'object') pending.push(child);
   }
 }
 
-/** Re-runs allowed before a document's source-file includes all fall back to the plain document policy. */
-const MAX_SOURCE_FILE_PASSES = 4;
-
-/**
- * Expand under the document policy, admitting a file of any extension only as a `@code` block.
- *
- * A source file the document also splices as Carve is refused in both modes,
- * since the resolver cannot tell the two directives apart.
- */
-function expandAdmitted(source: string, extensions: CarveExtension[], scope: IncludeScope): { expanded: IncludeResult; resolver: IncludeResolver } {
-  const denied = new Set<string>();
-  for (let pass = 0; pass <= MAX_SOURCE_FILE_PASSES; pass++) {
-    const sourceFiles = pass < MAX_SOURCE_FILE_PASSES ? { denied, admitted: new Set<string>() } : undefined;
-    const resolver = policyResolver(scope.root, scope.allowedPaths, scope.replacements, sourceFiles);
-    const expanded = expandIncludes(parse(source, { extensions, positions: true }), source, {
-      resolve: resolver,
-      ...(scope.sourcePath ? { sourcePath: scope.sourcePath } : {}),
-      extensions,
-      collectIncluded: true,
-    });
-    const spliced = (expanded.included ?? []).filter((entry) => entry.mode === 'carve' && sourceFiles?.admitted.has(entry.file));
-    if (spliced.length === 0) return { expanded, resolver };
-    for (const entry of spliced) denied.add(entry.file);
-  }
-  throw new Error('unreachable: the last pass admits no source file');
+function textReader(scope: IncludeScope, source: string) {
+  const texts = new Map<string, string | undefined>();
+  return (file: string | undefined): string | undefined => {
+    if (file === undefined) return source;
+    const path = resolve(scope.root, file);
+    if (contained(scope.root, path) === undefined) return undefined;
+    if (!texts.has(path)) {
+      let text: string | undefined;
+      try { text = scope.replacements?.get(realpathSync(path)) ?? readFileSync(path, 'utf8'); } catch { text = undefined; }
+      texts.set(path, text);
+    }
+    return texts.get(path);
+  };
 }
 
-export function expandDocument(source: string, extensions: CarveExtension[], scope: IncludeScope): { doc: Document; includes: IncludeReport } {
-  const { expanded } = expandAdmitted(source, extensions, scope);
-  relativizePositions(expanded.doc, scope.root);
-  const warnings = expanded.warnings.map((warning) => {
-    // `detail` carries the resolver's own error text and is never forwarded.
-    const file = warning.file === undefined ? undefined : contained(scope.root, warning.file);
-    return { rule: warning.rule, message: warning.message, line: warning.line, column: warning.column, ...(file ? { file } : {}) };
-  });
+function includeWarning(diagnostic: Diagnostic, scope: IncludeScope, read: (file: string | undefined) => string | undefined): IncludeWarningReport {
+  const warning = toWarning(diagnostic, read(diagnostic.file));
+  const file = diagnostic.file === undefined ? undefined : contained(scope.root, resolve(scope.root, diagnostic.file));
+  return { rule: warning.rule, message: warning.message, line: warning.line, column: warning.column, ...(file ? { file } : {}) };
+}
+
+export function expandDocument(source: string, extensions: readonly ExtensionDefinition[], scope: IncludeScope): { doc: DocumentNode; includes: IncludeReport } {
+  const { document, diagnostics, suppressedDiagnostics } = parseTreeWithDiagnostics(source, { extensions, includes: includeConfig(scope) });
+  relativizePositions(document, scope.root);
+  const read = textReader(scope, source);
+  const warnings = diagnostics.filter((entry) => entry.code.startsWith('include')).map((entry) => includeWarning(entry, scope, read));
   const dependencies: IncludeDependencyReport[] = [];
-  for (const dependency of expanded.dependencies) {
-    const path = contained(scope.root, dependency.id);
-    if (path && !dependencies.some((seen) => seen.path === path)) dependencies.push({ path, resolved: dependency.resolved });
+  for (const dependency of includeDependencies(document)) {
+    const path = contained(scope.root, resolve(scope.root, dependency.file ?? dependency.path));
+    if (path && !dependencies.some((seen) => seen.path === path)) dependencies.push({ path, resolved: dependency.read });
   }
-  return { doc: expanded.doc, includes: { rootIndex: scope.rootIndex, warnings, dependencies, suppressedWarnings: expanded.suppressedWarnings } };
+  return { doc: document, includes: { rootIndex: scope.rootIndex, warnings, dependencies, suppressedWarnings: suppressedDiagnostics } };
 }
 
-export type IncludedLintWarning = Omit<LintWarning, 'includedBy'> & { includedBy?: Array<Omit<IncludeSite, 'file'> & { file?: string }> };
+export type IncludedLintWarning = Warning;
 
 /**
  * UTF-16 span of the directive token at a 1-based line and codepoint column.
@@ -186,37 +180,20 @@ export function directiveSpan(text: string, line: number, column: number): { sta
 /**
  * Lint `source` and the content its includes pull in, under the policy the render tools use.
  *
- * A finding inside an included file carries that file's root-relative `file`
- * and the directive chain that reached it; its positions are in that file.
+ * A finding inside an included file carries that file's root-relative `file`;
+ * its positions are in that file.
  */
-export function lintWithIncludes(source: string, scope: IncludeScope, lintOne: (source: string, includes: { resolve: IncludeResolver; sourcePath?: string }) => LintWarning[]): IncludedLintWarning[] {
-  const { resolver } = expandAdmitted(source, [], scope);
-  const warnings = lintOne(source, { resolve: resolver, ...(scope.sourcePath ? { sourcePath: scope.sourcePath } : {}) });
-  const texts = new Map<string, string>();
-  const textOf = (id: string | undefined): string | undefined => {
-    if (id === undefined || !isAbsolute(id)) return source;
-    if (contained(scope.root, id) === undefined) return undefined;
-    if (!texts.has(id)) {
-      try { texts.set(id, readFileSync(id, 'utf8')); } catch { return undefined; }
-    }
-    return texts.get(id);
-  };
-  const span = (id: string | undefined, line: number, column: number) => {
-    const text = textOf(id);
-    return text === undefined ? { start: 0, end: 0 } : directiveSpan(text, line, column);
-  };
-  return warnings.map((warning) => {
-    const { file, includedBy, ...rest } = warning;
-    const positioned = rest.rule.startsWith('include-') ? { ...rest, ...span(file, rest.line, rest.column) } : rest;
-    if (!includedBy) return positioned;
-    const relative = file === undefined ? undefined : contained(scope.root, file);
-    return {
-      ...positioned,
-      ...(relative ? { file: relative } : {}),
-      includedBy: includedBy.map(({ file: site, line, column }) => {
-        const path = site === undefined ? undefined : contained(scope.root, site);
-        return { line, column, ...span(site, line, column), ...(path ? { file: path } : {}) };
-      }),
-    };
+export function lintWithIncludes(source: string, scope: IncludeScope, platforms: readonly LintPlatform[]): IncludedLintWarning[] {
+  const includes = includeConfig(scope);
+  const read = textReader(scope, source);
+  const parsed = parseTreeWithDiagnostics(source, { includes });
+  const diagnostics = [...lintDiagnostics(source, platforms, includes), ...parsed.diagnostics.filter((entry) => entry.code.startsWith('include'))];
+  return diagnostics.map((diagnostic) => {
+    const warning = toWarning(diagnostic, read(diagnostic.file));
+    const positioned = warning.rule.startsWith('include') ? { ...warning, ...directiveSpan(read(diagnostic.file) ?? '', warning.line, warning.column) } : warning;
+    if (diagnostic.file === undefined) return positioned;
+    const file = contained(scope.root, resolve(scope.root, diagnostic.file));
+    const { file: _dropped, ...rest } = positioned;
+    return file ? { ...rest, file } : rest;
   });
 }
