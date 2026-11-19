@@ -314,7 +314,7 @@ describe('Carve operations', () => {
       });
     }
   });
-  it.skip('reports per-construct Markdown import fidelity (no fidelity records in the 0.2 import diagnostics, markup-carve/carve-js#5055)', () => {
+  it.skip('reports per-construct Markdown import fidelity (no preserved-construct records in the 0.2 import diagnostics, markup-carve/carve-js#5133)', () => {
     expect(migrate('**Hello**', 'markdown').report.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
     ]));
