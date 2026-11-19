@@ -209,7 +209,7 @@ describe('lint through includes', () => {
     expect(JSON.stringify(out)).not.toContain(root);
   });
 
-  it.skip('names the include chain of a finding in an included file (no chain in 0.2 diagnostics yet, markup-carve/carve-js#5056)', async () => {
+  it('names the include chain of a finding in an included file', async () => {
     const { workspace } = await fixture({ 'parts/child.crv': 'See [x][missing].\n' });
     const out = lint('{{ parts/child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0, sourcePath: 'index.crv' }));
     expect(out.warnings).toEqual([expect.objectContaining({
