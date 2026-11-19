@@ -25,7 +25,7 @@ import {
   type IncludeConfig,
   type RenderOptions,
 } from '@markup-carve/carve';
-import { semanticSpan, wikilinks } from '@markup-carve/carve/extensions';
+import { autolink, semanticSpan, wikilinks } from '@markup-carve/carve/extensions';
 import { registerExports } from '@markup-carve/carve/export';
 import { importDocument as importForeign } from '@markup-carve/carve/import';
 
@@ -81,16 +81,13 @@ export function lintDiagnostics(source: string, platforms: readonly LintPlatform
   return lintV2(source, { platforms, ...(includes ? { includes } : {}) });
 }
 
-/** The 0.1 extensions this server offered that have no 0.2 definition yet. */
-export const UNPORTED_EXTENSIONS = ['autolink'] as const;
-export type ExtensionName = 'tabs' | 'semantic-spans' | 'wikilinks' | typeof UNPORTED_EXTENSIONS[number];
+export type ExtensionName = 'tabs' | 'autolink' | 'semantic-spans' | 'wikilinks';
 
 export function extensionOptions(names: readonly ExtensionName[] = []): { extensions: ExtensionDefinition[]; renderers: Record<string, ExtensionRenderer> } {
-  const unported = names.find((name): name is typeof UNPORTED_EXTENSIONS[number] => (UNPORTED_EXTENSIONS as readonly string[]).includes(name));
-  if (unported) throw new Error(`The ${unported} extension is not available in Carve 0.2 yet; the 0.2 extension API is provisional and has no ${unported} definition.`);
   const extensions: ExtensionDefinition[] = [];
   const renderers: Record<string, ExtensionRenderer> = {};
   if (names.includes('tabs')) { extensions.push(...tabsExtensions); renderers['carve.tabs'] = tabsRenderer; }
+  if (names.includes('autolink')) extensions.push(autolink());
   for (const bundle of [names.includes('semantic-spans') ? semanticSpan() : undefined, names.includes('wikilinks') ? wikilinks() : undefined]) {
     if (!bundle) continue;
     extensions.push(...bundle.extensions);

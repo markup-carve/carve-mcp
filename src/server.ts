@@ -37,7 +37,7 @@ const renderSettings = {
   strictLosses: z.boolean().default(false).describe('Fail instead of returning output when content would be lost.'),
   maxRenderLosses: z.number().int().min(0).max(10_000).optional().describe('Maximum detailed losses to return.'),
   smartTypography: z.boolean().optional().describe('Typographic quotes and dashes.'),
-  extensions: z.array(z.enum(['tabs', 'autolink', 'semantic-spans', 'wikilinks'])).max(4).default([]).describe('Opt-in extensions; autolink has no Carve 0.2 definition yet.'),
+  extensions: z.array(z.enum(['tabs', 'autolink', 'semantic-spans', 'wikilinks'])).max(4).default([]).describe('Opt-in extensions.'),
   allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output (rawHtml). Disabled by default.'),
   sanitizeUrls: z.boolean().default(true).describe('Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one.'),
 };

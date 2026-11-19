@@ -16,9 +16,9 @@ The `next2` branch runs the Carve 0.2 engine (`@markup-carve/carve` from carve-j
 - `carve_format` produces canonical Carve and reports rendering losses. Pass `alignTables: true` to pad table cells so each column lines up. A GFM separator row is an ordinary row in 0.2; `carve_upgrade` turns it into `|=` header cells.
 - `carve_render` renders HTML, and Markdown, plain text and ANSI through the
   engine's exports (`@markup-carve/carve/export`). Extensions: `tabs`,
-  `semantic-spans` (`samp`, `var`, `cite` and `dfn` spans) and `wikilinks`
-  (the 0.2 spelling is `:wiki[Page]`) work; `autolink` is refused until 0.2
-  has a definition for it. `smartTypography` is a boolean in 0.2.
+  `autolink` (bare `http`, `https` and mail addresses), `semantic-spans`
+  (`samp`, `var`, `cite` and `dfn` spans) and `wikilinks` (the 0.2 spelling is
+  `:wiki[Page]`). `smartTypography` is a boolean in 0.2.
 - `carve_check_targets` compares publishing compatibility across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles. A target whose writer the engine does not register reports `unavailable`.
 - `carve_parse` returns the resolved, position-aware 2.0 tree; `positions: false` leaves out source positions. Positions count UTF-8 bytes.
 - `carve_create_ast_patch` compares two interchange ASTs and returns a
