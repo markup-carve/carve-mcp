@@ -97,6 +97,7 @@ describe('include containment', () => {
     const out = render('{{ ../escape.crv }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
     expect(out.value).toContain('{{ ../escape.crv }}');
     expect(out.value).not.toContain('Escaped.');
+    // C2-N-013: the 0.2 parse names the resolver cause instead of include-unresolved.
     expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual([expect.stringMatching(/^include-(?:not-found|outside-root)$/)]);
   });
 
@@ -167,6 +168,8 @@ describe('code includes of source files', () => {
     expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual([expect.stringMatching(/^include-(?:not-found|outside-root)$/)]);
   });
 
+  // C2-N-012: 0.2 calls the resolver once per include with its own options, so the @code read no longer
+  // fails because another include in the document asks for the same file as Carve.
   it('reads a source file for @code and refuses it as Carve in the same document', async () => {
     const { workspace } = await fixture({ 'src/server.js': SERVER_JS });
     const out = render('{{ src/server.js @code:js }}\n\n{{ src/server.js }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
@@ -201,13 +204,23 @@ describe('lint through includes', () => {
     const { root, workspace } = await fixture({ 'parts/child.crv': 'See [x][missing].\n' });
     const out = lint('{{ parts/child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0, sourcePath: 'index.crv' }));
     expect(out.valid).toBe(false);
-    // 0.2 diagnostics name the file but carry no include chain.
+    // 0.2 diagnostics name the file but carry no include chain (markup-carve/carve-js#5056).
     expect(out.warnings).toEqual([expect.objectContaining({ file: 'parts/child.crv', line: 1 })]);
     expect(JSON.stringify(out)).not.toContain(root);
   });
 
+  it.skip('names the include chain of a finding in an included file (no chain in 0.2 diagnostics yet, markup-carve/carve-js#5056)', async () => {
+    const { workspace } = await fixture({ 'parts/child.crv': 'See [x][missing].\n' });
+    const out = lint('{{ parts/child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0, sourcePath: 'index.crv' }));
+    expect(out.warnings).toEqual([expect.objectContaining({
+      rule: 'unresolved-reference-link', file: 'parts/child.crv', line: 1, column: 5,
+      includedBy: [expect.objectContaining({ file: 'index.crv', line: 1, column: 1 })],
+    })]);
+  });
+
   it('reports include offsets in UTF-16 units of the file they name', async () => {
     const { workspace } = await fixture({ 'child.crv': '\u{1F600} {{ gone.crv }}\n' });
+    // C2-N-002: an include is a block line only, so the directive stands on its own line; C2-N-013 names the cause.
     const out = lint('\u{1F600}\u{1F600}\n\n{{ absent.crv }}\n\n{{ child.crv }}\n', [], includeScope(workspace, { includeRootIndex: 0 }));
     expect(out.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ rule: 'include-not-found', line: 3, column: 1, start: 6, end: 22 }),
@@ -216,6 +229,7 @@ describe('lint through includes', () => {
 
   it('lints nothing included without a root', async () => {
     const out = lint('{{ parts/child.crv }}\n');
+    // C2-N-003: a call without a resolver reports every include with include-no-resolver.
     expect(out.warnings.map((warning) => warning.rule)).toEqual(['include-no-resolver']);
   });
 

@@ -15,7 +15,8 @@ describe('documentation resources', () => {
 
   it('teaches spellings that render as the guide says in 0.2', () => {
     expect(render('{_u_} {~s~} {=m=}', 'html').value).toBe('<p><u>u</u> <s>s</s> <mark>m</mark></p>');
-    expect(lint('{_u_} {~s~}\n').warningCount).toBe(0);
+    // A line that starts with `{_` is reported by block-marker-as-text (C2-B-090), so the spans follow text.
+    expect(lint('See {_u_} {~s~}\n').warningCount).toBe(0);
     expect(render('= A heading', 'html').value).toContain('<h1>A heading</h1>');
   });
 

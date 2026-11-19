@@ -48,16 +48,18 @@ describe('Carve operations', () => {
     }
   });
   // The 0.1 Markdown, plain-text and ANSI writers return through the 0.2 writer registry.
-  it.skip('renders Markdown through the markdown writer (writer not ported to 0.2 yet)', () => {
+  it.skip('renders Markdown through the markdown writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
     expect(render('= Hello', 'markdown').value).toContain('Hello');
   });
-  it.skip('renders plain text through the plain-text writer (writer not ported to 0.2 yet)', () => {
+  it.skip('renders plain text through the plain-text writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
     expect(render('= Hello', 'plain').value).toContain('Hello');
   });
-  it.skip('renders ANSI through the ansi writer (writer not ported to 0.2 yet)', () => {
+  it.skip('renders ANSI through the ansi writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
     expect(render('= Hello', 'ansi').value).toContain('Hello');
   });
   it('reports target-specific warnings and rendering losses', () => {
+    // The github target renders through the markdown writer, unavailable until markup-carve/carve-js#5057;
+    // a raw fence names its format after a space (C2-B-225).
     const github = compatibilityMatrix('Contact @person', ['github']);
     expect(github).toMatchObject({ compatible: false, summary: { unavailable: 1 }, targets: [{ target: 'github', status: 'unavailable', warningCount: 1 }] });
     const lossy = compatibilityMatrix('``` =latex\nx\n```', ['plain', 'pdf']);
@@ -78,15 +80,16 @@ describe('Carve operations', () => {
       expect(() => render('Visit https://example.com', 'html', { extensions: [name] })).toThrow(new RegExp(`The ${name} extension is not available in Carve 0.2 yet`));
     }
   });
-  it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet)', () => {
+  it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet, markup-carve/carve#6070)', () => {
     expect(render('Visit https://example.com', 'html', { extensions: ['autolink'] }).value).toContain('<a href=');
   });
-  it.skip('renders semantic spans with the semantic-spans extension (no 0.2 semantic-spans extension yet)', () => {
+  it.skip('renders semantic spans with the semantic-spans extension (no 0.2 semantic-spans extension yet, markup-carve/carve#6070)', () => {
     expect(render('[x]{samp}', 'html', { extensions: ['semantic-spans'] }).value).toContain('<samp>');
   });
-  it.skip('links wiki targets with the wikilinks extension (no 0.2 wikilinks extension yet)', () => {
+  it.skip('links wiki targets with the wikilinks extension (no 0.2 wikilinks extension yet, markup-carve/carve-js#5047)', () => {
     expect(render('[[Page]]', 'html', { extensions: ['wikilinks'] }).value).toContain('<a href=');
   });
+  // UPGRADING (smartTypography): 0.2 takes a boolean only, so the 0.1 `{ quotes: false }` shape is gone.
   it('substitutes typographic glyphs on request', () => {
     expect(render('"Wait..." -- it\'s fine', 'html', { smartTypography: true }).value).toContain('<p>“Wait…” – it’s fine</p>');
   });
@@ -112,6 +115,7 @@ describe('Carve operations', () => {
     expect(patch.operationCount).toBeGreaterThan(0);
     expect(patch.changes).toEqual(expect.arrayContaining([expect.objectContaining({ summary: expect.stringContaining('heading') })]));
     expect(patch.operations).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'replace' })]));
+    // C2-A-010: a 0.2 tree carries srcByteLength only for measured source, so positions and lengths stay out of patches.
     expect(JSON.stringify(patch.operations)).not.toContain('"pos"');
     const applied = applyStructuredAstPatch(before, patch.operations);
     expect(applied.ast).toEqual(expect.objectContaining({ type: 'document', astVersion: '2.0' }));
@@ -156,6 +160,7 @@ describe('Carve operations', () => {
     expect(patch.changes.every(({ target, summary }) => !target.includes('\n') && !summary.includes('\n'))).toBe(true);
     const mixed = createStructuredAstPatch(parse('- a\n- b'), parse('- x\n- b\n- c'));
     expect(mixed.changes).toEqual(expect.arrayContaining([
+      // C2-A-053: list items are `children` in 0.2.
       expect.objectContaining({ kind: 'replace', summary: expect.stringMatching(/^Changed children on list/) }),
     ]));
   });
@@ -264,6 +269,7 @@ describe('Carve operations', () => {
   it('orders patch paths deterministically by code point', () => {
     const before = parse('[x]{Foo="1" bar="2"}');
     const after = parse('[x]{Foo="9" bar="8"}');
+    // C2-A-032: keyValues is a list of [key, value] pairs, so a value is addressed by index.
     expect(createStructuredAstPatch(before, after).operations.map(({ path }) => path)).toEqual([
       '/children/0/children/0/attrs/keyValues/0/1',
       '/children/0/children/0/attrs/keyValues/1/1',
@@ -271,6 +277,7 @@ describe('Carve operations', () => {
   });
   it('normalizes the returned AST to match its rendered source', () => {
     const ast = parse('Body');
+    // C2-A-179: 0.2 renames the footnote `label` to `key`.
     const footnote = { type: 'footnote', key: 'note', namespace: 'footnote', children: [{ type: 'paragraph', children: [{ type: 'text', value: 'Note' }] }] };
     const applied = applyStructuredAstPatch(ast, [{ op: 'replace', path: '/children', value: [footnote, ...ast.children] }]);
     expect(createStructuredAstPatch(applied.ast, parse(applied.source)).operationCount).toBe(0);
@@ -299,6 +306,8 @@ describe('Carve operations', () => {
     const patch = createReversibleStructuredAstPatch(first, parse('[y]{type=widget pos=1}'));
     expect(() => applyReversibleStructuredAstPatch('[x]{type=widget pos=2}', patch)).toThrow(/precondition/);
   });
+  // UPGRADING (migrate helpers): 0.2 imports HTML in the library and Markdown, GFM and Djot through
+  // `carve2 import`; the report is schema 3 and the writer spells strong with one `*` pair.
   it('imports each 0.2 input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({
       value: expect.stringContaining('*Hello*'),
@@ -312,6 +321,15 @@ describe('Carve operations', () => {
     }
     expect(() => migrate('[b]Hello[/b]', 'bbcode')).toThrow(/not carried over to Carve 0.2/);
   });
+  // UPGRADING (migrateBbcode): BBCode has no 0.2 importer.
+  it.skip('migrates BBCode (no 0.2 BBCode importer, see spec/0.2 UPGRADING migrateBbcode)', () => {
+    expect(migrate('[b]Hello[/b]', 'bbcode').value).toContain('Hello');
+  });
+  it.skip('reports per-construct Markdown import fidelity (importer is CLI-only in 0.2, markup-carve/carve-js#5055)', () => {
+    expect(migrate('**Hello**', 'markdown').report.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
+    ]));
+  });
   it('upgrades Carve 0.1 source to 0.2', () => {
     const result = upgrade('Some text\n# Heading\n');
     expect(result).toMatchObject({ changed: true, value: 'Some text\n\n# Heading\n', writable: true });
@@ -323,6 +341,11 @@ describe('Carve operations', () => {
 
 
 describe('compatibility receipts', () => {
+  it.skip('rejects flattened spans with render and preservation losses (markdown writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+    const source = '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n';
+    const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
+    expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
+  });
   it('reports the 0.2 engine and marks unregistered writers unavailable', () => {
     const source = '|= System |= Limit |\n| A | 20 |\n^ Limits\n';
     const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
