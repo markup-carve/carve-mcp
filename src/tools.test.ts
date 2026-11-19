@@ -42,26 +42,24 @@ describe('Carve operations', () => {
   it('renders HTML', () => {
     expect(render('= Hello', 'html').value).toContain('<h1');
   });
-  it('refuses the writer targets 0.2 has not registered yet', () => {
-    for (const [target, writer] of [['markdown', 'markdown'], ['plain', 'plain-text'], ['ansi', 'ansi']] as const) {
-      expect(() => render('= Hello', target)).toThrow(new RegExp(`The ${writer} writer is not available yet`));
-    }
+  // The 0.1 Markdown, plain-text and ANSI writers return through the 0.2 writer registry (`@markup-carve/carve/export`).
+  it('renders Markdown through the markdown writer', () => {
+    expect(render('= Hello', 'markdown').value).toBe('# Hello\n');
   });
-  // The 0.1 Markdown, plain-text and ANSI writers return through the 0.2 writer registry.
-  it.skip('renders Markdown through the markdown writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
-    expect(render('= Hello', 'markdown').value).toContain('Hello');
+  it('renders plain text through the plain-text writer', () => {
+    expect(render('= Hello', 'plain').value).toBe('Hello\n');
   });
-  it.skip('renders plain text through the plain-text writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
-    expect(render('= Hello', 'plain').value).toContain('Hello');
-  });
-  it.skip('renders ANSI through the ansi writer (writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+  it('renders ANSI through the ansi writer', () => {
     expect(render('= Hello', 'ansi').value).toContain('Hello');
   });
+  it('passes smartTypography to the export writers', () => {
+    expect(render('"Wait..."', 'markdown', { smartTypography: true }).value).toBe('“Wait…”\n');
+    expect(render('"Wait..."', 'markdown', { smartTypography: false }).value).toBe('"Wait..."\n');
+  });
   it('reports target-specific warnings and rendering losses', () => {
-    // The github target renders through the markdown writer, unavailable until markup-carve/carve-js#5057;
-    // a raw fence names its format after a space (C2-B-225).
+    // A raw fence names its format after a space (C2-B-225).
     const github = compatibilityMatrix('Contact @person', ['github']);
-    expect(github).toMatchObject({ compatible: false, summary: { unavailable: 1 }, targets: [{ target: 'github', status: 'unavailable', warningCount: 1 }] });
+    expect(github).toMatchObject({ compatible: false, summary: { warning: 1 }, targets: [{ target: 'github', status: 'warning', warningCount: 1 }] });
     const lossy = compatibilityMatrix('``` =latex\nx\n```', ['plain', 'pdf']);
     expect(lossy.summary.lossy).toBeGreaterThan(0);
     expect(lossy.targets.find(({ target }) => target === 'pdf')?.status).toBe('lossy');
@@ -75,19 +73,18 @@ describe('Carve operations', () => {
     const tabs = ':::: tabs\n::: tab "Install"\nRun.\n:::\n::::\n';
     expect(render(tabs, 'html', { extensions: ['tabs'] }).value).toContain('Install');
   });
-  it('refuses the 0.1 extensions that have no 0.2 definition', () => {
-    for (const name of ['autolink', 'semantic-spans', 'wikilinks'] as const) {
-      expect(() => render('Visit https://example.com', 'html', { extensions: [name] })).toThrow(new RegExp(`The ${name} extension is not available in Carve 0.2 yet`));
-    }
+  it('refuses the 0.1 autolink extension, which has no 0.2 definition', () => {
+    expect(() => render('Visit https://example.com', 'html', { extensions: ['autolink'] })).toThrow(/The autolink extension is not available in Carve 0.2 yet/);
   });
   it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet, markup-carve/carve#6070)', () => {
     expect(render('Visit https://example.com', 'html', { extensions: ['autolink'] }).value).toContain('<a href=');
   });
-  it.skip('renders semantic spans with the semantic-spans extension (no 0.2 semantic-spans extension yet, markup-carve/carve#6070)', () => {
-    expect(render('[x]{samp}', 'html', { extensions: ['semantic-spans'] }).value).toContain('<samp>');
+  it('renders semantic spans with the semantic-spans extension', () => {
+    expect(render('[x]{samp}', 'html', { extensions: ['semantic-spans'] }).value).toBe('<p><samp>x</samp></p>');
   });
-  it.skip('links wiki targets with the wikilinks extension (no 0.2 wikilinks extension yet, markup-carve/carve-js#5047)', () => {
-    expect(render('[[Page]]', 'html', { extensions: ['wikilinks'] }).value).toContain('<a href=');
+  // C2-X-057: the 0.2 wikilink is the inline extension `:wiki[Page]`, not the 0.1 `[[Page]]`.
+  it('links wiki targets with the wikilinks extension', () => {
+    expect(render(':wiki[Page]', 'html', { extensions: ['wikilinks'] }).value).toContain('<a href="page" class="wikilink"');
   });
   // UPGRADING (smartTypography): 0.2 takes a boolean only, so the 0.1 `{ quotes: false }` shape is gone.
   it('substitutes typographic glyphs on request', () => {
@@ -306,33 +303,30 @@ describe('Carve operations', () => {
     const patch = createReversibleStructuredAstPatch(first, parse('[y]{type=widget pos=1}'));
     expect(() => applyReversibleStructuredAstPatch('[x]{type=widget pos=2}', patch)).toThrow(/precondition/);
   });
-  // UPGRADING (migrate helpers): 0.2 imports HTML in the library and Markdown, GFM and Djot through
-  // `carve2 import`; the report is schema 3 and the writer spells strong with one `*` pair.
+  // UPGRADING (migrate helpers): 0.2 imports HTML in the core entry and Markdown, GFM, Djot and BBCode
+  // through `@markup-carve/carve/import`; the report is schema 3 and the writer spells strong with one `*` pair.
   it('imports each 0.2 input format', () => {
     expect(migrate('<strong>Hello</strong>', 'html')).toMatchObject({
       value: expect.stringContaining('*Hello*'),
       report: { schemaVersion: 3, sourceFormat: 'html', diagnostics: expect.any(Array) },
     });
-    for (const [format, source] of [['markdown', '**Hello**'], ['gfm', '**Hello** ~~gone~~'], ['djot', '*Hello*']] as const) {
+    for (const [format, source] of [['markdown', '**Hello**'], ['gfm', '**Hello** ~~gone~~'], ['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']] as const) {
       expect(migrate(source, format), format).toMatchObject({
         value: expect.stringContaining('*Hello*'),
         report: { schemaVersion: 3, sourceFormat: format, diagnostics: expect.any(Array) },
       });
     }
-    expect(() => migrate('[b]Hello[/b]', 'bbcode')).toThrow(/not carried over to Carve 0.2/);
   });
-  // UPGRADING (migrateBbcode): BBCode has no 0.2 importer.
-  it.skip('migrates BBCode (no 0.2 BBCode importer, see spec/0.2 UPGRADING migrateBbcode)', () => {
-    expect(migrate('[b]Hello[/b]', 'bbcode').value).toContain('Hello');
-  });
-  it.skip('reports per-construct Markdown import fidelity (importer is CLI-only in 0.2, markup-carve/carve-js#5055)', () => {
+  it.skip('reports per-construct Markdown import fidelity (no fidelity records in the 0.2 import diagnostics, markup-carve/carve-js#5055)', () => {
     expect(migrate('**Hello**', 'markdown').report.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
     ]));
   });
+  // C2-M-051: a denied destination is reported as import-destination-denied; a Markdown import reads
+  // library HTML, so its findings name no range of the input.
   it('keeps the warnings of a successful Markdown import', () => {
     expect(migrate('[x](javascript:foo)\n', 'markdown').report.diagnostics).toEqual([
-      expect.objectContaining({ code: 'import-degraded', severity: 'warning', line: 1, column: 1 }),
+      expect.objectContaining({ code: 'import-destination-denied', severity: 'warning' }),
     ]);
   });
   it('returns the patched tree as its written source reads back', () => {
@@ -352,16 +346,17 @@ describe('Carve operations', () => {
 
 
 describe('compatibility receipts', () => {
-  it.skip('rejects flattened spans with render and preservation losses (markdown writer not ported to 0.2 yet, markup-carve/carve-js#5057)', () => {
+  it('rejects flattened spans with render losses', () => {
     const source = '|= System |= Limit | < |\n| A | Cold | 20 |\n| ^ | Hot | 10 |\n^ Limits\n';
     const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
     expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
   });
-  it('reports the 0.2 engine and marks unregistered writers unavailable', () => {
+  it('reports the 0.2 engine and the caption losses of the Markdown targets', () => {
     const source = '|= System |= Limit |\n| A | 20 |\n^ Limits\n';
     const result = compatibilityMatrix(source, ['html', 'markdown', 'github', 'pdf']);
     expect(result).toMatchObject({ receiptVersion: 2, source: { format: 'carve', sha256: sha256Text(source) }, versions: { engine: LIB_VERSION, mcp: mcpVersion } });
-    expect(result.targets.map(target => target.status)).toEqual(['compatible', 'unavailable', 'unavailable', 'compatible']);
+    expect(result.targets.map(target => target.status)).toEqual(['compatible', 'lossy', 'lossy', 'compatible']);
+    expect(result.targets[1]?.losses.map(({ code }) => code)).toStrictEqual(['markdown-caption-flattened']);
     expect(result.targets[3]?.assessmentScope.finalArtifact).toContain('HTML stage only');
   });
 });

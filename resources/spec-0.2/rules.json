@@ -1,5 +1,5 @@
 {
- "commit": "019d9a380671f49e978814d35b0dd94f7b6405ca",
+ "commit": "64207ed7281f1a6706e057bb52bc658d9469929b",
  "rules": [
   {
    "id": "C2-A-001",
@@ -774,7 +774,7 @@
   {
    "id": "C2-A-174",
    "document": "ast.md",
-   "text": "The record replaces the separate callbacks, warning lists and render-loss settings of 0.1."
+   "text": "The record replaces the separate callbacks, warning lists and render-loss settings of 0.1. Two 0.1 loss settings stay as options of the render: the allow list `allowLosses` and the cap `maxLosses` (C2-H-204, C2-H-205)."
   },
   {
    "id": "C2-A-175",
@@ -1499,7 +1499,7 @@
   {
    "id": "C2-H-045",
    "document": "html.md",
-   "text": "A hard break is `<br>` followed by a line break. A soft break is a line break."
+   "text": "A hard break is `<br>` followed by a line break. A soft break is written as `softBreak` says (C2-H-203): a line break by default."
   },
   {
    "id": "C2-H-046",
@@ -1587,6 +1587,16 @@
    "text": "With `rawHtml` on, a raw HTML block whose payload has no line and one whose payload is one blank line both write one empty line. HTML does not show the difference that `value` keeps (C2-A-048)."
   },
   {
+   "id": "C2-H-206",
+   "document": "html.md",
+   "text": "`codeBlockRenderer` is a host function that writes code blocks, for a host that highlights them. The renderer calls it once for each `code_block` it writes, in the order of the output, wherever the block stands: in a container, in a caption figure, in a code group, in the fallback of an extension node and in the children of an expanded include. It is called in both modes and under every profile, but not for a code block outside the profile, which is written in its degraded form (C2-H-165). It is not called for any other node: not for a raw block, also where `rawHtml` off writes it as a code block (C2-H-050), not for a code span, a math node or an extension node that a renderer writes. It takes two arguments: the node, which it reads and does not change, with the language in `syntax`, the text in `value` and, where the tree has them, `title`, `groupLabel` and `attrs`; and the default HTML, the `<pre>` element that C2-H-047 and C2-H-048 give for the block, with its attributes, the carriers of `roundtrip` and the line of `sourceLines`. For a code block with a caption it is called for the block inside the `<figure>` (C2-H-062), so the node has no `caption`, `attrs`, `lang` or `dir` and the default HTML none of their attributes; the figure and its caption are written as without the function."
+  },
+  {
+   "id": "C2-H-207",
+   "document": "html.md",
+   "text": "The function returns HTML as text, or nothing. Text is written in place of the default HTML, after the same indentation and otherwise as it is: it is trusted host HTML, which the URL filter (C2-H-161), the character replacement (C2-H-176) and the profile do not touch, and the host answers for its safety and, in static mode, for its being self-contained (C2-H-122). Nothing writes the default HTML. A value that is neither text nor nothing is refused with an option error that names `codeBlockRenderer`, and the render returns no output. An error the function throws is the host's own and leaves the call unchanged; it is no refusal of C2-T-006. The tree does not change, and no entry of the record reports a replaced block. Without the option every code block is written as C2-H-047 says."
+  },
+  {
    "id": "C2-H-055",
    "document": "html.md",
    "text": "A table is `<table>` with `<thead>`, one `<tbody>` for each body and `<tfoot>` for its groups. Each group tag stands on its own line and each row is one line: `<tr>`, its cells, `</tr>`. An empty group is not written."
@@ -1644,7 +1654,7 @@
   {
    "id": "C2-H-065",
    "document": "html.md",
-   "text": "A caption holds blocks (C2-A-081). A caption with one paragraph, which is every parsed caption, writes that paragraph bare inside `<figcaption>` or `<caption>`, and line breaks in it are soft breaks. In a supplied caption with several blocks every paragraph gets `<p>`."
+   "text": "A caption holds blocks (C2-A-081). A caption with one paragraph, which is every parsed caption, writes that paragraph bare inside `<figcaption>` or `<caption>`, and line breaks in it are soft breaks, written as `softBreak` says (C2-H-203). In a supplied caption with several blocks every paragraph gets `<p>`."
   },
   {
    "id": "C2-H-066",
@@ -2074,7 +2084,7 @@
   {
    "id": "C2-H-121",
    "document": "html.md",
-   "text": "Fourteen of the 20 options affect rendering. No option of this section changes the tree, except that `headingIds` controls a resolution result."
+   "text": "Eighteen of the 24 options affect rendering. No option of this section changes the tree, except that `headingIds` controls a resolution result."
   },
   {
    "id": "C2-H-122",
@@ -2192,9 +2202,24 @@
    "text": "Resolution does not read `profile`: a reference to a heading resolves as it does without a profile, and the tree does not change (C2-H-121). The render reads it. The one place resolution reads it is the view of an extension node (C2-X-032): a node the profile degrades is resolved in its fallback, and the tree does not change either. A heading outside the profile is degraded (C2-H-165) and writes no element and no id, so a reference link to it is written in its unresolved form (C2-H-085), as if the heading did not exist. A cross-reference outside the profile writes its resolved link text under C2-H-165; one inside the profile follows C2-H-086 when its heading was degraded. A link that is itself outside the profile is degraded and writes the plain text of its children."
   },
   {
+   "id": "C2-H-203",
+   "document": "html.md",
+   "text": "`softBreak` sets how a `soft_break` is written: `newline`, the default, writes a line break; `space` writes one space; `br` writes `<br>` followed by a line break, the form of a hard break (C2-H-045), for output such as chat that shows no line break of the source. These are the three values of the 0.1 soft break mode of the PHP engine. An unknown value is refused. The option holds wherever a soft break is written, in a paragraph, a heading and a caption (C2-H-065), and for a soft break of a supplied tree in a hard-break block (C2-H-044), in both modes. Every profile admits `soft_break` (C2-H-163), so it holds under each of them. It does not change a break that C2-H-069 leaves out beside a comment line, nor the one space that a soft break gives in a degraded form (C2-H-165) and in plain text (C2-H-143). The tree does not change. The HTML importer reads the output of `space` as text and that of `br` as a `hard_break` (C2-M-046), and `roundtrip` writes no carrier for either."
+  },
+  {
+   "id": "C2-H-204",
+   "document": "html.md",
+   "text": "`allowLosses` lists the codes of the render-loss channel of `data/lint-rules.json` that a host accepts. An entry whose code is on the list is left out of the record (C2-A-172) and counts for neither `strictLosses` (C2-H-130) nor `maxLosses` (C2-H-205), so an allowed code alone never makes a render fail. A value that is no code of that channel is refused with an option error before the render starts. The default is the empty list. The HTML importer reads the option in the same way, for its own entries and for those of the writer that spells its tree (C2-M-082, C2-W-134). It is the allow list of the 0.1 command line, which `--allow-loss` still sets (C2-T-027)."
+  },
+  {
+   "id": "C2-H-205",
+   "document": "html.md",
+   "text": "`maxLosses` caps the render-loss entries the record keeps: the first `maxLosses` of them in the order they occur stay, and the number of the others is added to `suppressedDiagnostics` of the result (C2-T-024). The value is a count, a decimal integer of at least 0, and its default is 100, the default of the 0.1 cap `maxRenderLosses`; any other value is refused with an option error. Entries of the parse and lint channels and allowed entries (C2-H-204) are not counted. The cap changes no output: `strictLosses` counts every loss that is not allowed, kept or not, so a render under `strictLosses` with `maxLosses` 0 still fails on a loss. The HTML importer reads the option in the same way. The command line sets it with `--max-render-losses` (C2-T-029)."
+  },
+  {
    "id": "C2-H-137",
    "document": "html.md",
-   "text": "These are the 20 options, and there are no others. An application may spell a name by the convention of its language. An option that an engine does not offer is refused, not ignored."
+   "text": "These are the 24 options, and there are no others. An application may spell a name by the convention of its language. An option that an engine does not offer is refused, not ignored."
   },
   {
    "id": "C2-H-174",
@@ -4814,7 +4839,7 @@
   {
    "id": "C2-T-002",
    "document": "tooling.md",
-   "text": "The program is `carve`. An engine that installs it beside a 0.1 program may give it another name: the reference engine names it `carve2` on `next2`."
+   "text": "The program is `carve`."
   },
   {
    "id": "C2-T-003",
@@ -4854,7 +4879,7 @@
   {
    "id": "C2-T-010",
    "document": "tooling.md",
-   "text": "A flag that sets an option is named by the option in lower case with hyphens, so `urlPolicy` is `--url-policy`: a `boolean` option is a switch, an `enum` option takes one of its values, and a `list`, `map` or `structure` option takes JSON text. The one option set otherwise is `includes`, which `--includes` and `--include-root` set (C2-T-018). `extensions` and `renderers` take host code, which JSON text cannot name, so they have no flag: they are options of the library calls only (C2-T-005). A value the option refuses is refused with the category `usage`. An option that the table of a command lists no flag for, or whose flag is not given, has its default; for `includes` C2-T-018 says what holds."
+   "text": "A flag that sets an option is named by the option in lower case with hyphens, so `urlPolicy` is `--url-policy`: a `boolean` option is a switch, an `enum` option takes one of its values, and a `list`, `map` or `structure` option takes JSON text. The one option set otherwise is `includes`, which `--includes` and `--include-root` set (C2-T-018). `allowLosses` and `maxLosses` keep the 0.1 flags: `--allow-loss` gives one code per instance (C2-T-027) and `--max-render-losses` the count (C2-T-029). `extensions` and `renderers` take host code, which JSON text cannot name, so they have no flag: they are options of the library calls only (C2-T-005). `codeBlockRenderer` takes host code as well and has no flag either. A value the option refuses is refused with the category `usage`. An option that the table of a command lists no flag for, or whose flag is not given, has its default; for `includes` C2-T-018 says what holds."
   },
   {
    "id": "C2-T-011",
@@ -4927,6 +4952,11 @@
    "text": "An expansion retains at most `include_diagnostics` of `data/limits.json`, 100, entries whose code is the code of a cause in `data/includes.json`, the first in the order the failures occur. The result of a call that returns a record gives the number of the others as `suppressedDiagnostics`, 0 where there are none, and the command line counts them in `suppressed` (C2-T-021). An include whose entry is held back stays unexpanded as C2-N-061 says."
   },
   {
+   "id": "C2-T-041",
+   "document": "tooling.md",
+   "text": "`positionOf` takes a source as `parse` takes it and an offset in its UTF-8 bytes, counted as the offsets of a range are (C2-A-141, C2-B-218), and returns `line` and `column`: the LINE and COLUMN of C2-T-019 for a range that starts at that offset, so a library host shows the positions the command line writes. `line` is 1 plus the number of line feeds before the offset; a carriage return is no line feed. `column` is 1 plus the number of code points between the offset and the last line feed before it, or the start of the source; a U+FFFD that replaces an ill-formed sequence or a U+0000 counts as the one code point it is (C2-B-218). An offset equal to the length of the source gives the position after its last character. An offset that is negative, no integer, greater than the length, or inside the bytes of one code point, an ill-formed sequence that one U+FFFD replaces included, is refused with `CarveOptionError` naming `offset`. The call reads no option."
+  },
+  {
    "id": "C2-T-025",
    "document": "tooling.md",
    "text": "A loss is a render-loss entry of a file whose code is not on the allow list. `render` writes each retained loss as a line on standard error, and no entry of the parse or the lint channel, which `diagnostics` and `lint` write (C2-T-031, C2-T-032)."
@@ -4939,7 +4969,7 @@
   {
    "id": "C2-T-027",
    "document": "tooling.md",
-   "text": "`--allow-loss` takes a code of the render-loss channel of `data/lint-rules.json`; any other value is refused with the category `usage`. An allowed code is neither written on standard error nor in the report."
+   "text": "`--allow-loss` takes a code of the render-loss channel of `data/lint-rules.json`; any other value is refused with the category `usage`. An allowed code is neither written on standard error nor in the report. The codes of the run are the option `allowLosses` (C2-H-204)."
   },
   {
    "id": "C2-T-028",
@@ -4949,7 +4979,7 @@
   {
    "id": "C2-T-029",
    "document": "tooling.md",
-   "text": "`--max-render-losses` takes a count, a decimal integer of at least 0, and its default is 100. Each file retains its first losses up to that count; the others are counted in `suppressed` and written on no line."
+   "text": "`--max-render-losses` takes a count, a decimal integer of at least 0, and its default is 100. It sets the option `maxLosses` (C2-H-205). Each file retains its first losses up to that count; the others are counted in `suppressed` and written on no line."
   },
   {
    "id": "C2-T-030",

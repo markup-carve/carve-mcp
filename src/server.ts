@@ -37,7 +37,7 @@ const renderSettings = {
   strictLosses: z.boolean().default(false).describe('Fail instead of returning output when content would be lost.'),
   maxRenderLosses: z.number().int().min(0).max(10_000).optional().describe('Maximum detailed losses to return.'),
   smartTypography: z.boolean().optional().describe('Typographic quotes and dashes.'),
-  extensions: z.array(z.enum(['tabs', 'autolink', 'semantic-spans', 'wikilinks'])).max(4).default([]).describe('Opt-in extensions; only tabs exists in Carve 0.2 yet.'),
+  extensions: z.array(z.enum(['tabs', 'autolink', 'semantic-spans', 'wikilinks'])).max(4).default([]).describe('Opt-in extensions; autolink has no Carve 0.2 definition yet.'),
   allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output (rawHtml). Disabled by default.'),
   sanitizeUrls: z.boolean().default(true).describe('Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one.'),
 };
@@ -599,7 +599,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
-    description: 'Import HTML, Markdown, GFM, or Djot as Carve 0.2 with diagnostics. 0.2 has no BBCode importer.',
+    description: 'Import HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 with diagnostics.',
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']) }),
     outputSchema: migrateOutput,
     annotations: readOnly,

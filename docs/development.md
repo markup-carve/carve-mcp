@@ -181,17 +181,17 @@ can. Callers can also choose heading-ID behavior, loss policy, smart typography,
 and extensions. On Carve 0.2 smart typography is a boolean (`true` substitutes
 quotes, ellipses and dashes, `false` keeps what the author typed); the 0.1
 `glyph`, `source` and `{ "quotes": false }` shapes are gone. The `tabs`
-extension works. `autolink`, `semantic-spans` and `wikilinks` stay in the
-schema but are refused with a clear error until the provisional 0.2 extension
-API defines them (markup-carve/carve#6070, markup-carve/carve-js#5047).
+extension, and the `semantic-spans` and `wikilinks` bundles of
+`@markup-carve/carve/extensions`, work. `autolink` stays in the schema but is
+refused with a clear error until the provisional 0.2 extension API defines it
+(markup-carve/carve#6070).
 
-`carve_migrate` imports HTML through the 0.2 library and Markdown, GFM and Djot
-through the pinned engine's `carve2 import` command, since 0.2 specifies no
-Markdown or Djot importer (C2-T-003). It has no dialect switches on 0.2, and
-BBCode is refused. Raw HTML passthrough is disabled by default (`rawHtml`), and
+`carve_migrate` imports HTML through the core entry and Markdown, GFM, Djot and
+BBCode through `@markup-carve/carve/import`, since 0.2 specifies no importer for
+them (C2-T-003). It has no dialect switches on 0.2. Raw HTML passthrough is disabled by default (`rawHtml`), and
 the URL policy blanks dangerous schemes unless a caller explicitly disables it.
 
-`carve_upgrade` runs the engine's 0.1-to-0.2 upgrade tool (`carve2 upgrade`)
+`carve_upgrade` runs the engine's 0.1-to-0.2 upgrade tool (`carve upgrade`)
 and returns its records; the vendored upgrade map is served as
 `carve://upgrade-map`.
 

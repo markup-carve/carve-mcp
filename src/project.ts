@@ -5,7 +5,7 @@ import { gfm } from 'micromark-extension-gfm';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import type { LintPlatform, Warning as LintWarning } from './engine.js';
 import { childEntries } from './ast-fields.js';
-import { stringOffsetOfByte } from '@markup-carve/carve/v2';
+import { stringOffsetOfByte } from '@markup-carve/carve';
 import { expandDocument } from './includes.js';
 import { lint, parse } from './tools.js';
 import { formatWorkspaceSource } from './edits.js';

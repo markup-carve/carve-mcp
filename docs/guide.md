@@ -6,20 +6,20 @@ Give MCP-compatible assistants the same Carve parser, linter, formatter, and
 renderers used by the JavaScript implementation. Filesystem access is absent by
 default and can be enabled for explicitly configured document roots.
 
-The `next2` branch runs the Carve 0.2 engine (`@markup-carve/carve`, `./v2`
-export). Run `carve_upgrade` on Carve 0.1 source before editing it as 0.2.
+The `next2` branch runs the Carve 0.2 engine (`@markup-carve/carve` from carve-js
+`next2`). Run `carve_upgrade` on Carve 0.1 source before editing it as 0.2.
 
 ## Tools
 
 - `carve_lint` checks a document and returns precise, structured warnings.
 - `carve_diagnose_and_fix` previews safe fixes, applies selected fix IDs, and returns an undo patch; ambiguous repairs remain writer-review items.
 - `carve_format` produces canonical Carve and reports rendering losses. Pass `alignTables: true` to pad table cells so each column lines up. A GFM separator row is an ordinary row in 0.2; `carve_upgrade` turns it into `|=` header cells.
-- `carve_render` renders HTML. The `markdown`, `plain`, and `ansi` targets are
-  kept, but answer "writer not available yet" until the 0.2 engine registers
-  those writers (markup-carve/carve-js#5057). Extensions: `tabs` works;
-  `autolink`, `semantic-spans`, and `wikilinks` are refused until 0.2 has a
-  definition for them. `smartTypography` is a boolean in 0.2.
-- `carve_check_targets` compares publishing compatibility across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles. A target whose writer the 0.2 engine has not registered yet reports `unavailable`.
+- `carve_render` renders HTML, and Markdown, plain text and ANSI through the
+  engine's exports (`@markup-carve/carve/export`). Extensions: `tabs`,
+  `semantic-spans` (`samp`, `var`, `cite` and `dfn` spans) and `wikilinks`
+  (the 0.2 spelling is `:wiki[Page]`) work; `autolink` is refused until 0.2
+  has a definition for it. `smartTypography` is a boolean in 0.2.
+- `carve_check_targets` compares publishing compatibility across HTML, Markdown, plain text, ANSI, GitHub, WordPress, and PDF-stage profiles. A target whose writer the engine does not register reports `unavailable`.
 - `carve_parse` returns the resolved, position-aware 2.0 tree; `positions: false` leaves out source positions. Positions count UTF-8 bytes.
 - `carve_create_ast_patch` compares two interchange ASTs and returns a
   position-independent patch.
@@ -54,7 +54,7 @@ export). Run `carve_upgrade` on Carve 0.1 source before editing it as 0.2.
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations
   as a guarded UTF-8 source edit. The patched AST is returned only with
   `includeAst: true`.
-- `carve_migrate` imports HTML, Markdown, GFM, or Djot as Carve 0.2 and returns a version 3 report with the import diagnostics. BBCode has no 0.2 importer and is refused. The Markdown dialect flags of 0.1 (`highlight`, `superscript`, `math`) are gone.
+- `carve_migrate` imports HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 and returns a version 3 report with the import diagnostics. The Markdown dialect flags of 0.1 (`highlight`, `superscript`, `math`) are gone.
 - `carve_upgrade` rewrites Carve 0.1 source as 0.2 with the engine's upgrade tool. It returns the new source, the upgrade records (each names its `U-nnn` entry), and `writable`, which is false when a record needs a person.
 - `carve_reference_graph` indexes cross-document headings, footnotes, abbreviations, links, and images, including broken edges and orphaned definitions (when workspace access is enabled).
 

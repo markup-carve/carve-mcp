@@ -1,8 +1,8 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { fileSystemResolver } from '@markup-carve/carve/v2/node';
-import type { ExtensionDefinition, IncludeConfig, IncludeResolver } from '@markup-carve/carve/v2';
-import { includeDependencies } from '@markup-carve/carve/v2';
+import { fileSystemResolver } from '@markup-carve/carve/node';
+import type { ExtensionDefinition, IncludeConfig, IncludeResolver } from '@markup-carve/carve';
+import { includeDependencies } from '@markup-carve/carve';
 import { lintDiagnostics, parseTreeWithDiagnostics, toWarning, type Diagnostic, type DocumentNode, type LintPlatform, type Warning } from './engine.js';
 import { documentPathRefusal, hiddenPathRefusal, type Workspace } from './workspace.js';
 
@@ -187,7 +187,11 @@ export function lintWithIncludes(source: string, scope: IncludeScope, platforms:
   const includes = includeConfig(scope);
   const read = textReader(scope, source);
   const parsed = parseTreeWithDiagnostics(source, { includes });
-  const diagnostics = [...lintDiagnostics(source, platforms, includes), ...parsed.diagnostics.filter((entry) => entry.code.startsWith('include'))];
+  const linted = lintDiagnostics(source, platforms, includes);
+  // lint already reports some include findings itself; add only the parse findings it lacks.
+  const key = (entry: Diagnostic) => `${entry.code}\0${entry.file ?? ''}\0${entry.range?.startOffset ?? ''}\0${entry.range?.endOffset ?? ''}`;
+  const seen = new Set(linted.map(key));
+  const diagnostics = [...linted, ...parsed.diagnostics.filter((entry) => entry.code.startsWith('include') && !seen.has(key(entry)))];
   return diagnostics.map((diagnostic) => {
     const warning = toWarning(diagnostic, read(diagnostic.file));
     const positioned = warning.rule.startsWith('include') ? { ...warning, ...directiveSpan(read(diagnostic.file) ?? '', warning.line, warning.column) } : warning;

@@ -24,19 +24,22 @@ import {
   type HeadingIds,
   type IncludeConfig,
   type RenderOptions,
-} from '@markup-carve/carve/v2';
+} from '@markup-carve/carve';
+import { semanticSpan, wikilinks } from '@markup-carve/carve/extensions';
+import { registerExports } from '@markup-carve/carve/export';
+import { importDocument as importForeign } from '@markup-carve/carve/import';
 
 const require = createRequire(import.meta.url);
 const enginePackagePath = require.resolve('@markup-carve/carve/package.json');
 const enginePackage = require(enginePackagePath) as { version: string };
 
 /** The engine is the 0.2 API of the pinned `@markup-carve/carve` package. */
-export const ENGINE_VERSION = `${enginePackage.version} (v2, AST ${AST_VERSION})`;
+export const ENGINE_VERSION = `${enginePackage.version} (Carve 0.2, AST ${AST_VERSION})`;
 export const SPEC_VERSION = '0.2';
 export const LINT_PLATFORMS = ['github'] as const;
 export type LintPlatform = typeof LINT_PLATFORMS[number];
 export type { Diagnostic, DocumentNode, HeadingIds };
-export { CarveRenderError };
+export { CarveRenderError, stringOffsetOfByte };
 
 export interface Warning {
   rule: string;
@@ -78,15 +81,22 @@ export function lintDiagnostics(source: string, platforms: readonly LintPlatform
   return lintV2(source, { platforms, ...(includes ? { includes } : {}) });
 }
 
-/** The 0.1 extensions this server offered; none has a 0.2 definition yet. */
-export const UNPORTED_EXTENSIONS = ['autolink', 'semantic-spans', 'wikilinks'] as const;
-export type ExtensionName = 'tabs' | typeof UNPORTED_EXTENSIONS[number];
+/** The 0.1 extensions this server offered that have no 0.2 definition yet. */
+export const UNPORTED_EXTENSIONS = ['autolink'] as const;
+export type ExtensionName = 'tabs' | 'semantic-spans' | 'wikilinks' | typeof UNPORTED_EXTENSIONS[number];
 
 export function extensionOptions(names: readonly ExtensionName[] = []): { extensions: ExtensionDefinition[]; renderers: Record<string, ExtensionRenderer> } {
   const unported = names.find((name): name is typeof UNPORTED_EXTENSIONS[number] => (UNPORTED_EXTENSIONS as readonly string[]).includes(name));
   if (unported) throw new Error(`The ${unported} extension is not available in Carve 0.2 yet; the 0.2 extension API is provisional and has no ${unported} definition.`);
-  if (!names.includes('tabs')) return { extensions: [], renderers: {} };
-  return { extensions: [...tabsExtensions], renderers: { 'carve.tabs': tabsRenderer } };
+  const extensions: ExtensionDefinition[] = [];
+  const renderers: Record<string, ExtensionRenderer> = {};
+  if (names.includes('tabs')) { extensions.push(...tabsExtensions); renderers['carve.tabs'] = tabsRenderer; }
+  for (const bundle of [names.includes('semantic-spans') ? semanticSpan() : undefined, names.includes('wikilinks') ? wikilinks() : undefined]) {
+    if (!bundle) continue;
+    extensions.push(...bundle.extensions);
+    Object.assign(renderers, bundle.renderers);
+  }
+  return { extensions, renderers };
 }
 
 export interface HtmlResult { html: string; diagnostics: Diagnostic[]; suppressedDiagnostics: number }
@@ -95,17 +105,17 @@ export function renderHtml(input: string | DocumentNode, options: RenderOptions)
   return renderWithDiagnostics(input, options);
 }
 
-/** The writer targets of 0.1 that 0.2 reserves for its writer registry. */
-export const REGISTRY_TARGETS = { markdown: 'markdown', plain: 'plain-text', ansi: 'ansi' } as const;
+/** The writer targets of 0.1 that 0.2 serves through the exports of its writer registry. */
+export const REGISTRY_TARGETS = { markdown: 'markdown', plain: 'plain', ansi: 'ansi' } as const;
 export type RegistryTarget = keyof typeof REGISTRY_TARGETS;
 
-const writers = createWriterRegistry();
+const writers = registerExports(createWriterRegistry());
 
 export function writerAvailable(target: RegistryTarget): boolean {
   return writers.has(REGISTRY_TARGETS[target]);
 }
 
-export function writeTarget(target: RegistryTarget, document: DocumentNode, options: { strictLosses?: boolean } = {}) {
+export function writeTarget(target: RegistryTarget, document: DocumentNode, options: { strictLosses?: boolean; smartTypography?: boolean } = {}) {
   const name = REGISTRY_TARGETS[target];
   if (!writers.has(name)) {
     throw new Error(`The ${name} writer is not available yet in Carve 0.2; the engine reserves the target and registers the writer once it is ported.`);
@@ -142,27 +152,31 @@ export function importHtml(html: string) {
   return importDocument(html, { from: 'html' });
 }
 
+/** Markdown, GFM, Djot and BBCode import, outside the 0.2 specification (C2-T-003). */
+export function importFormat(input: string, from: 'markdown' | 'gfm' | 'djot' | 'bbcode') {
+  return importForeign(input, { from });
+}
+
 const CLI_TIMEOUT_MS = 30_000;
 const CLI_MAX_BUFFER = 64 * 1024 * 1024;
 
-/** `carve2`, the 0.2 command line of the pinned engine package. */
-function carve2Path(): string {
-  return join(dirname(enginePackagePath), 'dist', 'cli2.js');
+/** `carve`, the command line of the pinned engine package. */
+function carvePath(): string {
+  return join(dirname(enginePackagePath), 'dist', 'cli.js');
 }
 
-export interface Carve2Run { status: number; stdout: string; stderr: string }
+export interface CarveRun { status: number; stdout: string; stderr: string }
 
 /**
- * Run `carve2` on `input` as standard input.
+ * Run `carve` on `input` as standard input.
  *
- * Only for the 0.2 calls the library does not export (the upgrade tool and the
- * Markdown and Djot importers); the arguments are fixed by the caller, never
- * taken from a client.
+ * Only for the 0.2 call the library does not export (the upgrade tool); the
+ * arguments are fixed by the caller, never taken from a client.
  */
-export function runCarve2(args: readonly string[], input: string): Carve2Run {
-  const run = spawnSync(process.execPath, [carve2Path(), ...args, '-'], {
+export function runCarve(args: readonly string[], input: string): CarveRun {
+  const run = spawnSync(process.execPath, [carvePath(), ...args, '-'], {
     input, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'],
   });
-  if (typeof run.status !== 'number') throw new Error(`carve2 did not finish${run.signal ? ` (${run.signal})` : ''}.`);
+  if (typeof run.status !== 'number') throw new Error(`carve did not finish${run.signal ? ` (${run.signal})` : ''}.`);
   return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
