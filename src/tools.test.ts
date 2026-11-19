@@ -76,7 +76,7 @@ describe('Carve operations', () => {
   it('refuses the 0.1 autolink extension, which has no 0.2 definition', () => {
     expect(() => render('Visit https://example.com', 'html', { extensions: ['autolink'] })).toThrow(/The autolink extension is not available in Carve 0.2 yet/);
   });
-  it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet, markup-carve/carve#6070)', () => {
+  it.skip('links bare URLs with the autolink extension (no 0.2 autolink extension yet, markup-carve/carve-js#5073)', () => {
     expect(render('Visit https://example.com', 'html', { extensions: ['autolink'] }).value).toContain('<a href=');
   });
   it('renders semantic spans with the semantic-spans extension', () => {
