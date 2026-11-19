@@ -1,4 +1,4 @@
-import { nodeRange, resolveSourceBlocks, sha256Text, type BlockScope } from './blocks.js';
+import { nodeRange, position, resolveSourceBlocks, sha256Text, SourceOffsets, withoutAttributeLines, type BlockScope } from './blocks.js';
 import { astIdentity, astNodes, lint, MAX_SOURCE_BYTES, parse, validateSource, validateStructuredPayload, type AstSelector } from './tools.js';
 
 // A refusal leaves the document unchanged and tells the caller why in fields
@@ -126,17 +126,18 @@ export function replaceSource(source: string, selector: AstSelector, text: strin
   const result = source.slice(0, offsets.unit(range.start)) + text + source.slice(offsets.unit(range.end));
   validateSource(result);
 
-  const textPoints = Array.from(text).length;
+  const textBytes = Buffer.byteLength(text, 'utf8');
   const after = parse(result) as unknown as Record<string, unknown>;
   const type = String(node.type);
   const replaced = astNodes(after as never).find((candidate) => candidate.path === path)?.node;
-  const replacedStart = (replaced?.pos as { startOffset?: number } | undefined)?.startOffset;
+  const replacedPos = replaced ? position(replaced) : undefined;
+  const replacedStart = replacedPos ? withoutAttributeLines(replacedPos, replaced!, new SourceOffsets(result)).startOffset : undefined;
   if (replaced?.type !== type || replacedStart !== range.start) {
     throw new SourceEditRefusal(`The replacement no longer parses as the selected ${type}.`,
       { reason: 'node-kind-changed', expected: type, actual: replaced && replacedStart === range.start ? String(replaced.type) : null });
   }
-  const trailingSpace = textPoints - Array.from(text.replace(/[ \t\r\n]+$/u, '')).length;
-  assertSurroundingsUnchanged(ast, after, path, range.start, range.end, textPoints - (range.end - range.start), trailingSpace);
+  const trailingSpace = text.length - text.replace(/[ \t\r\n]+$/u, '').length;
+  assertSurroundingsUnchanged(ast, after, path, range.start, range.end, textBytes - (range.end - range.start), trailingSpace);
 
   const unitStart = offsets.unit(range.start);
   const findings = compareFindings(lintFindings(source), lintFindings(result), unitStart, offsets.unit(range.end), unitStart + text.length);

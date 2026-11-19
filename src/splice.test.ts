@@ -24,7 +24,8 @@ const messy = '# Title\r\n\r\nFirst\tparagraph 😀.\r\n\r\n-   one\r\n-   two\r
 describe('byte-exact source replacement', () => {
   it.each([
     ['a top-level paragraph', '/children/1', 'Changed\tpara 😀 with *style*.'],
-    ['a list item paragraph', '/children/2/items/1/children/0', 'deux é'],
+    // C2-A-053: a 0.2 list holds its items in `children`, not `items`.
+    ['a list item paragraph', '/children/2/children/1/children/0', 'deux é'],
     ['a block quote paragraph', '/children/3/children/0', 'quoted again'],
     ['an admonition paragraph', '/children/4/children/0', 'Inside, edited.'],
     ['the last paragraph without a newline', '/children/5', 'Final 😀'],
@@ -65,16 +66,22 @@ describe('byte-exact source replacement', () => {
   it('refuses an inline edit that splits its paragraph, but allows a trailing line break at a block end', () => {
     expect(refusal(() => replaceSource('*bold* tail', { kind: 'ast-path', value: '/children/0/children/0' }, '*new*\n\n')).details)
       .toMatchObject({ reason: 'surroundings-changed', nodeType: 'paragraph' });
-    expect(refusal(() => replaceSource('*bold* tail', { kind: 'ast-path', value: '/children/0/children/0' }, '*new* `')).details)
+    // C2-I-017: an unclosed backtick run is text in 0.2, so it no longer swallows the tail;
+    // a run that finds a closer later in the paragraph still does.
+    expect(replaceSource('*bold* tail', { kind: 'ast-path', value: '/children/0/children/0' }, '*new* `').result).toBe('*new* ` tail');
+    expect(refusal(() => replaceSource('*bold* tail`', { kind: 'ast-path', value: '/children/0/children/0' }, '*new* `')).details)
       .toMatchObject({ reason: 'surroundings-changed', nodeType: 'text' });
     expect(replaceSource('*bold* tail', { kind: 'ast-path', value: '/children/0/children/0' }, '*new*').result).toBe('*new* tail');
     expect(refusal(() => replaceSource('*bold*\n\nTail', { kind: 'ast-path', value: '/children/0/children/0' }, '*new*\n\nExtra')).details)
       .toMatchObject({ reason: 'surroundings-changed', nodeType: 'paragraph' });
-    expect(refusal(() => replaceSource('- a\n- b', { kind: 'ast-path', value: '/children/0/items/0/children/0' }, 'a2\n')).details)
+    // C2-A-053: list items sit in `children`.
+    expect(refusal(() => replaceSource('- a\n- b', { kind: 'ast-path', value: '/children/0/children/0/children/0' }, 'a2\n')).details)
       .toMatchObject({ reason: 'surroundings-changed', nodeType: 'list' });
+    // C2-B-192: an attribute line with a blank line after it is a text paragraph, so the
+    // heading survives and the edit is refused for the new unattached-attribute finding.
     expect(refusal(() => replaceSource('Old\n\n# Next', { kind: 'ast-path', value: '/children/0' }, 'New\n\n{#changed}')).details)
-      .toMatchObject({ reason: 'surroundings-changed', nodeType: 'heading' });
-    expect(replaceSource('- a\n- b\n\nAfter\n', { kind: 'ast-path', value: '/children/0/items/1/children/0' }, 'b2\n').result).toBe('- a\n- b2\n\n\nAfter\n');
+      .toMatchObject({ reason: 'new-lint-findings', introduced: [{ rule: 'unattached-block-attribute', line: 3 }] });
+    expect(replaceSource('- a\n- b\n\nAfter\n', { kind: 'ast-path', value: '/children/0/children/1/children/0' }, 'b2\n').result).toBe('- a\n- b2\n\n\nAfter\n');
   });
 
   it('refuses new lint findings but tolerates ones that were already there', () => {
@@ -223,15 +230,18 @@ describe('carve_replace_source over MCP', () => {
   it('allows an edit that repairs an unresolved include', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'index.crv'), '{{ gone.crv }}\n');
+    await writeFile(join(root, 'here.crv'), 'Fixed.\n');
     const client = await connect({ roots: [root], allowWrite: true });
+    // C2-A-181: an unresolved include is an `include` node in 0.2, not a paragraph,
+    // so the repair keeps the node kind by pointing it at a file that exists.
     const repaired = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
-      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: 'Fixed.',
+      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: '{{ here.crv }}',
     } });
     expect(repaired.isError).not.toBe(true);
     expect((repaired.structuredContent as { project: { complete: boolean } }).project.complete).toBe(true);
     const sha256 = (repaired.structuredContent as { sha256: string }).sha256;
     const applied = await client.callTool({ name: 'carve_reviewed_edit', arguments: {
-      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: 'Fixed.',
+      rootIndex: 0, path: 'index.crv', selector: { kind: 'ast-path', value: '/children/0' }, text: '{{ here.crv }}',
       expectedSha256: sha256, dryRun: false,
     } });
     expect(applied.isError).not.toBe(true);

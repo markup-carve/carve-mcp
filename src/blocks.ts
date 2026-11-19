@@ -9,7 +9,7 @@ export function sha256Text(source: string): string {
 
 type Position = { startLine: number; endLine: number; startOffset: number; endOffset: number };
 
-function position(node: Record<string, unknown>): Position | undefined {
+export function position(node: Record<string, unknown>): Position | undefined {
   const pos = node.pos as Partial<Position> | undefined;
   if (!pos || typeof pos.startOffset !== 'number' || typeof pos.endOffset !== 'number') return undefined;
   return pos as Position;
@@ -55,7 +55,7 @@ export interface SourceRange { start: number; end: number; startLine: number; en
  * A 0.2 block position starts at its attribute lines; the block's own source
  * starts after them, so a replacement keeps the attributes.
  */
-function withoutAttributeLines(pos: Position, node: Record<string, unknown>, offsets: SourceOffsets): Position {
+export function withoutAttributeLines(pos: Position, node: Record<string, unknown>, offsets: SourceOffsets): Position {
   if (!node.attrs) return pos;
   let start = pos.startOffset;
   let line = pos.startLine;
