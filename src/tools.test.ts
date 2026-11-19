@@ -330,6 +330,17 @@ describe('Carve operations', () => {
       expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
     ]));
   });
+  it('keeps the warnings of a successful Markdown import', () => {
+    expect(migrate('[x](javascript:foo)\n', 'markdown').report.diagnostics).toEqual([
+      expect.objectContaining({ code: 'import-degraded', severity: 'warning', line: 1, column: 1 }),
+    ]);
+  });
+  it('returns the patched tree as its written source reads back', () => {
+    const before = parse('= Old\n');
+    const applied = applyStructuredAstPatch(before, [{ op: 'replace', path: '/children/0/children/0/value', value: 'New' }]);
+    expect(applied.source).toBe('= New\n');
+    expect(applied.ast.children[0]).toMatchObject({ type: 'heading', generatedId: 'New' });
+  });
   it('upgrades Carve 0.1 source to 0.2', () => {
     const result = upgrade('Some text\n# Heading\n');
     expect(result).toMatchObject({ changed: true, value: 'Some text\n\n# Heading\n', writable: true });

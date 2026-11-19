@@ -596,7 +596,9 @@ export function applyStructuredAstPatch(ast: unknown, operations: unknown[]) {
   const patched = stripPositions(applyAstPatch(base, operations));
   validateAst(patched, 'Patched AST');
   assertWriterDepth(patched);
-  return { ast: patched, source: writeCarve(patched as unknown as DocumentNode) };
+  const source = writeCarve(patched as unknown as DocumentNode);
+  // Derived fields such as generatedId follow the written source, not the stale values a patch left behind.
+  return { ast: stripPositions(treeJson(parseTree(source))) as unknown as typeof patched, source };
 }
 
 function validateReversiblePatch(value: unknown): ReversibleStructuredAstPatch {
@@ -667,9 +669,14 @@ export function migrate(source: string, format: SourceFormat): MigrationResult {
   // the engine ships them only as `carve2 import`.
   const run = runCarve2(['import', '--from', format], source);
   if (run.status !== 0) throw new Error(`carve2 import --from ${format} failed: ${run.stderr.trim() || `exit ${run.status}`}`);
+  // `carve2 import` writes `<stdin>:LINE:COLUMN: SEVERITY CODE MESSAGE` per diagnostic, also on success.
   const diagnostics = run.stderr.split('\n').filter((line) => line.trim() !== '').map((line) => {
-    const match = /^carve\[([^\]]+)\]:\s*(.*)$/.exec(line);
-    return { code: match?.[1] ?? 'import-note', message: match?.[2] ?? line, severity: 'warning' as const };
+    const entry = /^<stdin>:(\d+):(\d+): (error|warning|hint|info) (\S+) (.*)$/.exec(line);
+    if (entry) {
+      return { code: entry[4]!, message: entry[5]!, severity: SEVERITY[entry[3]!] ?? 'warning', line: Number(entry[1]), column: Number(entry[2]) };
+    }
+    const failure = /^carve\[([^\]]+)\]:\s*(.*)$/.exec(line);
+    return { code: failure?.[1] ?? 'import-note', message: failure?.[2] ?? line, severity: 'warning' as const };
   });
   return { value: run.stdout, report: { schemaVersion: 3, sourceFormat: format, diagnostics } };
 }

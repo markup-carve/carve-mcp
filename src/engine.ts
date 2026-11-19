@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import {
@@ -160,15 +160,9 @@ export interface Carve2Run { status: number; stdout: string; stderr: string }
  * taken from a client.
  */
 export function runCarve2(args: readonly string[], input: string): Carve2Run {
-  try {
-    const stdout = execFileSync(process.execPath, [carve2Path(), ...args, '-'], {
-      input, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { status: 0, stdout, stderr: '' };
-  }
-  catch (error) {
-    const failed = error as { status?: number | null; stdout?: string; stderr?: string; signal?: string | null };
-    if (typeof failed.status !== 'number') throw new Error(`carve2 did not finish${failed.signal ? ` (${failed.signal})` : ''}.`);
-    return { status: failed.status, stdout: failed.stdout ?? '', stderr: failed.stderr ?? '' };
-  }
+  const run = spawnSync(process.execPath, [carve2Path(), ...args, '-'], {
+    input, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  if (typeof run.status !== 'number') throw new Error(`carve2 did not finish${run.signal ? ` (${run.signal})` : ''}.`);
+  return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
 }
