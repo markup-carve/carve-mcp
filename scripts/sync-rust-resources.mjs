@@ -1,4 +1,10 @@
+import { reportRustGap, rustServerOn01 } from './rust-engine-gap.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
+
+if (rustServerOn01()) {
+  reportRustGap('rust-resources');
+  process.exit(0);
+}
 
 const sourceUrl = new URL('../src/rules.generated.ts', import.meta.url);
 const outputUrl = new URL('../rust/resources/rules.json', import.meta.url);

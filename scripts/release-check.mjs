@@ -63,6 +63,8 @@ for (const secret of ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_ID_TOKEN_REQUES
 }
 const installArgs = ['install', '--omit=dev'];
 if (releaseRun) installArgs.push('--ignore-scripts');
+// npm 12 refuses a git dependency of a non-root package unless allowed.
+else installArgs.push('--allow-git=all');
 installArgs.push(join(packDirectory, filename));
 execFileSync('npm', installArgs, {
   cwd: installDirectory, env: installEnv, stdio: ['ignore', 'ignore', 'inherit'],

@@ -82,12 +82,12 @@ const blockOutput = z.object({ sha256: z.string(), sourceBytes: z.number().int()
     startLine: z.number().int(), endLine: z.number().int(), source: z.string(), node: z.unknown().optional() }).loose()), truncated: z.boolean() }).loose();
 const migrationDiagnostic = z.object({
   code: z.string().min(1), message: z.string().min(1), severity: z.enum(['info', 'warning', 'error']),
-  path: z.string().optional(), line: z.number().int().positive().optional(), column: z.number().int().positive().optional(),
+  path: z.string().optional(),
 }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({
-  schemaVersion: z.literal(3), sourceFormat: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']), diagnostics: z.array(migrationDiagnostic),
+  schemaVersion: z.literal(3), sourceFormat: z.enum(['html', 'markdown', 'gfm', 'djot']), diagnostics: z.array(migrationDiagnostic),
 }).loose() }).loose();
-const upgradeOutput = z.object({ value: z.string(), changed: z.boolean(), check: z.string(), writable: z.boolean(), records: z.array(z.unknown()), engine01: z.string() }).loose();
+const upgradeOutput = z.object({ value: z.string(), writable: z.boolean(), records: z.array(z.unknown()) }).loose();
 const compatibilityOutput = z.object({ receiptVersion: z.number().int().min(2).max(2), source: z.object({ format: z.literal('carve'), sha256: z.string().regex(/^[0-9a-f]{64}$/) }), versions: z.object({ engine: z.string(), mcp: z.string() }), compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int(), unavailable: z.number().int() }), targets: z.array(z.unknown()) }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
@@ -599,7 +599,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
-    description: 'Import HTML, Markdown, GFM, or Djot source as Carve 0.2 with import diagnostics. BBCode is not carried over to 0.2.',
+    description: 'Import HTML, Markdown, GFM, or Djot as Carve 0.2 with diagnostics. 0.2 has no BBCode importer.',
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']) }),
     outputSchema: migrateOutput,
     annotations: readOnly,
@@ -607,7 +607,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_upgrade')) server.registerTool('carve_upgrade', {
     title: 'Upgrade Carve 0.1 to 0.2',
-    description: 'Rewrite Carve 0.1 source as Carve 0.2 with the engine upgrade tool. writable is false when its HTML self-check needs a person; read records before accepting.',
+    description: 'Rewrite Carve 0.1 source as 0.2. writable is false when a person must review records.',
     inputSchema: z.object({ source: sourceSchema }).strict(),
     outputSchema: upgradeOutput,
     annotations: readOnly,
