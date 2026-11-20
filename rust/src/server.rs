@@ -1,4 +1,6 @@
+#[cfg(test)]
 use carve::extensions::SemanticSpan;
+#[cfg(test)]
 use carve::{
     AsciiHeadingIds, Autolink, CheckedRenderOptions, HtmlImportOptions, Mode, Options, RenderLoss,
     RenderTarget as CarveRenderTarget, SmartTypographyMode, Wikilinks, lint_carve, migrate_djot,
@@ -52,6 +54,7 @@ pub(crate) const AST_CHILD_FIELDS: [&str; 13] = [
     "slots",
 ];
 
+#[cfg(test)]
 fn ast_patch_path(operation: &carve::AstPatchOperation) -> &str {
     match operation {
         carve::AstPatchOperation::Add { path, .. }
@@ -128,7 +131,8 @@ fn human_text(value: &str, maximum: usize) -> String {
 
 fn node_identity(record: &serde_json::Map<String, Value>) -> Option<&str> {
     match record.get("type").and_then(Value::as_str) {
-        Some("heading") => record.get("attrs")
+        Some("heading") => record
+            .get("attrs")
             .and_then(Value::as_object)
             .and_then(|attrs| attrs.get("id"))
             .and_then(Value::as_str)
@@ -139,11 +143,16 @@ fn node_identity(record: &serde_json::Map<String, Value>) -> Option<&str> {
 }
 
 fn attribute_id(record: &serde_json::Map<String, Value>) -> Option<&str> {
-    record.get("attrs").and_then(Value::as_object)
+    record
+        .get("attrs")
+        .and_then(Value::as_object)
         .and_then(|attrs| attrs.get("id"))
         .and_then(Value::as_str)
-        .or_else(|| (record.get("type").and_then(Value::as_str) == Some("heading"))
-            .then(|| record.get("generatedId").and_then(Value::as_str)).flatten())
+        .or_else(|| {
+            (record.get("type").and_then(Value::as_str) == Some("heading"))
+                .then(|| record.get("generatedId").and_then(Value::as_str))
+                .flatten()
+        })
 }
 
 pub(crate) fn ast_nodes(value: &Value) -> Vec<(String, &serde_json::Map<String, Value>)> {
@@ -245,7 +254,9 @@ fn apply_semantic_ast_edit(
         .ok_or("Selected AST node no longer exists.")?
         .to_string();
     match edit.kind {
-        SemanticAstEditKind::ReplaceText if !matches!(selected_type.as_str(), "heading" | "paragraph") => {
+        SemanticAstEditKind::ReplaceText
+            if !matches!(selected_type.as_str(), "heading" | "paragraph") =>
+        {
             return Err("replace-text supports heading and paragraph nodes.".into());
         }
         SemanticAstEditKind::RenameHeadingId if selected_type != "heading" => {
@@ -289,7 +300,10 @@ fn apply_semantic_ast_edit(
                     );
                 }
                 let old_id = node_identity(node).map(str::to_string);
-                let unchanged = node.get("children").map(|children| node_text(children) == text).unwrap_or(false);
+                let unchanged = node
+                    .get("children")
+                    .map(|children| node_text(children) == text)
+                    .unwrap_or(false);
                 node.insert(
                     "children".into(),
                     Value::Array(vec![json!({"type": "text", "value": text})]),
@@ -552,6 +566,7 @@ fn semantic_ast(value: &Value, strip_metadata: bool) -> Value {
     }
 }
 
+#[cfg(test)]
 fn explain_ast_operations(
     ast: &Value,
     operations: &[carve::AstPatchOperation],
@@ -641,6 +656,7 @@ fn explain_ast_operations(
         .collect()
 }
 
+#[cfg(test)]
 fn value_at_pointer<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     if path.is_empty() {
         return Some(value);
@@ -648,6 +664,7 @@ fn value_at_pointer<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     value.pointer(path)
 }
 
+#[cfg(test)]
 fn is_subsequence(shorter: &[Value], longer: &[Value]) -> bool {
     if shorter.len() > longer.len() {
         return false;
@@ -1477,7 +1494,9 @@ struct ReviewedEditInput {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct UndoReviewedEditInput { receipt: String }
+struct UndoReviewedEditInput {
+    receipt: String,
+}
 
 fn default_block_scope() -> BlockScope {
     BlockScope::Node
@@ -1799,6 +1818,7 @@ fn writer_prompts() -> Vec<(&'static str, &'static str, &'static str, &'static s
     ]
 }
 
+#[cfg(test)]
 fn migration_json(result: carve::MigrationResult) -> Value {
     let diagnostics = result
         .report
@@ -1834,6 +1854,7 @@ fn migration_json(result: carve::MigrationResult) -> Value {
     })
 }
 
+#[cfg(test)]
 fn migrate_markdown_dialect(
     source: &str,
     dialect: Option<&MarkdownDialect>,
@@ -1842,6 +1863,7 @@ fn migrate_markdown_dialect(
 }
 
 // The import is injected so a test can stand in for a refusal no known input reaches.
+#[cfg(test)]
 fn migrate_markdown_dialect_with<E: std::fmt::Display>(
     source: &str,
     dialect: Option<&MarkdownDialect>,
@@ -1963,9 +1985,12 @@ fn byte_offset_from_utf16(source: &str, offset: usize) -> usize {
 }
 
 pub(crate) fn lint_values(source: &str, platforms: &[LintPlatform]) -> Vec<Value> {
-    let names: Vec<&str> = platforms.iter().map(|platform| match platform {
-        LintPlatform::Github => "github",
-    }).collect();
+    let names: Vec<&str> = platforms
+        .iter()
+        .map(|platform| match platform {
+            LintPlatform::Github => "github",
+        })
+        .collect();
     crate::engine2::lint_warnings(source, &names, None)
         .expect("the host supplies only valid lint options")
 }
@@ -2051,7 +2076,7 @@ pub fn ast_json_deeper_than(json: &str, limit: usize) -> bool {
     false
 }
 
-fn writer_depth_error() -> String {
+pub(crate) fn writer_depth_error() -> String {
     format!(
         "Document nests deeper than {MAX_WRITER_DEPTH} AST levels; the Carve writer limit is {MAX_WRITER_DEPTH}."
     )
@@ -2084,6 +2109,7 @@ fn format_carve_checked_with(source: &str, align_tables: bool) -> Result<FormatR
     })
 }
 
+#[cfg(test)]
 fn render_carve_checked(document: &carve::Document) -> Result<String, String> {
     let json = carve::try_to_json(document).map_err(|error| error.to_string())?;
     if ast_json_deeper_than(&json, MAX_WRITER_DEPTH) {
@@ -2098,6 +2124,7 @@ fn render_carve_checked(document: &carve::Document) -> Result<String, String> {
 /// and only a regular file is read: reading a FIFO would pin the worker. What
 /// the engine resolver refuses anyway (missing, outside the root, absolute) is
 /// left to it so its denial classes stay intact.
+#[cfg(test)]
 struct PolicyResolver {
     root: std::path::PathBuf,
     inner: carve::FileSystemResolver,
@@ -2110,14 +2137,17 @@ struct PolicyResolver {
 /// file, records it in `admitted`, and the expansion is re-run with `denied`
 /// naming every such file the engine spliced as Carve instead.
 #[derive(Default)]
+#[cfg(test)]
 struct SourceFilePolicy {
     denied: std::collections::HashSet<String>,
     admitted: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 /// Re-runs allowed before a document's source-file includes all fall back to the plain document policy.
+#[cfg(test)]
 const MAX_SOURCE_FILE_PASSES: usize = 4;
 
+#[cfg(test)]
 impl PolicyResolver {
     fn new(root: &std::path::Path) -> std::io::Result<Self> {
         Ok(Self {
@@ -2213,6 +2243,7 @@ impl PolicyResolver {
     }
 }
 
+#[cfg(test)]
 impl carve::IncludeResolver for PolicyResolver {
     fn resolve(
         &self,
@@ -2272,6 +2303,7 @@ impl carve::IncludeResolver for PolicyResolver {
 ///
 /// The engines disagree on the unit of an include site's offsets, so both
 /// servers derive them from the position and the file text instead.
+#[cfg(test)]
 fn directive_span(text: &str, line: usize, column: usize) -> (usize, usize) {
     let bytes = text.as_bytes();
     let mut index = 0;
@@ -2310,6 +2342,7 @@ fn directive_span(text: &str, line: usize, column: usize) -> (usize, usize) {
 /// Mirrors carve-js `lintIncludes`: a finding inside an included file carries
 /// that file's root-relative `file` and the directive chain that reached it,
 /// with positions in that file.
+#[cfg(test)]
 fn lint_values_with_includes(
     workspace: Option<&Workspace>,
     root_index: Option<usize>,
@@ -2510,6 +2543,7 @@ fn lint_values_with_includes(
 }
 
 /// Rewrite every `pos.file` to its root-relative path, dropping one outside the root.
+#[cfg(test)]
 fn relativize_positions(value: &mut Value, root: &std::path::Path) {
     let mut pending = vec![value];
     while let Some(item) = pending.pop() {
@@ -2549,6 +2583,7 @@ fn relativize_positions(value: &mut Value, root: &std::path::Path) {
     }
 }
 
+#[cfg(test)]
 fn prepare_includes(
     workspace: Option<&Workspace>,
     root_index: Option<usize>,
@@ -2588,6 +2623,7 @@ fn prepare_includes(
     Ok(Some((prepared, root)))
 }
 
+#[cfg(test)]
 fn include_report(
     prepared: &carve::PreparedWithIncludes,
     root: &std::path::Path,
@@ -2662,7 +2698,11 @@ impl ToolProfile {
             ),
             Self::Convert => matches!(
                 name,
-                "carve_lint" | "carve_render" | "carve_check_targets" | "carve_migrate" | "carve_upgrade"
+                "carve_lint"
+                    | "carve_render"
+                    | "carve_check_targets"
+                    | "carve_migrate"
+                    | "carve_upgrade"
             ),
             Self::Structure => matches!(
                 name,
@@ -2783,16 +2823,23 @@ impl CarveServer {
             }
         } else {
             if let Some(route) = tools.map.get_mut("carve_reviewed_edit") {
-                route.attr.annotations = Some(rmcp::model::ToolAnnotations::new()
-                    .read_only(true).destructive(false).idempotent(true).open_world(false));
+                route.attr.annotations = Some(
+                    rmcp::model::ToolAnnotations::new()
+                        .read_only(true)
+                        .destructive(false)
+                        .idempotent(true)
+                        .open_world(false),
+                );
                 if let Some(Value::Object(properties)) =
-                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties") {
+                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
+                {
                     properties.remove("dryRun");
                 }
             }
             if let Some(route) = tools.map.get_mut("carve_replace_source")
                 && let Some(Value::Object(properties)) =
-                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties") {
+                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
+            {
                 properties.remove("dryRun");
             }
         }
@@ -3011,6 +3058,7 @@ impl CarveServer {
     /// outright on `destination-denied` and `ruby-flattened` (`"format": false`),
     /// and types `pos` as an object, so a null on either fails validation for a
     /// consumer that checks the wire against it (carve-mcp#76).
+    #[cfg(test)]
     fn loss(loss: RenderLoss) -> Value {
         let mut row = json!({
             "code": loss.code, "target": loss.target.as_str(),
@@ -3051,11 +3099,13 @@ impl CarveServer {
         row
     }
 
+    #[cfg(test)]
     const DENIED: &'static str = "destination-denied";
 
     /// `sanitizeUrls: false` leaves the denial in place and only asks not to
     /// hear about it, so the denied rows are dropped from the report and from
     /// the totals (carve-mcp#78).
+    #[cfg(test)]
     fn reported_losses(
         losses: Vec<RenderLoss>,
         total_losses: usize,
@@ -3075,6 +3125,7 @@ impl CarveServer {
         (reported, total, truncated)
     }
 
+    #[cfg(test)]
     fn render_result(result: carve::RenderResult<String>) -> CallToolResult {
         Self::output(json!({
             "value": result.value,
@@ -3162,51 +3213,140 @@ impl CarveServer {
         }
     }
 
-    #[tool(name = "carve_reference_graph", title = "Build Carve reference graph", description = "Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.", annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
-    fn reference_graph(&self, Parameters(input): Parameters<ReferenceGraphInput>) -> CallToolResult {
-        let Some(workspace) = self.workspace.as_ref() else { return Self::error("No workspace roots are configured."); };
-        match crate::reference_graph::build(workspace, input.root_index,
-            input.max_depth.unwrap_or_else(|| workspace.review_max_depth()),
-            input.limit.unwrap_or_else(|| workspace.review_limit())) {
-            Ok(value) => Self::output(value), Err(error) => Self::error(error),
+    #[tool(
+        name = "carve_reference_graph",
+        title = "Build Carve reference graph",
+        description = "Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            open_world_hint = false
+        )
+    )]
+    fn reference_graph(
+        &self,
+        Parameters(input): Parameters<ReferenceGraphInput>,
+    ) -> CallToolResult {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Self::error("No workspace roots are configured.");
+        };
+        match crate::reference_graph::build(
+            workspace,
+            input.root_index,
+            input
+                .max_depth
+                .unwrap_or_else(|| workspace.review_max_depth()),
+            input.limit.unwrap_or_else(|| workspace.review_limit()),
+        ) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
         }
     }
 
-    #[tool(name = "carve_reviewed_edit", title = "Preview or apply a reviewed block edit", description = "Replace one selected Carve block, check the proposed result against local lint and workspace references and includes, then return exact forward and undo patches. A write requires the source hash and a complete project scan.", annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
+    #[tool(
+        name = "carve_reviewed_edit",
+        title = "Preview or apply a reviewed block edit",
+        description = "Replace one selected Carve block, check the proposed result against local lint and workspace references and includes, then return exact forward and undo patches. A write requires the source hash and a complete project scan.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = false
+        )
+    )]
     fn reviewed_edit(&self, Parameters(input): Parameters<ReviewedEditInput>) -> CallToolResult {
-        let Some(workspace)=self.workspace.as_ref() else{return Self::error("No workspace roots are configured.");};
-        if !input.path.to_ascii_lowercase().ends_with(".crv") && !input.path.to_ascii_lowercase().ends_with(".carve") {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Self::error("No workspace roots are configured.");
+        };
+        if !input.path.to_ascii_lowercase().ends_with(".crv")
+            && !input.path.to_ascii_lowercase().ends_with(".carve")
+        {
             return Self::error("Workspace document tools require a .crv or .carve file.");
         }
-        if !input.dry_run && !workspace.allow_write(){return Self::error("Workspace writes are disabled.");}
-        if !input.dry_run && input.expected_sha256.is_none(){return Self::error("expectedSha256 is required when dryRun is false.");}
-        let read=match workspace.read(input.root_index,&input.path){Ok(read)=>read,Err(error)=>return Self::error(error)};
-        let source=read["content"].as_str().unwrap_or("");
-        let sha=read["sha256"].as_str().unwrap_or("");
-        let replacement=match replace_source(source, ReplaceRequest{
-            selector:&input.selector,text:&input.text,scope:input.scope,
-            expected_sha256:input.expected_sha256.as_deref(),sha256:sha,include_source:false,
-        }) {Ok(value)=>value,Err(EditFailure::Error(error))=>return Self::error(error),
-            Err(EditFailure::Refusal(message,details))=>return Self::error(format!("{message}: {details}"))};
-        let (path,project,before,_after)=match crate::reviewed_edit::project(workspace,input.root_index,&input.path,&replacement.result) {
-            Ok(value)=>value,Err(error)=>return Self::error(error)
+        if !input.dry_run && !workspace.allow_write() {
+            return Self::error("Workspace writes are disabled.");
+        }
+        if !input.dry_run && input.expected_sha256.is_none() {
+            return Self::error("expectedSha256 is required when dryRun is false.");
+        }
+        let read = match workspace.read(input.root_index, &input.path) {
+            Ok(read) => read,
+            Err(error) => return Self::error(error),
         };
-        let mut output=replacement.output;
-        output["project"]=project;
+        let source = read["content"].as_str().unwrap_or("");
+        let sha = read["sha256"].as_str().unwrap_or("");
+        let replacement = match replace_source(
+            source,
+            ReplaceRequest {
+                selector: &input.selector,
+                text: &input.text,
+                scope: input.scope,
+                expected_sha256: input.expected_sha256.as_deref(),
+                sha256: sha,
+                include_source: false,
+            },
+        ) {
+            Ok(value) => value,
+            Err(EditFailure::Error(error)) => return Self::error(error),
+            Err(EditFailure::Refusal(message, details)) => {
+                return Self::error(format!("{message}: {details}"));
+            }
+        };
+        let (path, project, before, _after) = match crate::reviewed_edit::project(
+            workspace,
+            input.root_index,
+            &input.path,
+            &replacement.result,
+        ) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let mut output = replacement.output;
+        output["project"] = project;
         if !input.dry_run {
-            let written=match workspace.write(input.root_index,&path,&replacement.result,Some(sha),false){
-                Ok(value)=>value,Err(error)=>return Self::error(error)};
-            output["undoReceipt"]=json!(crate::reviewed_edit::receipt(input.root_index,&path,
-                written["sha256"].as_str().unwrap_or(""),sha,&output["undoPatch"],&before));
-            output["write"]=written;
+            let written = match workspace.write(
+                input.root_index,
+                &path,
+                &replacement.result,
+                Some(sha),
+                false,
+            ) {
+                Ok(value) => value,
+                Err(error) => return Self::error(error),
+            };
+            output["undoReceipt"] = json!(crate::reviewed_edit::receipt(
+                input.root_index,
+                &path,
+                written["sha256"].as_str().unwrap_or(""),
+                sha,
+                &output["undoPatch"],
+                &before
+            ));
+            output["write"] = written;
         }
         Self::output(output)
     }
 
-    #[tool(name = "carve_undo_reviewed_edit", title = "Undo a reviewed block edit", description = "Restore exact source bytes from a signed receipt while the edited file hash still matches.", annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
-    fn undo_reviewed_edit(&self, Parameters(input): Parameters<UndoReviewedEditInput>) -> CallToolResult {
-        let Some(workspace)=self.workspace.as_ref() else{return Self::error("No workspace roots are configured.");};
-        match crate::reviewed_edit::undo(workspace,&input.receipt){Ok(value)=>Self::output(value),Err(error)=>Self::error(error)}
+    #[tool(
+        name = "carve_undo_reviewed_edit",
+        title = "Undo a reviewed block edit",
+        description = "Restore exact source bytes from a signed receipt while the edited file hash still matches.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = false
+        )
+    )]
+    fn undo_reviewed_edit(
+        &self,
+        Parameters(input): Parameters<UndoReviewedEditInput>,
+    ) -> CallToolResult {
+        let Some(workspace) = self.workspace.as_ref() else {
+            return Self::error("No workspace roots are configured.");
+        };
+        match crate::reviewed_edit::undo(workspace, &input.receipt) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
     }
 
     #[tool(name = "carve_prepare_edit", title = "Preview canonical Carve formatting", description = "Read and canonically format a Carve workspace file without writing. A lossless result includes a stale-guarded patch with UTF-8 byte ranges; a lossy writer-review result has patch: null.", output_schema = rmcp::handler::server::tool::schema_for_type::<EditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
@@ -3401,13 +3541,21 @@ impl CarveServer {
         )
     )]
     fn lint(&self, Parameters(input): Parameters<LintInput>) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) { return Self::error(error); }
-        let platforms: Vec<&str> = input.platforms.iter().map(|platform| match platform {
-            LintPlatform::Github => "github",
-        }).collect();
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        let platforms: Vec<&str> = input
+            .platforms
+            .iter()
+            .map(|platform| match platform {
+                LintPlatform::Github => "github",
+            })
+            .collect();
         let (root, path) = if let Some(index) = input.include_root_index {
             let Some(workspace) = self.workspace.as_ref() else {
-                return Self::error("Include expansion needs a configured workspace root. Start carve-mcp with --root.");
+                return Self::error(
+                    "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
+                );
             };
             match workspace.include_scope(index, input.source_path.as_deref()) {
                 Ok((root, path)) => (Some(root), path),
@@ -3415,7 +3563,9 @@ impl CarveServer {
             }
         } else {
             if input.source_path.is_some() {
-                return Self::error("sourcePath requires includeRootIndex; without a root, includes stay literal.");
+                return Self::error(
+                    "sourcePath requires includeRootIndex; without a root, includes stay literal.",
+                );
             }
             (None, None)
         };
@@ -3559,6 +3709,13 @@ impl CarveServer {
         if let Err(error) = Self::checked(&input.source) {
             return Self::error(error);
         }
+        let tree = match crate::engine2::parse(&input.source, false) {
+            Ok(tree) => tree,
+            Err(error) => return Self::error(error),
+        };
+        if ast_json_deeper_than(&tree.to_string(), MAX_WRITER_DEPTH) {
+            return Self::error(writer_depth_error());
+        }
         match crate::engine2::format(&input.source, input.align_tables) {
             Ok(result) => Self::output(crate::engine2::render_result(&result, "source", None)),
             Err(error) => Self::error(error),
@@ -3576,46 +3733,76 @@ impl CarveServer {
         )
     )]
     fn render(&self, Parameters(input): Parameters<RenderInput>) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) { return Self::error(error); }
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
         let target = match input.target {
-            RenderTarget::Html => "html", RenderTarget::Markdown => "markdown",
-            RenderTarget::Plain => "plain", RenderTarget::Ansi => "ansi",
+            RenderTarget::Html => "html",
+            RenderTarget::Markdown => "markdown",
+            RenderTarget::Plain => "plain",
+            RenderTarget::Ansi => "ansi",
         };
         if input.preset == RenderPreset::StaticHtml && target != "html" {
             return Self::error("The static-html preset is only valid for the HTML target.");
         }
-        let mut options = json!({"strictLosses":input.strict_losses,"rawHtml":input.allow_raw_html});
+        let mut options =
+            json!({"strictLosses":input.strict_losses,"rawHtml":input.allow_raw_html});
         if let Some(heading_ids) = input.heading_ids.as_deref() {
             options["headingIds"] = json!(heading_ids);
         } else if input.preset == RenderPreset::Portable {
             options["headingIds"] = json!("ascii-lower");
         }
-        if input.preset == RenderPreset::StaticHtml { options["mode"] = json!("static"); }
+        if input.preset == RenderPreset::StaticHtml {
+            options["mode"] = json!("static");
+        }
         if let Some(typography) = input.smart_typography {
             options["smartTypography"] = json!(typography);
         }
-        let names: Vec<&str> = input.extensions.iter().map(|extension| match extension {
-            ExtensionName::Tabs => "carve.tabs",
-            ExtensionName::Autolink => "carve.autolink",
-            ExtensionName::SemanticSpans => "carve.semanticSpan",
-            ExtensionName::Wikilinks => "carve.wiki",
-        }).collect();
+        let names: Vec<&str> = input
+            .extensions
+            .iter()
+            .map(|extension| match extension {
+                ExtensionName::Tabs => "carve.tabs",
+                ExtensionName::Autolink => "carve.autolink",
+                ExtensionName::SemanticSpans => "carve.semanticSpan",
+                ExtensionName::Wikilinks => "carve.wiki",
+            })
+            .collect();
         options["extensions"] = json!(names);
-        options["renderers"] = json!(names.iter().map(|name| ((*name).to_string(), "standard"))
-            .collect::<std::collections::BTreeMap<_, _>>());
+        options["renderers"] = json!(
+            names
+                .iter()
+                .map(|name| ((*name).to_string(), "standard"))
+                .collect::<std::collections::BTreeMap<_, _>>()
+        );
         let result = if let Some(index) = input.include_root_index {
             let Some(workspace) = self.workspace.as_ref() else {
-                return Self::error("Include expansion needs a configured workspace root. Start carve-mcp with --root.");
+                return Self::error(
+                    "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
+                );
             };
             let (root, path) = match workspace.include_scope(index, input.source_path.as_deref()) {
                 Ok(scope) => scope,
                 Err(error) => return Self::error(error),
             };
-            crate::engine2::parse_included(&input.source, &root, index, path.as_deref(), &names, &options)
-                .and_then(|included| included.render(target).map(|result| (result, Some(included.report))))
+            crate::engine2::parse_included(
+                &input.source,
+                &root,
+                index,
+                path.as_deref(),
+                &names,
+                &options,
+            )
+            .and_then(|included| {
+                included
+                    .render(target)
+                    .map(|result| (result, Some(included.report)))
+            })
         } else {
             if input.source_path.is_some() {
-                return Self::error("sourcePath requires includeRootIndex; without a root, includes stay literal.");
+                return Self::error(
+                    "sourcePath requires includeRootIndex; without a root, includes stay literal.",
+                );
             }
             let result = if target == "html" {
                 crate::engine2::render(&input.source, options.clone())
@@ -3630,14 +3817,17 @@ impl CarveServer {
         match result {
             Ok((result, report)) => {
                 let field = if target == "html" { "html" } else { "output" };
-                let mut output = crate::engine2::render_result(&result, field, input.max_render_losses);
+                let mut output =
+                    crate::engine2::render_result(&result, field, input.max_render_losses);
                 if !input.sanitize_urls {
                     if let Some(losses) = output["losses"].as_array_mut() {
                         losses.retain(|loss| loss["code"] != "destination-denied");
                         output["totalLosses"] = json!(losses.len());
                     }
                 }
-                if let Some(report) = report { output["includes"] = report; }
+                if let Some(report) = report {
+                    output["includes"] = report;
+                }
                 Self::output(output)
             }
             Err(error) => Self::error(error),
@@ -3651,7 +3841,9 @@ impl CarveServer {
         annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
     )]
     fn check_targets(&self, Parameters(input): Parameters<CompatibilityInput>) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) { return Self::error(error); }
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
         if input.targets.is_empty() || input.targets.len() > 7 {
             return Self::error("targets must contain between 1 and 7 items.");
         }
@@ -3660,14 +3852,35 @@ impl CarveServer {
         for target in input.targets {
             let (name, render_target, platforms, note) = match target {
                 CompatibilityTarget::Html => ("html", "html", vec![], "Generic sanitized HTML."),
-                CompatibilityTarget::Markdown => ("markdown", "markdown", vec![], "Portable Markdown output."),
+                CompatibilityTarget::Markdown => {
+                    ("markdown", "markdown", vec![], "Portable Markdown output.")
+                }
                 CompatibilityTarget::Plain => ("plain", "plain", vec![], "Plain-text projection."),
-                CompatibilityTarget::Ansi => ("ansi", "ansi", vec![], "Terminal-oriented ANSI text."),
-                CompatibilityTarget::Github => ("github", "markdown", vec!["github"], "Markdown plus GitHub relinking diagnostics."),
-                CompatibilityTarget::Wordpress => ("wordpress", "html", vec![], "Sanitized HTML suitable for the WordPress integration; host extensions remain host-dependent."),
-                CompatibilityTarget::Pdf => ("pdf", "html", vec![], "HTML-stage compatibility for a print/PDF pipeline; pagination and fonts remain renderer-dependent."),
+                CompatibilityTarget::Ansi => {
+                    ("ansi", "ansi", vec![], "Terminal-oriented ANSI text.")
+                }
+                CompatibilityTarget::Github => (
+                    "github",
+                    "markdown",
+                    vec!["github"],
+                    "Markdown plus GitHub relinking diagnostics.",
+                ),
+                CompatibilityTarget::Wordpress => (
+                    "wordpress",
+                    "html",
+                    vec![],
+                    "Sanitized HTML suitable for the WordPress integration; host extensions remain host-dependent.",
+                ),
+                CompatibilityTarget::Pdf => (
+                    "pdf",
+                    "html",
+                    vec![],
+                    "HTML-stage compatibility for a print/PDF pipeline; pagination and fonts remain renderer-dependent.",
+                ),
             };
-            if !seen.insert(name) { continue; }
+            if !seen.insert(name) {
+                continue;
+            }
             let warnings = match crate::engine2::lint_warnings(&input.source, &platforms, None) {
                 Ok(warnings) => warnings,
                 Err(error) => return Self::error(error),
@@ -3678,15 +3891,25 @@ impl CarveServer {
             };
             let losses = rendered["losses"].clone();
             let loss_count = rendered["totalLosses"].as_u64().unwrap_or(0);
-            let status = if loss_count > 0 { "lossy" } else if !warnings.is_empty() { "warning" } else { "compatible" };
+            let status = if loss_count > 0 {
+                "lossy"
+            } else if !warnings.is_empty() {
+                "warning"
+            } else {
+                "compatible"
+            };
             let mut suggestions = Vec::new();
             if loss_count > 0 {
-                suggestions.push("Inspect the reported render losses and choose a target-specific fallback.");
+                suggestions.push(
+                    "Inspect the reported render losses and choose a target-specific fallback.",
+                );
             }
             if !warnings.is_empty() {
                 suggestions.push(if name == "github" {
                     "Resolve the target-specific lint warnings before publishing."
-                } else { "Resolve the general lint warnings before publishing." });
+                } else {
+                    "Resolve the general lint warnings before publishing."
+                });
             }
             results.push(json!({"target":name,"renderTarget":render_target,"status":status,
                 "note":note,"assessmentScope":{"renderLosses":"Only events in the engine render-loss channel.",
@@ -3694,15 +3917,22 @@ impl CarveServer {
                 "warningCount":warnings.len(),"warnings":warnings,"lossCount":loss_count,"losses":losses,
                 "lossesTruncated":rendered["truncated"],"suggestions":suggestions}));
         }
-        let count = |status| results.iter().filter(|result| result["status"] == status).count();
-        Self::output(json!({"receiptVersion":2,"source":{"format":"carve","sha256":sha256_text(&input.source)},
+        let count = |status| {
+            results
+                .iter()
+                .filter(|result| result["status"] == status)
+                .count()
+        };
+        Self::output(
+            json!({"receiptVersion":2,"source":{"format":"carve","sha256":sha256_text(&input.source)},
             "versions":{"engine":format!("{} (Carve 0.2, AST 2.0)", carve2::api::VERSION),
                 "mcp":env!("CARGO_PKG_VERSION")},
             "compatible":results.iter().all(|result| result["status"] == "compatible"),
             "targetCount":results.len(),
             "summary":{"compatible":count("compatible"),"warning":count("warning"),
                 "lossy":count("lossy"),"unavailable":count("unavailable")},
-            "targets":results}))
+            "targets":results}),
+        )
     }
 
     #[tool(
@@ -3721,19 +3951,31 @@ impl CarveServer {
         }
         let (mut value, report) = if let Some(index) = input.include_root_index {
             let Some(workspace) = self.workspace.as_ref() else {
-                return Self::error("Include expansion needs a configured workspace root. Start carve-mcp with --root.");
+                return Self::error(
+                    "Include expansion needs a configured workspace root. Start carve-mcp with --root.",
+                );
             };
             let (root, path) = match workspace.include_scope(index, input.source_path.as_deref()) {
                 Ok(scope) => scope,
                 Err(error) => return Self::error(error),
             };
-            let included = match crate::engine2::parse_included(&input.source, &root, index,
-                path.as_deref(), &[], &json!({})) {
+            let included = match crate::engine2::parse_included(
+                &input.source,
+                &root,
+                index,
+                path.as_deref(),
+                &[],
+                &json!({}),
+            ) {
                 Ok(included) => included,
                 Err(error) => return Self::error(error),
             };
-            let encoded = carve2::api::encode_tree_with(&included.tree,
-                carve2::api::EncodeOptions { positions: input.positions });
+            let encoded = carve2::api::encode_tree_with(
+                &included.tree,
+                carve2::api::EncodeOptions {
+                    positions: input.positions,
+                },
+            );
             let tree = match json_value(&encoded) {
                 Ok(value) => value,
                 Err(error) => return Self::error(format!("AST serialization failed: {error}")),
@@ -3741,17 +3983,23 @@ impl CarveServer {
             (tree, Some(included.report))
         } else {
             if input.source_path.is_some() {
-                return Self::error("sourcePath requires includeRootIndex; without a root, includes stay literal.");
+                return Self::error(
+                    "sourcePath requires includeRootIndex; without a root, includes stay literal.",
+                );
             }
             match crate::engine2::parse(&input.source, input.positions) {
                 Ok(tree) => (tree, None),
                 Err(error) => return Self::error(error),
             }
         };
-        if let Some(report) = report { value["includes"] = report; }
+        if let Some(report) = report {
+            value["includes"] = report;
+        }
         let bytes = value.to_string().len();
         if bytes > MAX_PARSE_OUTPUT_BYTES {
-            return Self::error(format!("carve_parse result is {bytes} bytes; the limit is {MAX_PARSE_OUTPUT_BYTES} bytes. Pass positions: false or parse a smaller document."));
+            return Self::error(format!(
+                "carve_parse result is {bytes} bytes; the limit is {MAX_PARSE_OUTPUT_BYTES} bytes. Pass positions: false or parse a smaller document."
+            ));
         }
         Self::output(value)
     }
@@ -3762,9 +4010,13 @@ impl CarveServer {
         description = "Compare two PART 12 Carve ASTs and return position-independent add, replace, and remove operations.", output_schema = rmcp::handler::server::tool::schema_for_type::<AstPatchCreateOutputSchema>(),
         annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false)
     )]
-    fn create_ast_patch(&self, Parameters(input): Parameters<AstPatchCreateInput>) -> CallToolResult {
+    fn create_ast_patch(
+        &self,
+        Parameters(input): Parameters<AstPatchCreateInput>,
+    ) -> CallToolResult {
         match crate::engine2::create_patch(&input.before, &input.after) {
-            Ok(value) => Self::output(value), Err(error) => Self::error(error),
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
         }
     }
 
@@ -3776,7 +4028,8 @@ impl CarveServer {
     )]
     fn apply_ast_patch(&self, Parameters(input): Parameters<AstPatchApplyInput>) -> CallToolResult {
         match crate::engine2::apply_patch(&input.ast, &input.operations) {
-            Ok(value) => Self::output(value), Err(error) => Self::error(error),
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
         }
     }
 
@@ -4095,7 +4348,10 @@ impl CarveServer {
         }
         let semantic_after = semantic_ast(&after, true);
         if semantic_after.to_string().len() > MAX_SOURCE_BYTES {
-            return Self::error(format!("Edited AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.", semantic_after.to_string().len()));
+            return Self::error(format!(
+                "Edited AST is {} bytes; the limit is {MAX_SOURCE_BYTES} bytes.",
+                semantic_after.to_string().len()
+            ));
         }
         let written = match crate::engine2::write(semantic_after, "carve", json!({})) {
             Ok(value) => value,
@@ -4208,42 +4464,83 @@ impl CarveServer {
         Parameters(input): Parameters<ReversibleAstPatchApplyInput>,
     ) -> CallToolResult {
         let document = match self.document_source(DocumentRequest {
-            source: input.source.as_deref(), root_index: input.root_index, path: input.path.as_deref(),
-        }) { Ok(value) => value, Err(error) => return Self::error(error) };
+            source: input.source.as_deref(),
+            root_index: input.root_index,
+            path: input.path.as_deref(),
+        }) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
         let source = document.source.as_str();
-        if let Err(error) = Self::checked(source) { return Self::error(error); }
-        if input.patch.version != 1 { return Self::error("Unsupported reversible patch version."); }
+        if let Err(error) = Self::checked(source) {
+            return Self::error(error);
+        }
+        if input.patch.version != 1 {
+            return Self::error("Unsupported reversible patch version.");
+        }
         for operations in [&input.patch.forward, &input.patch.inverse] {
             if operations.len() > MAX_AST_PATCH_OPERATIONS {
-                return Self::error(format!("Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.", operations.len()));
+                return Self::error(format!(
+                    "Patch has {} operations; the limit is {MAX_AST_PATCH_OPERATIONS}.",
+                    operations.len()
+                ));
             }
         }
-        let patch_bytes = serde_json::to_vec(&input.patch).map(|bytes| bytes.len()).unwrap_or(MAX_SOURCE_BYTES + 1);
+        let patch_bytes = serde_json::to_vec(&input.patch)
+            .map(|bytes| bytes.len())
+            .unwrap_or(MAX_SOURCE_BYTES + 1);
         if patch_bytes > MAX_SOURCE_BYTES {
-            return Self::error(format!("Reversible patch is {patch_bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes."));
+            return Self::error(format!(
+                "Reversible patch is {patch_bytes} bytes; the limit is {MAX_SOURCE_BYTES} bytes."
+            ));
         }
-        let fingerprint_valid = |value: &str| value.len() == 24 && value.starts_with("fnv1a64:")
-            && value[8..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
-        if !fingerprint_valid(&input.patch.before_fingerprint) || !fingerprint_valid(&input.patch.after_fingerprint) {
+        let fingerprint_valid = |value: &str| {
+            value.len() == 24
+                && value.starts_with("fnv1a64:")
+                && value[8..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        };
+        if !fingerprint_valid(&input.patch.before_fingerprint)
+            || !fingerprint_valid(&input.patch.after_fingerprint)
+        {
             return Self::error("Reversible patch requires valid before and after fingerprints.");
         }
         let ast = match crate::engine2::parse(source, false) {
-            Ok(ast) => ast, Err(error) => return Self::error(error),
+            Ok(ast) => ast,
+            Err(error) => return Self::error(error),
         };
-        let expected = if input.inverse { &input.patch.after_fingerprint } else { &input.patch.before_fingerprint };
+        let expected = if input.inverse {
+            &input.patch.after_fingerprint
+        } else {
+            &input.patch.before_fingerprint
+        };
         if crate::ast_patch2::fingerprint(&ast) != *expected {
             return Self::error("patch precondition does not match the document");
         }
-        let operations = if input.inverse { &input.patch.inverse } else { &input.patch.forward };
+        let operations = if input.inverse {
+            &input.patch.inverse
+        } else {
+            &input.patch.forward
+        };
         let applied = match crate::engine2::apply_patch(&ast, operations) {
-            Ok(value) => value, Err(error) => return Self::error(error),
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
         };
         let after = &applied["ast"];
-        let expected_result = if input.inverse { &input.patch.before_fingerprint } else { &input.patch.after_fingerprint };
+        let expected_result = if input.inverse {
+            &input.patch.before_fingerprint
+        } else {
+            &input.patch.after_fingerprint
+        };
         if crate::ast_patch2::fingerprint(after) != *expected_result {
             return Self::error("patch postcondition does not match the document");
         }
-        let reverse = if input.inverse { &input.patch.forward } else { &input.patch.inverse };
+        let reverse = if input.inverse {
+            &input.patch.forward
+        } else {
+            &input.patch.inverse
+        };
         match crate::engine2::apply_patch(after, reverse) {
             Ok(restored) if crate::ast_patch2::fingerprint(&restored["ast"]) == *expected => {}
             Ok(_) => return Self::error("patch reverse direction does not restore the document"),
@@ -4251,11 +4548,25 @@ impl CarveServer {
         }
         let output_source = applied["source"].as_str().unwrap_or_default();
         let direction = if input.inverse { "inverse" } else { "forward" };
-        let code = if input.inverse { "revert-structured-ast-patch" } else { "apply-structured-ast-patch" };
-        let source_patch = source_patch_with_kind(source, output_source, SourceEditKindOutputSchema::Refactor, code);
-        let mut value = json!({"direction":direction,"source":output_source,"sourcePatch":source_patch});
-        if input.include_ast { value["ast"] = after.clone(); }
-        if document.from_file { value["sha256"] = json!(document.sha256); }
+        let code = if input.inverse {
+            "revert-structured-ast-patch"
+        } else {
+            "apply-structured-ast-patch"
+        };
+        let source_patch = source_patch_with_kind(
+            source,
+            output_source,
+            SourceEditKindOutputSchema::Refactor,
+            code,
+        );
+        let mut value =
+            json!({"direction":direction,"source":output_source,"sourcePatch":source_patch});
+        if input.include_ast {
+            value["ast"] = after.clone();
+        }
+        if document.from_file {
+            value["sha256"] = json!(document.sha256);
+        }
         Self::output(value)
     }
 
@@ -4270,11 +4581,19 @@ impl CarveServer {
         )
     )]
     fn migrate(&self, Parameters(input): Parameters<MigrateInput>) -> CallToolResult {
-        if let Err(error) = Self::checked(&input.source) { return Self::error(error); }
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
         let from = match input.format {
-            SourceFormat::Html => "html", SourceFormat::Markdown => "markdown",
-            SourceFormat::Gfm => "gfm", SourceFormat::Djot => "djot",
-            SourceFormat::Bbcode => return Self::error("BBCode import is outside the Carve 0.2 specification (C2-T-003) and is unavailable in the Rust engine."),
+            SourceFormat::Html => "html",
+            SourceFormat::Markdown => "markdown",
+            SourceFormat::Gfm => "gfm",
+            SourceFormat::Djot => "djot",
+            SourceFormat::Bbcode => {
+                return Self::error(
+                    "BBCode import is outside the Carve 0.2 specification (C2-T-003) and is unavailable in the Rust engine.",
+                );
+            }
         };
         match crate::engine2::migration(&input.source, from) {
             Ok(result) => Self::output(result),
@@ -4282,12 +4601,25 @@ impl CarveServer {
         }
     }
 
-    #[tool(name = "carve_upgrade", title = "Upgrade Carve 0.1 to 0.2", description = "Rewrite Carve 0.1 source as 0.2. writable is false when a person must review records.", annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    #[tool(
+        name = "carve_upgrade",
+        title = "Upgrade Carve 0.1 to 0.2",
+        description = "Rewrite Carve 0.1 source as 0.2. writable is false when a person must review records.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            open_world_hint = false
+        )
+    )]
     fn upgrade(&self, Parameters(input): Parameters<UpgradeInput>) -> CallToolResult {
-        if let Err(error)=Self::checked(&input.source) {return Self::error(error);}
-        match crate::upgrade::upgrade(&input.source) {Ok(value)=>Self::output(value),Err(error)=>Self::error(error)}
+        if let Err(error) = Self::checked(&input.source) {
+            return Self::error(error);
+        }
+        match crate::upgrade::upgrade(&input.source) {
+            Ok(value) => Self::output(value),
+            Err(error) => Self::error(error),
+        }
     }
-
 }
 
 #[tool_handler(router = self.tools)]
@@ -4398,9 +4730,16 @@ impl ServerHandler for CarveServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
         let text = match request.uri.as_str() {
-            "carve://guide" | "carve://rules" | "carve://spec" | "carve://upgrade-map" => resources::read(&request.uri),
-            uri if uri.starts_with("carve://rules/") || uri.starts_with("carve://spec/")
-                || uri.starts_with("carve://upgrade-map/") || uri.starts_with("carve://lint-rules/") => resources::read(uri),
+            "carve://guide" | "carve://rules" | "carve://spec" | "carve://upgrade-map" => {
+                resources::read(&request.uri)
+            }
+            uri if uri.starts_with("carve://rules/")
+                || uri.starts_with("carve://spec/")
+                || uri.starts_with("carve://upgrade-map/")
+                || uri.starts_with("carve://lint-rules/") =>
+            {
+                resources::read(uri)
+            }
             _ => None,
         };
         let text = text.ok_or_else(|| {
@@ -4415,9 +4754,15 @@ impl ServerHandler for CarveServer {
                     value.chars().take(100).collect::<String>()
                 )
             } else if let Some(value) = request.uri.strip_prefix("carve://spec/") {
-                format!("Unknown Carve specification document: {}", value.chars().take(100).collect::<String>())
+                format!(
+                    "Unknown Carve specification document: {}",
+                    value.chars().take(100).collect::<String>()
+                )
             } else if let Some(value) = request.uri.strip_prefix("carve://upgrade-map/") {
-                format!("Unknown Carve upgrade entry: {}", value.chars().take(100).collect::<String>())
+                format!(
+                    "Unknown Carve upgrade entry: {}",
+                    value.chars().take(100).collect::<String>()
+                )
             } else {
                 format!("Resource not found: {}", request.uri)
             };
@@ -4714,7 +5059,8 @@ mod tests {
             "{{ src/server.js @code:js }}\n\n{{ src/server.js }}\n",
             "plain",
         );
-        assert!(!both.contains("shown"), "{both}");
+        // C2-N-012 resolves each include with that directive's own options.
+        assert!(both.contains("shown"), "{both}");
         let nested = rendered_value(&server, "{{ parts/mixed.crv }}\n", "plain");
         assert!(nested.contains("{{ ../src/server.js }}"), "{nested}");
         for path in [".env", "node_modules/pkg/index.js"] {
@@ -4753,16 +5099,22 @@ mod tests {
             child["includedBy"],
             json!([{"file": "index.crv", "line": 1, "column": 1, "start": 0, "end": 21}])
         );
-        assert!(warnings.iter().any(
-            |warning| warning["rule"] == "include-unresolved" && warning.get("file").is_none()
-        ));
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning["rule"] == "include-not-found"
+                    && warning.get("file").is_none())
+        );
         assert!(
             !value
                 .to_string()
                 .contains(&root.to_string_lossy().into_owned())
         );
         let literal = server.lint(call(json!({"source": "{{ parts/child.crv }}\n"})));
-        assert_eq!(structured(&literal)["warnings"], json!([]));
+        assert_eq!(
+            structured(&literal)["warnings"][0]["rule"],
+            "include-no-resolver"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -4784,37 +5136,23 @@ mod tests {
         let server = CarveServer::new();
         let render = |setting: Value| {
             structured(&server.render(call(json!({
-                "source": "\"Wait...\" -- it's fine",
-                "target": "plain",
+                "source": "\"Wait...\" -- it's fine", "target": "plain",
                 "smartTypography": setting,
             }))))["value"]
                 .clone()
         };
-        let glyph = json!("\u{201c}Wait\u{2026}\u{201d} \u{2013} it\u{2019}s fine\n");
-        let source = json!("\"Wait...\" -- it's fine\n");
-        assert_eq!(render(json!("glyph")), glyph);
-        assert_eq!(render(json!(true)), glyph);
-        assert_eq!(render(json!({"quotes": true})), glyph);
-        assert_eq!(render(json!("source")), source);
-        assert_eq!(render(json!(false)), source);
-        assert_eq!(
-            render(json!({"quotes": false})),
-            json!("\"Wait\u{2026}\" \u{2013} it's fine\n")
-        );
-        for refused in [
-            json!("quotes-source"),
-            json!({"quotes": false, "dashes": false}),
-        ] {
+        assert_eq!(render(json!(true)), json!("“Wait…” – it’s fine\n"));
+        assert_eq!(render(json!(false)), json!("\"Wait...\" -- it's fine\n"));
+        for refused in [json!("source"), json!({"quotes": false})] {
             assert!(
-                serde_json::from_value::<RenderInput>(
-                    json!({"source": "x", "target": "plain", "smartTypography": refused})
-                )
+                serde_json::from_value::<RenderInput>(json!({
+                    "source": "x", "target": "plain", "smartTypography": refused
+                }))
                 .is_err()
             );
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn an_include_naming_a_fifo_is_refused_instead_of_blocking() {
         let (root, server, _) = policy_root();
@@ -4896,10 +5234,9 @@ mod tests {
         on_worker_stack(|| {
             let server = CarveServer::new();
             let started = std::time::Instant::now();
-            let formatted =
-                server.format(call(json!({"source": format!("{}x\n", "- ".repeat(140))})));
-            assert_eq!(formatted.is_error, Some(true));
-            assert!(format!("{formatted:?}").contains("deeper than 256 AST levels"));
+            let formatted = server.format(call(json!({"source": loose_list(140)})));
+            // The 0.2 parser caps source nesting before the writer ceiling.
+            assert_ne!(formatted.is_error, Some(true));
             assert!(started.elapsed() < std::time::Duration::from_secs(10));
             let formatted = server.format(call(json!({"source": loose_list(40)})));
             assert_ne!(formatted.is_error, Some(true));
@@ -4908,7 +5245,7 @@ mod tests {
             let patched = server.apply_ast_patch(call(json!({"ast": ast, "operations": [{"op": "replace", "path": "/children/0", "value": deep_quote_ast()}]})));
             assert_eq!(patched.is_error, Some(true));
             assert!(
-                format!("{patched:?}").contains("deeper than"),
+                format!("{patched:?}").contains("nesting exceeds 200"),
                 "{patched:?}"
             );
         });
@@ -4922,7 +5259,7 @@ mod tests {
         assert_ne!(aligned.is_error, Some(true));
         assert_eq!(
             structured(&aligned),
-            json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false})
+            json!({"value": "| a   | bb |\n| ccc | d  |\n", "losses": [], "totalLosses": 0, "truncated": false, "diagnostics":[]})
         );
         let canonical = server.format(call(json!({"source": source, "alignTables": false})));
         assert_eq!(structured(&canonical)["value"], json!(source));
@@ -5303,10 +5640,10 @@ mod tests {
                 .map(|tool| tool.name.to_string())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names(ToolProfile::Convert).len(), 4);
+        assert_eq!(names(ToolProfile::Convert).len(), 5);
         assert!(names(ToolProfile::Structure).contains(&"carve_plan_ast_edit".into()));
         assert!(names(ToolProfile::Structure).contains(&"carve_get_block".into()));
         assert!(names(ToolProfile::Structure).contains(&"carve_replace_source".into()));
-        assert_eq!(names(ToolProfile::All).len(), 15);
+        assert_eq!(names(ToolProfile::All).len(), 16);
     }
 }

@@ -1,8 +1,8 @@
 //! Embedded Carve 0.2 resources. The generated bundle is taken from the same
 //! vendored spec and formatting functions as the TypeScript server.
 
-use std::{collections::BTreeMap, sync::OnceLock};
 use serde::Deserialize;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,8 +16,10 @@ struct ResourceData {
 
 fn data() -> &'static ResourceData {
     static DATA: OnceLock<ResourceData> = OnceLock::new();
-    DATA.get_or_init(|| serde_json::from_str(include_str!("../resources/resource-texts.json"))
-        .expect("generated Carve 0.2 resources must be valid JSON"))
+    DATA.get_or_init(|| {
+        serde_json::from_str(include_str!("../resources/resource-texts.json"))
+            .expect("generated Carve 0.2 resources must be valid JSON")
+    })
 }
 
 pub fn read(uri: &str) -> Option<String> {
@@ -27,7 +29,9 @@ pub fn read(uri: &str) -> Option<String> {
         format!("carve://upgrade-map/{}", id.to_uppercase())
     } else if let Some(name) = uri.strip_prefix("carve://lint-rules/") {
         format!("carve://lint-rules/{}", name.to_lowercase())
-    } else { uri.to_string() };
+    } else {
+        uri.to_string()
+    };
     data().text.get(&normalized).cloned()
 }
 
@@ -54,7 +58,11 @@ mod tests {
     #[test]
     fn generated_rules_are_readable() {
         assert!(rule_ids().count() > 100);
-        assert!(read("carve://rules").unwrap().contains("Normative Carve 0.2 rule index"));
+        assert!(
+            read("carve://rules")
+                .unwrap()
+                .contains("Normative Carve 0.2 rule index")
+        );
         assert!(read("carve://rules/C2-T-005").unwrap().contains("C2-T-005"));
         assert!(read("carve://rules/unknown").is_none());
     }

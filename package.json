@@ -19,10 +19,10 @@
     "prepack": "npm run build",
     "release:check": "npm run check && npm test && npm run build && node scripts/check-schema-budget.mjs && node scripts/release-check.mjs",
     "sync:rust-resources": "npm run build && node scripts/sync-rust-resources.mjs",
-    "check:rust-resources": "npm run build && node scripts/sync-rust-resources.mjs --check",
+    "check:rust-resources": "npm run build && node scripts/sync-rust-resources.mjs --check && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-resource-conformance-v2.mjs",
     "check:schema-budget": "npm run build && node scripts/check-schema-budget.mjs",
     "check:engine-current": "node scripts/check-engine-current.mjs",
-    "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance.mjs",
+    "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance-v2.mjs",
     "test:workflow": "npm run build && node scripts/writer-workflow.mjs",
     "test": "vitest run",
     "test:watch": "vitest"

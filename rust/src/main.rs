@@ -3,14 +3,14 @@ use std::process::ExitCode;
 
 use rmcp::ServiceExt;
 
-mod blocks;
 mod ast_patch2;
+mod blocks;
 mod config;
 mod engine2;
 mod preservation;
 mod reference_graph;
-mod reviewed_edit;
 mod resources;
+mod reviewed_edit;
 mod server;
 mod splice;
 mod transport;

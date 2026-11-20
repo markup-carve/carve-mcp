@@ -374,8 +374,15 @@ impl Workspace {
         check_links: bool,
         check_anchors: bool,
     ) -> Result<Value, String> {
-        self.review_with_replacement(root_index, max_depth, limit, github,
-            check_links, check_anchors, None)
+        self.review_with_replacement(
+            root_index,
+            max_depth,
+            limit,
+            github,
+            check_links,
+            check_anchors,
+            None,
+        )
     }
 
     pub(crate) fn review_with_replacement(
@@ -414,8 +421,13 @@ impl Workspace {
                 break;
             }
             total_bytes += bytes;
-            sources.insert(path.to_owned(), replacement.filter(|(name, _)| *name == path)
-                .map_or_else(|| read["content"].as_str().unwrap().to_owned(), |(_, value)| value.to_owned()));
+            sources.insert(
+                path.to_owned(),
+                replacement.filter(|(name, _)| *name == path).map_or_else(
+                    || read["content"].as_str().unwrap().to_owned(),
+                    |(_, value)| value.to_owned(),
+                ),
+            );
         }
         let mut files = Vec::new();
         let mut counts = BTreeMap::<String, usize>::new();
@@ -638,10 +650,10 @@ impl Workspace {
             .collect::<Vec<_>>();
         Ok(
             json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"fixPlan":{"automatic":automatic,"writerReview":writer_review},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes,
-                "checks":{"localLint":true,"localLinks":check_links,"anchors":check_links && check_anchors,"includes":false,"complete":complete},
-                "includeDependencies":[],"filesRead":files_read,
+                "checks":{"localLint":true,"localLinks":check_links,"anchors":check_links && check_anchors,"includes":false,"suppressedIncludeWarnings":false,"complete":complete},
+                "includeDependencies":[],"includeAdjustments":[],"filesRead":files_read,
                 "scope":{"maxDepth":listing["maxDepth"],"limit":listing["limit"],"excluded":&self.review.exclude},
-                "versions":{"engine":CARVE_ENGINE_VERSION,"mcp":env!("CARGO_PKG_VERSION")}}),
+                "versions":{"engine":format!("{} (Carve 0.2, AST 2.0)", CARVE_ENGINE_VERSION),"mcp":env!("CARGO_PKG_VERSION")}}),
         )
     }
 }
@@ -666,9 +678,15 @@ fn collect_anchor_ids(value: &Value, ids: &mut BTreeSet<String>, all: bool) {
         return;
     };
     if all || record.get("type").and_then(Value::as_str) == Some("heading") {
-        if let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
-            .or_else(|| (record.get("type").and_then(Value::as_str) == Some("heading"))
-                .then(|| value.get("generatedId").and_then(Value::as_str)).flatten()) {
+        if let Some(id) = value
+            .pointer("/attrs/id")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                (record.get("type").and_then(Value::as_str) == Some("heading"))
+                    .then(|| value.get("generatedId").and_then(Value::as_str))
+                    .flatten()
+            })
+        {
             ids.insert(id.to_owned());
         }
     }
@@ -676,9 +694,13 @@ fn collect_anchor_ids(value: &Value, ids: &mut BTreeSet<String>, all: bool) {
         if let Some(child) = record.get(field) {
             if field == "slots" {
                 if let Some(slots) = child.as_object() {
-                    for values in slots.values() { collect_anchor_ids(values, ids, all); }
+                    for values in slots.values() {
+                        collect_anchor_ids(values, ids, all);
+                    }
                 }
-            } else { collect_anchor_ids(child, ids, all); }
+            } else {
+                collect_anchor_ids(child, ids, all);
+            }
         }
     }
 }
@@ -747,7 +769,9 @@ mod tests {
             .expect("Cargo.lock has a carve-lang package");
         assert!(block.contains(&format!("\nversion = \"{CARVE_ENGINE_VERSION}\"\n")));
         let manifest = include_str!("../Cargo.toml");
-        let line = manifest.lines().find(|line| line.starts_with("carve2 = "))
+        let line = manifest
+            .lines()
+            .find(|line| line.starts_with("carve2 = "))
             .expect("Cargo.toml declares the Carve 0.2 engine");
         assert!(line.contains("git = "));
     }
@@ -847,7 +871,7 @@ mod tests {
         let root = temporary_root();
         fs::write(
             root.join("guide.crv"),
-            "# Top\n\n{#summary}\nSummary text.\n\n- # In A List\n\n:::note\n# In A Note\n:::\n\n> # In A Quote\n\n^ Caption\n",
+            "= Top\n\n{#summary}\nSummary text.\n\n- = In A List\n\n::: note\n= In A Note\n:::\n\n> = In A Quote\n\n^ Caption\n",
         )
         .unwrap();
         fs::write(
