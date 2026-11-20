@@ -54,7 +54,7 @@ The `next2` branch runs the Carve 0.2 engine (`@markup-carve/carve` from carve-j
 - `carve_apply_reversible_ast_patch` safely previews forward or undo operations
   as a guarded UTF-8 source edit. The patched AST is returned only with
   `includeAst: true`.
-- `carve_migrate` imports HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 and returns a version 3 report with the import diagnostics. The Markdown dialect flags of 0.1 (`highlight`, `superscript`, `math`) are gone.
+- `carve_migrate` imports HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 and returns a version 3 report with the import diagnostics. The 0.1 `markdown` format read GitHub Flavored Markdown; in 0.2 that is `gfm`, and `markdown` is strict CommonMark, which keeps a GFM table as escaped text. The Markdown dialect flags of 0.1 (`highlight`, `superscript`, `math`) are gone.
 - `carve_upgrade` rewrites Carve 0.1 source as 0.2 with the engine's upgrade tool. It returns the new source, the upgrade records (each names its `U-nnn` entry), and `writable`, which is false when a record needs a person.
 - `carve_reference_graph` indexes cross-document headings, footnotes, abbreviations, links, and images, including broken edges and orphaned definitions (when workspace access is enabled).
 

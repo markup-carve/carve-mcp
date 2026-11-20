@@ -314,6 +314,11 @@ describe('Carve operations', () => {
       });
     }
   });
+  it('converts a GFM table with gfm and keeps it as text with strict markdown', () => {
+    const table = '| a | b |\n|---|--:|\n| 1 | 2 |\n';
+    expect(migrate(table, 'gfm').value).toBe('|= a |={>} b |\n| 1 | 2 |\n');
+    expect(migrate(table, 'markdown').value).toMatch(/^\\\| a \| b \|/);
+  });
   it.skip('reports per-construct Markdown import fidelity (no preserved-construct records in the 0.2 import diagnostics, markup-carve/carve-js#5133)', () => {
     expect(migrate('**Hello**', 'markdown').report.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'markdown-strong', fidelity: 'preserved' }),
