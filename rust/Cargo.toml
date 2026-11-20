@@ -14,7 +14,8 @@ categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 atomic-write-file = "0.3.1"
-carve-lang = "=0.1.14"
+carve = { package = "carve-lang", version = "=0.1.14" }
+carve2 = { package = "carve-lang", git = "https://github.com/markup-carve/carve-rs", rev = "8388a5a4f77452174ad04d9ee99f03a35244a960" }
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

@@ -4,7 +4,9 @@ use std::process::ExitCode;
 use rmcp::ServiceExt;
 
 mod blocks;
+mod ast_patch2;
 mod config;
+mod engine2;
 mod preservation;
 mod resources;
 mod server;

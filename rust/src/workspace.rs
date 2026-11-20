@@ -438,12 +438,7 @@ impl Workspace {
                 ) {
                     continue;
                 }
-                let ast = carve::to_json_with_options(
-                    source,
-                    &carve::Options::default().with_positions(true),
-                );
-                let value: Value =
-                    crate::server::json_value(&ast).map_err(|error| error.to_string())?;
+                let value = crate::engine2::parse(source, true)?;
                 let mut ids = BTreeSet::new();
                 collect_anchor_ids(&value, &mut ids, !folds_anchors(path));
                 if folds_anchors(path) {
@@ -658,14 +653,19 @@ fn collect_anchor_ids(value: &Value, ids: &mut BTreeSet<String>, all: bool) {
     let Some(record) = value.as_object() else {
         return;
     };
-    if (all || record.get("type").and_then(Value::as_str) == Some("heading"))
-        && let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
-    {
-        ids.insert(id.to_owned());
+    if all || record.get("type").and_then(Value::as_str) == Some("heading") {
+        if let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
+            .or_else(|| value.get("generatedId").and_then(Value::as_str)) {
+            ids.insert(id.to_owned());
+        }
     }
     for field in AST_CHILD_FIELDS {
         if let Some(child) = record.get(field) {
-            collect_anchor_ids(child, ids, all);
+            if field == "slots" {
+                if let Some(slots) = child.as_object() {
+                    for values in slots.values() { collect_anchor_ids(values, ids, all); }
+                }
+            } else { collect_anchor_ids(child, ids, all); }
         }
     }
 }
