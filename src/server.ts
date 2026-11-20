@@ -85,7 +85,7 @@ const migrationDiagnostic = z.object({
   path: z.string().optional(),
 }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({
-  schemaVersion: z.literal(3), sourceFormat: z.enum(['html', 'markdown', 'gfm', 'djot']), diagnostics: z.array(migrationDiagnostic),
+  schemaVersion: z.literal(3), sourceFormat: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']), diagnostics: z.array(migrationDiagnostic),
 }).loose() }).loose();
 const upgradeOutput = z.object({ value: z.string(), writable: z.boolean(), records: z.array(z.unknown()) }).loose();
 const compatibilityOutput = z.object({ receiptVersion: z.number().int().min(2).max(2), source: z.object({ format: z.literal('carve'), sha256: z.string().regex(/^[0-9a-f]{64}$/) }), versions: z.object({ engine: z.string(), mcp: z.string() }), compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int(), unavailable: z.number().int() }), targets: z.array(z.unknown()) }).loose();

@@ -62,6 +62,19 @@ describe('MCP server', () => {
     expect(sourceEdit.structuredContent).toMatchObject({ direction: 'forward', source: expect.stringContaining('After'), sourcePatch: { edits: expect.any(Array) } });
   });
 
+  it('returns every migrate source format through the output schema', async () => {
+    const server = await createServer();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    closeables.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    for (const [format, source] of [['html', '<p><b>Hello</b></p>'], ['markdown', '**Hello**'], ['gfm', '~~gone~~'], ['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']]) {
+      const migrated = await client.callTool({ name: 'carve_migrate', arguments: { source, format } });
+      expect(migrated.isError, format).not.toBe(true);
+      expect(migrated.structuredContent, format).toMatchObject({ report: { sourceFormat: format } });
+    }
+  });
+
   it('offers a small set of writer-controlled workflows', async () => {
     const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
