@@ -84,12 +84,29 @@ fn warning_key(value: &Value, include_severity: bool) -> String {
     }
     key
 }
-fn new_errors(before: &Value, after: &Value, include_severity: bool) -> Vec<Value> {
+fn new_errors(
+    before: &Value,
+    after: &Value,
+    include_severity: bool,
+    original: Option<&Value>,
+) -> Vec<Value> {
     let mut counts = BTreeMap::<String, usize>::new();
     for warning in before["projectWarnings"].as_array().into_iter().flatten() {
         *counts
             .entry(warning_key(warning, include_severity))
             .or_default() += 1;
+    }
+    if let Some(original) = original {
+        let mut allowed = BTreeMap::<String, usize>::new();
+        for warning in original.as_array().into_iter().flatten() {
+            *allowed
+                .entry(warning_key(warning, include_severity))
+                .or_default() += 1;
+        }
+        for (key, count) in allowed {
+            let current = counts.entry(key).or_default();
+            *current = (*current).max(count);
+        }
     }
     after["projectWarnings"]
         .as_array()
@@ -120,7 +137,7 @@ pub(crate) fn project(
     let after = review(workspace, root, &path, Some(result))?;
     complete(&before, &path)?;
     complete(&after, &path)?;
-    let introduced = new_errors(&before, &after, false);
+    let introduced = new_errors(&before, &after, false, None);
     if !introduced.is_empty() {
         return Err(format!(
             "The edit introduces project validation errors: {}",
@@ -212,7 +229,12 @@ pub(crate) fn undo(workspace: &Workspace, receipt: &str) -> Result<Value, String
     let after = review(workspace, root, path, Some(&restored))?;
     complete(&before, path)?;
     complete(&after, path)?;
-    let introduced = new_errors(&before, &after, true);
+    let introduced = new_errors(
+        &before,
+        &after,
+        true,
+        Some(&value["originalProjectWarnings"]),
+    );
     if !introduced.is_empty() {
         return Err("Undo would introduce project errors.".into());
     }

@@ -26,7 +26,9 @@ fn run(source: &str, report: bool) -> Result<(i32, String, String), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| format!("Carve upgrade CLI is unavailable: {error}"))?;
+        .map_err(|error| {
+            format!("Carve upgrade requires the JavaScript Carve CLI (C2-T-003): {error}")
+        })?;
     child
         .stdin
         .take()

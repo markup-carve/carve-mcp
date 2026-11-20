@@ -87,6 +87,19 @@ try {
     const [tsUndo,rsUndo]=await Promise.all([call(typescript,'carve_undo_reviewed_edit',{receipt:tsReceipt}),call(native,'carve_undo_reviewed_edit',{receipt:rsReceipt})]);
     try{deepStrictEqual(rsUndo,tsUndo);}catch{failures++;console.error(`Reviewed undo mismatch\nTS ${JSON.stringify(tsUndo)}\nRS ${JSON.stringify(rsUndo)}`);}
   }else { failures++;console.error('A reviewed edit did not return a signed undo receipt.'); }
+  for(const root of roots)writeFileSync(join(root,'docs/faulty.crv'),'= Faulty\n\n[missing](absent.crv)\n');
+  const faultyArgs={rootIndex:0,path:'docs/faulty.crv',selector:{kind:'node-type',value:'paragraph'},
+    text:'Repaired.',dryRun:false,
+    expectedSha256:(await call(typescript,'carve_read_file',{rootIndex:0,path:'docs/faulty.crv'})).value.sha256};
+  const [tsRepair,rsRepair]=await Promise.all([call(typescript,'carve_reviewed_edit',faultyArgs),call(native,'carve_reviewed_edit',faultyArgs)]);
+  const originalTsReceipt=tsRepair.value.undoReceipt,originalRsReceipt=rsRepair.value.undoReceipt;
+  if(typeof originalTsReceipt==='string')tsRepair.value.undoReceipt='<signed receipt>';
+  if(typeof originalRsReceipt==='string')rsRepair.value.undoReceipt='<signed receipt>';
+  try{deepStrictEqual(rsRepair,tsRepair);}catch{failures++;console.error(`Reviewed repair mismatch\nTS ${JSON.stringify(tsRepair)}\nRS ${JSON.stringify(rsRepair)}`);}
+  if(typeof originalTsReceipt==='string'&&typeof originalRsReceipt==='string') {
+    const [tsRestore,rsRestore]=await Promise.all([call(typescript,'carve_undo_reviewed_edit',{receipt:originalTsReceipt}),call(native,'carve_undo_reviewed_edit',{receipt:originalRsReceipt})]);
+    try{deepStrictEqual(rsRestore,tsRestore);}catch{failures++;console.error(`Existing-error undo mismatch\nTS ${JSON.stringify(tsRestore)}\nRS ${JSON.stringify(rsRestore)}`);}
+  }else { failures++;console.error('A reviewed repair did not return a signed undo receipt.'); }
   ok(!failures,`${failures} Rust 0.2 tool comparisons differed.`);
-  console.log(`${cases.length+2} Carve 0.2 tool calls and ${tsTools.length} tool names agree.`);
+  console.log(`${cases.length+4} Carve 0.2 tool calls and ${tsTools.length} tool names agree.`);
 } finally {await Promise.all([typescript.close(),native.close()]);}
