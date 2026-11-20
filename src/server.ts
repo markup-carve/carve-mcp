@@ -599,7 +599,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
-    description: 'Import HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 with diagnostics.',
+    description: 'Import HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 with diagnostics. Use gfm for ordinary or GitHub Markdown, as the 0.1 markdown format read: markdown is strict CommonMark and keeps tables, task lists and strikethrough as text.',
     inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']) }),
     outputSchema: migrateOutput,
     annotations: readOnly,
