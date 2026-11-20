@@ -5,7 +5,7 @@ use carve2::api;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -44,7 +44,11 @@ impl Included {
     }
 }
 
-fn include_resolver(root: PathBuf) -> api::Resolver {
+fn include_resolver(
+    root: PathBuf,
+    allowed: Option<BTreeSet<String>>,
+    replacements: BTreeMap<String, String>,
+) -> api::Resolver {
     Arc::new(move |request: &api::Request<'_>| {
         use api::Cause;
         if Path::new(request.path).is_absolute() {
@@ -73,6 +77,18 @@ fn include_resolver(root: PathBuf) -> api::Resolver {
         let resolved = canonical
             .strip_prefix(&root)
             .map_err(|_| Cause::OutsideRoot)?;
+        let lexical_id = lexical
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let id = resolved
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        if allowed
+            .as_ref()
+            .is_some_and(|paths| !paths.contains(&lexical_id) || !paths.contains(&id))
+        {
+            return Err(Cause::OutsideRoot);
+        }
         if crate::workspace::hidden_path_refusal(&lexical).is_some()
             || crate::workspace::hidden_path_refusal(resolved).is_some()
         {
@@ -88,10 +104,10 @@ fn include_resolver(root: PathBuf) -> api::Resolver {
         if !std::fs::metadata(&canonical).is_ok_and(|metadata| metadata.is_file()) {
             return Err(Cause::Unreadable);
         }
-        let bytes = std::fs::read(&canonical).map_err(|_| Cause::Unreadable)?;
-        let id = resolved
-            .to_string_lossy()
-            .replace(std::path::MAIN_SEPARATOR, "/");
+        let bytes = replacements.get(&id).map_or_else(
+            || std::fs::read(&canonical).map_err(|_| Cause::Unreadable),
+            |content| Ok(content.as_bytes().to_vec()),
+        )?;
         Ok((bytes, id))
     })
 }
@@ -104,8 +120,30 @@ pub(crate) fn parse_included(
     extensions: &[&str],
     settings: &Value,
 ) -> Result<Included, String> {
+    parse_included_with(
+        source,
+        root,
+        root_index,
+        source_path,
+        extensions,
+        settings,
+        None,
+        BTreeMap::new(),
+    )
+}
+
+pub(crate) fn parse_included_with(
+    source: &str,
+    root: &Path,
+    root_index: usize,
+    source_path: Option<&str>,
+    extensions: &[&str],
+    settings: &Value,
+    allowed: Option<BTreeSet<String>>,
+    replacements: BTreeMap<String, String>,
+) -> Result<Included, String> {
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-    let mut includes = api::Includes::new(include_resolver(root.clone()));
+    let mut includes = api::Includes::new(include_resolver(root.clone(), allowed, replacements));
     includes.file = source_path.map(str::to_string);
     let mut options = api::Options {
         includes: Some(includes),
@@ -325,7 +363,8 @@ pub(crate) fn lint_warnings(
     };
     let root = if let Some((root, source_path)) = scope {
         let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
-        let mut includes = api::Includes::new(include_resolver(root.clone()));
+        let mut includes =
+            api::Includes::new(include_resolver(root.clone(), None, BTreeMap::new()));
         includes.file = source_path.map(str::to_string);
         options.includes = Some(includes);
         Some(root)

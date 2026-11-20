@@ -100,6 +100,15 @@ try {
     const [tsRestore,rsRestore]=await Promise.all([call(typescript,'carve_undo_reviewed_edit',{receipt:originalTsReceipt}),call(native,'carve_undo_reviewed_edit',{receipt:originalRsReceipt})]);
     try{deepStrictEqual(rsRestore,tsRestore);}catch{failures++;console.error(`Existing-error undo mismatch\nTS ${JSON.stringify(tsRestore)}\nRS ${JSON.stringify(rsRestore)}`);}
   }else { failures++;console.error('A reviewed repair did not return a signed undo receipt.'); }
+  for(const root of roots){
+    writeFileSync(join(root,'part.crv'),'first\nsecond\n');
+    writeFileSync(join(root,'with-include.crv'),'{{ part.crv @lines:2-2 }}\n');
+  }
+  const includeEdit={rootIndex:0,path:'part.crv',selector:{kind:'node-type',value:'paragraph'},text:'first'};
+  const [tsUnsafe,rsUnsafe]=await Promise.all([call(typescript,'carve_reviewed_edit',includeEdit),call(native,'carve_reviewed_edit',includeEdit)]);
+  if(!tsUnsafe.isError||!rsUnsafe.isError){failures++;console.error(`Include-breaking edit must be refused: ${JSON.stringify({tsUnsafe,rsUnsafe})}`);}
+  const [tsSafe,rsSafe]=await Promise.all([call(typescript,'carve_reviewed_edit',{...includeEdit,text:'first\nthird'}),call(native,'carve_reviewed_edit',{...includeEdit,text:'first\nthird'})]);
+  try{deepStrictEqual(rsSafe,tsSafe);}catch{failures++;console.error(`Include-safe edit mismatch\nTS ${JSON.stringify(tsSafe)}\nRS ${JSON.stringify(rsSafe)}`);}
   ok(!failures,`${failures} Rust 0.2 tool comparisons differed.`);
-  console.log(`${cases.length+4} Carve 0.2 tool calls and ${tsTools.length} tool names agree.`);
+  console.log(`${cases.length+6} Carve 0.2 tool calls and ${tsTools.length} tool names agree.`);
 } finally {await Promise.all([typescript.close(),native.close()]);}

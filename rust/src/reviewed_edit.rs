@@ -52,6 +52,7 @@ fn review(
         true,
         true,
         source.map(|source| (path, source)),
+        true,
     )
 }
 fn complete(value: &Value, path: &str) -> Result<(), String> {

@@ -41,6 +41,12 @@ fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn include_project_warning(path: &str, line: u64, column: u64, message: String) -> Value {
+    json!({"rule":"include-warning","code":"CARVE_PROJECT_INCLUDE_WARNING",
+        "severity":"error","suggestion":"Fix the include target or line range before publishing.",
+        "message":message,"path":path,"line":line,"column":column})
+}
+
 fn relative_string(path: &Path) -> String {
     path.components()
         .map(|part| part.as_os_str().to_string_lossy())
@@ -382,6 +388,7 @@ impl Workspace {
             check_links,
             check_anchors,
             None,
+            false,
         )
     }
 
@@ -394,6 +401,7 @@ impl Workspace {
         check_links: bool,
         check_anchors: bool,
         replacement: Option<(&str, &str)>,
+        strict: bool,
     ) -> Result<Value, String> {
         let listing = self.list(root_index, max_depth, limit)?;
         let paths = listing["files"].as_array().expect("files array");
@@ -453,6 +461,110 @@ impl Workspace {
             warning_count += warnings.len();
             files.push(json!({"path": path, "valid": warnings.is_empty(), "warningCount": warnings.len(), "warnings": warnings}));
         }
+        let mut include_dependencies = Vec::new();
+        let mut include_adjustments = Vec::new();
+        let mut unresolved_include = false;
+        let mut suppressed_include_warnings = false;
+        let mut expanded_anchors = BTreeMap::<String, BTreeSet<String>>::new();
+        if strict {
+            let root = &self.roots[root_index].0;
+            let allowed = sources.keys().cloned().collect::<BTreeSet<_>>();
+            let replacements = replacement
+                .map(|(path, source)| BTreeMap::from([(path.to_owned(), source.to_owned())]))
+                .unwrap_or_default();
+            let mut warning_keys = BTreeSet::new();
+            for (path, source) in &sources {
+                if !matches!(
+                    Path::new(path).extension().and_then(|v| v.to_str()),
+                    Some("crv" | "carve")
+                ) {
+                    continue;
+                }
+                let included = match crate::engine2::parse_included_with(
+                    source,
+                    root,
+                    root_index,
+                    Some(path),
+                    &[],
+                    &json!({}),
+                    Some(allowed.clone()),
+                    replacements.clone(),
+                ) {
+                    Ok(included) => included,
+                    Err(error) => {
+                        project_warnings.push(include_project_warning(
+                            path,
+                            1,
+                            1,
+                            format!("Include validation failed: {error}"),
+                        ));
+                        continue;
+                    }
+                };
+                let encoded = carve2::api::encode_tree_with(
+                    &included.tree,
+                    carve2::api::EncodeOptions { positions: false },
+                );
+                if let Ok(tree) = crate::server::json_value(&encoded) {
+                    let mut ids = BTreeSet::new();
+                    collect_anchor_ids(&tree, &mut ids, false);
+                    expanded_anchors.insert(path.clone(), ids);
+                }
+                for warning in included.report["warnings"].as_array().into_iter().flatten() {
+                    let rule = warning["rule"].as_str().unwrap_or("");
+                    let file = warning["file"].as_str().unwrap_or(path);
+                    let line = warning["line"].as_u64().unwrap_or(1);
+                    let column = warning["column"].as_u64().unwrap_or(1);
+                    let message = warning["message"].as_str().unwrap_or("");
+                    if matches!(
+                        rule,
+                        "include-heading-clamp" | "include-id-rename" | "include-footnote-rename"
+                    ) {
+                        include_adjustments.push(json!({"path":file,"rule":rule,"message":message,"line":line,"column":column}));
+                        continue;
+                    }
+                    if !warning_keys.insert(format!("{file}\0{line}\0{column}\0{rule}")) {
+                        continue;
+                    }
+                    let message = if matches!(rule, "include-unresolved" | "include-not-found") {
+                        format!(
+                            "{rule}: {message} Check the path and review scope (depth, limit, exclusions)."
+                        )
+                    } else {
+                        format!("{rule}: {message}")
+                    };
+                    project_warnings.push(include_project_warning(file, line, column, message));
+                }
+                let suppressed = included.report["suppressedWarnings"].as_u64().unwrap_or(0);
+                if suppressed > 0 {
+                    suppressed_include_warnings = true;
+                    project_warnings.push(include_project_warning(
+                        path,
+                        1,
+                        1,
+                        format!("{suppressed} additional include warnings were suppressed."),
+                    ));
+                }
+                for dependency in included.report["dependencies"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let resolved = dependency["resolved"] == true;
+                    if !resolved {
+                        unresolved_include = true;
+                    }
+                    include_dependencies.push(
+                        json!({"path":path,"dependency":dependency["path"],"resolved":resolved}),
+                    );
+                }
+            }
+        }
+        if strict && (listing["truncated"] == true || size_truncated) {
+            project_warnings.push(json!({"rule":"incomplete-scan","code":"CARVE_PROJECT_INCOMPLETE_SCAN",
+                "severity":"error","suggestion":"Increase the review limit or reduce the workspace scope.",
+                "message":"Workspace review stopped at a file or byte limit.","path":"","line":1,"column":1}));
+        }
         let mut anchors = BTreeMap::<String, BTreeSet<String>>::new();
         if check_links && check_anchors {
             for (path, source) in &sources {
@@ -462,9 +574,14 @@ impl Workspace {
                 ) {
                     continue;
                 }
-                let value = crate::engine2::parse(source, true)?;
-                let mut ids = BTreeSet::new();
-                collect_anchor_ids(&value, &mut ids, !folds_anchors(path));
+                let mut ids = if let Some(ids) = expanded_anchors.get(path) {
+                    ids.clone()
+                } else {
+                    let value = crate::engine2::parse(source, true)?;
+                    let mut ids = BTreeSet::new();
+                    collect_anchor_ids(&value, &mut ids, !folds_anchors(path));
+                    ids
+                };
                 if folds_anchors(path) {
                     ids = ids.into_iter().map(|id| id.to_lowercase()).collect();
                 }
@@ -640,6 +757,8 @@ impl Workspace {
         warning_count += project_warnings.len();
         let complete = !listing["truncated"].as_bool().unwrap_or(false)
             && !size_truncated
+            && !unresolved_include
+            && !suppressed_include_warnings
             && !project_warnings
                 .iter()
                 .any(|warning| warning["rule"] == "unreadable-document");
@@ -650,8 +769,8 @@ impl Workspace {
             .collect::<Vec<_>>();
         Ok(
             json!({"rootIndex":root_index,"valid":warning_count==0,"filesDiscovered":paths.len(),"filesChecked":files.len(),"warningCount":warning_count,"ruleCounts":counts,"summary":{"bySeverity":{"error":errors,"warning":warnings},"nextActions":next_actions},"fixPlan":{"automatic":automatic,"writerReview":writer_review},"files":files,"projectWarnings":project_warnings,"truncated":listing["truncated"].as_bool().unwrap_or(false) || size_truncated,"totalBytes":total_bytes,
-                "checks":{"localLint":true,"localLinks":check_links,"anchors":check_links && check_anchors,"includes":false,"suppressedIncludeWarnings":false,"complete":complete},
-                "includeDependencies":[],"includeAdjustments":[],"filesRead":files_read,
+                "checks":{"localLint":true,"localLinks":check_links,"anchors":check_links && check_anchors,"includes":strict,"suppressedIncludeWarnings":suppressed_include_warnings,"complete":complete},
+                "includeDependencies":include_dependencies,"includeAdjustments":include_adjustments,"filesRead":files_read,
                 "scope":{"maxDepth":listing["maxDepth"],"limit":listing["limit"],"excluded":&self.review.exclude},
                 "versions":{"engine":format!("{} (Carve 0.2, AST 2.0)", CARVE_ENGINE_VERSION),"mcp":env!("CARGO_PKG_VERSION")}}),
         )
