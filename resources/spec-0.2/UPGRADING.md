@@ -18,7 +18,7 @@ The tables below enumerate every entry in the shipped tool contract. The “0.2 
 
 ### Replay gap rulings
 
-The 18 November rulings take back the 17 November restores for one-letter ordered markers and line comments. The first marker fixes list style (C2-B-042), and a line comment takes every closer on its line (C2-I-024). U-397, U-398, U-403 and U-404 report list splits; `%%` directly after the opener of a bracket or a braced form is text again (C2-I-023). U-399 to U-402 and U-405 to U-407 rewrite only the seven sources whose full 0.1 and 0.2 HTML was checked. U-390 and U-393 now need no change. A comment inside a raw image alt is still source text (C2-I-074).
+The 18 November rulings take back the 17 November restores for one-letter ordered markers and line comments. The first marker fixes list style (C2-B-042), and a line comment takes every closer on its line (C2-I-024). U-397, U-398, U-403 and U-404 report list splits; `%%` directly after the opener of a bracket or a braced form is text again (C2-I-023). U-399 to U-402 and U-405 to U-407 were first checked on seven sources; the replay of 19 November widens them with U-432 to every line comment that 0.1 ended early, written only where the complete 0.1 and 0.2 HTML compare equal. U-390 now needs no change. U-393 and U-426 report every other line comment in a frame. A comment inside a raw image alt is still source text (C2-I-074).
 
 For U-375 to U-396, the pinned 0.1 and 0.2 engines were run on each shortest source. For U-397 to U-407, the 0.2 result follows the new clauses while the reference engine still follows the old rule; each proposed rewrite was checked against the full 0.1 HTML with the 0.2 engine. A rewrite is promised only for the complete HTML comparison of that input. The other rows require a report at the source range named in the map. The full source strings and expected 0.2 HTML are in the data rows.
 
@@ -28,7 +28,7 @@ For U-375 to U-396, the pinned 0.1 and 0.2 engines were run on each shortest sou
 | U-376 | Every space after the colon of an abbreviation definition is separator in 0.1: `*[HTML]:  Hyper Text` gives the title `Hyper Text`; 0.2 keeps the second space in the title. **SILENT** | The old HTML is restored by the verified source spelling. | Use one space after `*[HTML]:`; rewrite |
 | U-377 | A table attribute `aligns="right,,center"` aligns each column in 0.1; 0.2 has no `aligns` attribute. **SILENT** | The old HTML is restored by the verified source spelling. | Remove the invalid `aligns` list and put `{>}` or `{~}` on each affected cell; rewrite |
 | U-378 | A footnote definition inside a definition description, then an indented and an unindented line: `:: t`, `:  [^f]: note`, `     cont`, `tail`. 0.1 writes an empty description; 0.2 keeps the three lines as description text. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the nested definition opener through the following unprefixed line; report |
-| U-379 | A comment line under a definition term: `:: c`, `%% note`, `more`. 0.1 ends the list at the comment and `more` is a paragraph; 0.2 adds `more` to the term. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the comment line through the following retained line; report |
+| U-379 | A comment line under a definition term: `:: c`, `%% note`, `more`. 0.1 ends the list at the comment and `more` is a paragraph; 0.2 adds `more` to the term. **SILENT** | The old HTML differs. Where a blank line above the comment keeps the complete 0.1 HTML, U-433 writes it. | Report from the comment line through the following retained line; report |
 | U-380 | A comment in a div label: `::: note [%% hidden]`. 0.1 hides it and writes an empty label; 0.2 writes `%% hidden` as the label. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the bracketed label on the div opener; report |
 | U-381 | Inline markup in a div label: `::: note [/i/]`. 0.1 writes `<em>i</em>`; 0.2 writes the label as plain text. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the bracketed label on the div opener; report |
 | U-382 | A comment line in a div that opens on a list item: `- ::: inner`, ` %% c`, ` text`. 0.1 ends the div and the list at the comment and `text` is a paragraph after the list; 0.2 keeps `text` in the div. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the comment line through the next retained line; report |
@@ -42,7 +42,7 @@ For U-375 to U-396, the pinned 0.1 and 0.2 engines were run on each shortest sou
 | U-390 | A comment marker at the start of a deletion: `{-%% b-}`. | Both versions keep `%%` as text after the braced opener and write `<del>%% b</del>`. | No change; none |
 | U-391 | A comment fence with no closer in a footnote body: `[^n]: head`, then an indented `%%%`. 0.1 hides the rest of the body, including a later indented `tail`; 0.2 ends the footnote and writes `tail` as a paragraph. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the comment fence opener through the following unhidden line; report |
 | U-392 | An uppercase attribute name: `{CLASS=z}` on a line block. 0.1 writes `CLASS="z line-block"`; 0.2 writes `class="z line-block"`, the same HTML attribute. **SILENT** | Attribute names compare without case, so the HTML is the same. | Nothing to change; none |
-| U-393 | A line comment inside a substitution: `{~a %% b~>c~} d`. | Both versions let the comment hide the arrow and closer and write `{~a d`. | No change; none |
+| U-393 | A line comment inside a substitution, ended in 0.1 at the first raw closer of its frame: `{~a %% b~>c~} d`. 0.1 writes `{~a d`; 0.2 writes `{~a`. **SILENT** | The comment takes every closer on its line and the rest of the line (C2-I-024). Any bracket or braced frame changes the same way; U-399 to U-402 rewrite only their own verified sources. | Report from the comment marker through the end of its line; report |
 | U-394 | A comment fence opened in a quote, an unquoted `%%` line, and a quoted closer: `> %%%`, `%%`, `> %%%`, `z`. 0.1 writes one empty quote; 0.2 writes two. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the quoted opener through its matching closer; report |
 | U-395 | A comment fence line inside a braced comment in a list item: `- p`, `  {% a`, `   %%%`, `   z %}`, `plain`. 0.1 hides the braced comment and keeps `plain` in the item; 0.2 writes `{% a` as text and `plain` as a paragraph after the list. **SILENT** | The old HTML differs; no preserving spelling was verified. | Report from the braced comment opener through its closing mark; report |
 | U-396 | An empty unclosed math run at the end of inline content: <code>a $&#96;</code> or <code>$$&#96;&#96;</code>. 0.1 writes an empty math span; 0.2 writes the run as text (C2-I-017). **SILENT** | The old HTML differs; no preserving spelling exists: an adjacent closer joins the opener into a wider run, and a separator changes the empty value. | Report at the parsed math range; report |
@@ -57,6 +57,7 @@ For U-375 to U-396, the pinned 0.1 and 0.2 engines were run on each shortest sou
 | U-405 | A line comment at the start of a bracket: `[%% c] d`. 0.1 hides the comment and writes `[] d`; 0.2 writes `%% c` as text. **SILENT** | The old HTML is restored by the verified source spelling. | Write `[{% c %}] d`; rewrite |
 | U-406 | A line comment at the start of an inline footnote: `^[%% c] d`. 0.1 writes an empty note; 0.2 writes `%% c` in the note. **SILENT** | The old HTML is restored by the verified source spelling. | Write `^[{% c %}] d`; rewrite |
 | U-407 | A line comment at the start of extension content: `:f[%%]`. 0.1 writes an empty extension; 0.2 writes `%%` in it. **SILENT** | The old HTML is restored by the verified source spelling. | Write `:f[{% %}]`; rewrite |
+| U-426 | A line comment directly after the opener of a bracket, an inline note or extension content: `[%% hidden](/u)`. 0.1 hides the comment and writes an empty link; 0.2 writes `%% hidden` as the link text (C2-I-023). **SILENT** | The old HTML differs; U-405 to U-407 rewrite only their own verified sources. | Report from the `%%` through the closer of its frame; report |
 
 ### Extension rulings of 18 November
 
@@ -72,10 +73,38 @@ The explicit extension forms preserve their core fallback when no renderer is re
 | U-413 | :::: tabs ⏎ {label=Install} ⏎ ::: tab ⏎ Run. ⏎ ::: ⏎ :::: **SILENT** | The sole `label` attribute is moved to the quoted title (C2-X-056); inspect any other attribute before applying the rewrite. | Use the quoted-title spelling; rewrite |
 | U-414 | :::: tabs ⏎ ::: tab ⏎ # Install ⏎ Run. ⏎ ::: ⏎ :::: **SILENT** | A first heading is content, not a tab label (C2-X-056). Report because changing it to a title would also change the body. | Review by hand; report |
 | U-415 | :::: tabs ⏎ {.install} ⏎ ::: tab ⏎ Run. ⏎ ::: ⏎ :::: **SILENT** | A class alone supplies no quoted title (C2-X-056). Report to choose a title without guessing from the class. | Review by hand; report |
-| U-416 | :::: tabs ⏎ ::: tab "Install" ⏎ Run. ⏎ ::: ⏎ :::: (former aria host mode) **SILENT** | A host using the former aria mode must review its integration: the standard renderer writes radio controls in interactive mode and control-free sections in static mode (C2-X-043, C2-X-056). | Review by hand; report |
+| U-416 | :::: tabs ⏎ ::: tab "Install" ⏎ Run. ⏎ ::: ⏎ :::: (0.1 host setting `mode: 'aria'`) **SILENT** | The 0.1 aria mode maps onto the option `mode: 'aria'` of the 0.2 tabs renderer (C2-X-043, C2-X-056): the same WAI-ARIA tab pattern, with the switching script left to the host. The ids are `tabs-N-K` and `tabs-N-K-panel` (C2-X-048), not `tabset-N-tab-K` and `tabset-N-panel-K`, a tab id does not supply them, the buttons carry no class, the panels the class `tab-panel`, and no line break separates the elements. | No source edit; set `mode: 'aria'` on the tabs renderer and check scripts and styles that select the 0.1 ids or classes; none |
 | U-417 | {.custom-tabs} ⏎ :::: tabs ⏎ ::: tab "Install" ⏎ Run. ⏎ ::: ⏎ :::: (former per-instance host class) **SILENT** | A per-instance host class is not a standard tabs mode (C2-X-056). Report so the host can place its styling outside the standard renderer. | Review by hand; report |
 | U-418 | :::: tabs ⏎ ::: tab "A" ⏎ a ⏎ ::: ⏎ ⏎ {selected} ⏎ ::: tab "B" ⏎ b ⏎ ::: ⏎ :::: | `selected` keeps choosing the initially selected tab: the first marked tab, or the first tab with no mark, as in 0.1 (C2-X-056). The renderer markup around it is covered by U-416 and U-419. | No source edit; none |
 | U-419 | :::: tabs ⏎ ::: tab "Install" ⏎ Run. ⏎ ::: ⏎ :::: (static mode) **SILENT** | Static mode keeps the 0.1 static elements and classes, a `section` with an `h3` per tab and no controls (C2-X-043), but writes no line breaks between them and no 0.1 roundtrip carrier attributes, and the heading holds the title with its inline markup. | Review the host's static HTML processing; report |
+| U-427 | {.tabs} ⏎ :::: ⏎ {.tab} ⏎ ::: [Install] ⏎ Run it. ⏎ ::: ⏎ :::: **SILENT** | The tabs extension matches the div names `tabs` and `tab`, not the classes (C2-X-039, C2-X-040), so a class-form group or tab stays a core div. A class beside `tabs` or `tab` stays in the attribute block; the label moves to the quoted title as in U-412. | Write `:::: tabs` ⏎ `::: tab "Install"`; rewrite |
+| U-428 | :::: tabs ⏎ ::: tab "A" ⏎ a ⏎ ::: ⏎ ⏎ stray ⏎ :::: **SILENT** | 0.1 left a block that is not a tab out of the tabs output; 0.2 claims a group only when every block in it is a tab (C2-X-040), so the group stays a core div. Moving the block out of the group or into a tab changes the document. | Review by hand; report |
+
+### Extension rulings of 19 November
+
+0.2 adds no delimiter for an extension, so the 0.1 wiki and sample spellings move to the explicit forms. Rewrite only where the 0.1 host registered the extension: without it, `[[Page]]` was text in 0.1.
+
+| ID | 0.1 form or host setting | 0.2 result | Write in 0.2 / tool |
+| --- | --- | --- | --- |
+| U-423 | See [[Main Page]]. (former wikilinks host extension) **SILENT** | The wiki form is `:wiki[Page]` (C2-X-013, C2-X-057). | Write `See :wiki[Main Page].`; rewrite |
+| U-424 | See [[Main Page\|home]]. (former wikilinks host extension) **SILENT** | The display text after the first `\|` stays the display text and the fallback (C2-X-057). | Write `See :wiki[Main Page\|home].`; rewrite |
+| U-425 | Type :samp[ls -l]. (former samp host extension) **SILENT** | Sample output is a span with the key `samp`, an ordinary attribute of the core that a registered semantic span extension writes as `<samp>` (C2-X-066). | Write `Type [ls -l]{samp}.`; rewrite |
+| U-429 | # Intro ⏎ ⏎ See </#intro>. (`carve upgrade --migrate`) **SILENT** | A cross-reference or reference label that misses its only target by case alone is respelled to that target before the upgrade reads the source, the 0.1 `fmt --migrate` repair; the record is `case-reference`. An id is matched exactly (C2-I-097). A reference with several candidates is left for `lint`. | Write `See </#Intro>.`; rewrite |
+
+### Upgrade replay rows of 19 November
+
+The upgrade replay of the 0.1 conformance pack and examples found eight more changes with a preserving 0.2 spelling. Each is written only when the complete 0.1 and 0.2 HTML of the document compare equal.
+
+| ID | 0.1 form or host setting | 0.2 result | Write in 0.2 / tool |
+| --- | --- | --- | --- |
+| U-430 | a /b {+c/ d+} **SILENT** | 0.2 pairs a bare delimiter wherever it can open and close (C2-I-046 to C2-I-051), also across a braced opener or an attribute block, where 0.1 kept it text: `<p>a <em>b {+c</em> d+}</p>`. | Write `a \/b {+c/ d+}` (C2-I-010); escape |
+| U-431 | a ----------- b **SILENT** | C2-I-111 writes an odd hyphen run that is no multiple of three as one em dash and splits the rest again, `—––––`; 0.1 wrote as many em dashes as leave an even rest, `———–`. | Write the dashes 0.1 wrote, `a ———– b`; rewrite |
+| U-432 | `/*a %% b*/ y` **SILENT** | A line comment takes every closer on its line (C2-I-024) and starts only at a line start or after whitespace (C2-I-023): `<p>/*a</p>`. 0.1 ended it at the closer of an open span and read it directly after an opener. | Write a braced comment in its place, `*/a{% b%}/* y` (C2-I-025); rewrite |
+| U-433 | :: t ⏎  %% c ⏎    more **SILENT** | 0.2 skips a comment-only line (C2-B-137), so `more` continues the term: `<dl><dt>t more</dt></dl>`. 0.1 ended the term at the comment line. | Write a blank line above the comment line; rewrite |
+| U-434 | -   [ ] a **SILENT** | A task box is read only directly after the one space of the bullet (C2-B-046), so the box is text: `<li>[ ] a</li>`. 0.1 also read it after more spaces. | Write one space between the bullet and the box, `- [ ] a`; U-163 reports the shapes this does not verify; rewrite |
+| U-435 | [^n]: a ⏎ ⏎    :: t ⏎    :  d ⏎     > q **SILENT** | A block indented past the description mark stays in the description (C2-B-076): `<dd>d &gt; q</dd>`. 0.1 ended the description there, and the quote followed the description list in the note. | Move the block to the column of the list that holds it (C2-B-067), with a blank line where it stood under text (U-002); in a list item the same; rewrite |
+| U-436 | - + ⏎   %% c ⏎ after **SILENT** | With U-017 the comment moves to the marker line, and no paragraph is open to take `after` as a lazy line (C2-B-012), so it follows the list. 0.1 read it into the item. | Indent the line to the item column, `- %% c` then `  after` (C2-B-025); rewrite |
+| U-437 | > a ⏎ + ⏎ - b ⏎ > c **SILENT** | With U-016 the item takes the quote mark, and `> c` is then a lazy line of the item (C2-B-012, C2-B-024). 0.1 read `c` as a new paragraph of the quote. | Write a quoted blank line above it; rewrite |
 
 ### Source change index
 
@@ -719,7 +748,7 @@ Each row gives the smallest input retained by the measurement and the exact HTML
 | U-160 | Under C2-I-087,C2-B-082, x[^f ⏎ g] ⏎ [^f g]: n writes &lt;p&gt;x[^f ⏎ g]&lt;/p&gt; in 0.1. **SILENT** | The same source writes &lt;p&gt;x[^f g] ⏎ [^f g]: n&lt;/p&gt; in 0.2: the definition line directly below text is a lazy line (C2-B-024), so the reference stays unresolved. With a blank line before the definition the label with its line break resolves to it, and a tab inside the label has the same lookup effect (C2-I-079); escaping the opening bracket, `x\[^a` tab `b]`, keeps the 0.1 text. U-280 records the tab for a reference label. | Review; report |
 | U-161 | Under C2-I-067,C2-B-083, ![][a ⏎ b] writes &lt;p&gt;![][a ⏎ b]&lt;/p&gt; in 0.1. **SILENT** | The same source writes &lt;p&gt;![][a b]&lt;/p&gt; in 0.2. | Review; report |
 | U-162 | Under C2-B-171,C2-B-180, \|?v \| writes &lt;table&gt; ⏎   &lt;tbody&gt; ⏎     &lt;tr&gt;&lt;td style="vertical-align: bottom;"&gt;&lt;/td&gt;&lt;/tr&gt; ⏎   &lt;/tbody&gt; ⏎ &lt;/table&gt; in 0.1. **SILENT** | The same source writes &lt;table&gt; ⏎   &lt;tbody&gt; ⏎     &lt;tr&gt;&lt;td&gt;?v&lt;/td&gt;&lt;/tr&gt; ⏎   &lt;/tbody&gt; ⏎ &lt;/table&gt; in 0.2. | Brace the marks, `\|{?v} \|`, which gives the 0.1 HTML (C2-B-182); rewrite |
-| U-163 | Under C2-B-046, -  [ ] q writes &lt;ul class="task-list"&gt; ⏎   &lt;li&gt;&lt;input type="checkbox" disabled aria-label="q"&gt; q&lt;/li&gt; ⏎ &lt;/ul&gt; in 0.1. **SILENT** | The same source writes &lt;ul&gt; ⏎   &lt;li&gt;[ ] q&lt;/li&gt; ⏎ &lt;/ul&gt; in 0.2. | Review; report |
+| U-163 | Under C2-B-046, -  [ ] q writes &lt;ul class="task-list"&gt; ⏎   &lt;li&gt;&lt;input type="checkbox" disabled aria-label="q"&gt; q&lt;/li&gt; ⏎ &lt;/ul&gt; in 0.1. **SILENT** | The same source writes &lt;ul&gt; ⏎   &lt;li&gt;[ ] q&lt;/li&gt; ⏎ &lt;/ul&gt; in 0.2. | Review; where one space after the bullet keeps the complete 0.1 HTML, U-434 writes it; report |
 | U-164 | Under C2-H-101 and C2-H-161, [](‮javascript:) writes &lt;p&gt;&lt;a href="‮javascript:"&gt;&lt;/a&gt;&lt;/p&gt; in 0.1. An authored attribute that is no URL sink, `*x*{k="..."}` with U+202E before `javascript:x`, kept its value in 0.1 too. **SILENT** | The same source writes &lt;p&gt;&lt;a href=""&gt;&lt;/a&gt;&lt;/p&gt; in 0.2, and the attribute is written empty, `k=""`. | Review; report |
 | U-165 | Under C2-B-171,C2-B-167, \|{#x}\| writes &lt;table&gt; ⏎   &lt;tbody&gt; ⏎     &lt;tr&gt;&lt;td&gt;{&lt;span class="tag"&gt;&lt;strong&gt;#x&lt;/strong&gt;&lt;/span&gt;}&lt;/td&gt;&lt;/tr&gt; ⏎   &lt;/tbody&gt; ⏎ &lt;/table&gt; in 0.1. **SILENT** | The same source writes &lt;table&gt; ⏎   &lt;tbody&gt; ⏎     &lt;tr&gt;&lt;td id="x"&gt;&lt;/td&gt;&lt;/tr&gt; ⏎   &lt;/tbody&gt; ⏎ &lt;/table&gt; in 0.2. An authored `rowspan` or `colspan` on a cell is never written, as in 0.1 (C2-H-058). | Review; report |
 | U-166 | Under C2-I-078, [][@a] writes &lt;p&gt;[][@a]&lt;/p&gt; in 0.1. **SILENT** | The same source writes &lt;p&gt;[][&lt;span class="mention"&gt;&lt;strong&gt;@a&lt;/strong&gt;&lt;/span&gt;]&lt;/p&gt; in 0.2. | Review; report |
@@ -851,8 +880,8 @@ U-260 and U-261 are withdrawn: `{valigns="top,bottom"}` above a table and the ce
 | --- | --- | --- |
 | JavaScript | One large package API with parse, resolve, render, import, lint, and extension helpers. | Port to the functions of the package root. |
 | HTML | Existing section, list, table, footnote, and raw HTML conventions. | Compare rendered pages and update CSS and scripts. The source rewrite check hides some HTML changes. |
-| CLI | `dist/cli.js` offers render, fmt, lint, flatten, fix, diff, merge, portability, trace, and migrate. | [Tooling](tooling.md) specifies the 0.2 commands `render`, `ast`, `fmt`, `lint`, `diagnostics`, `import` and `migrate-ast`. The reference engine ships them as `carve` and adds `upgrade`. |
-| Missing runtime features | Lint, extension pipeline, include expansion, importers, and other output formats work in 0.1. | 0.2 has lint, include expansion and the HTML importer. For Markdown, plain text and ANSI output keep the 0.1 path or postpone switching those callers. |
+| CLI | `dist/cli.js` offers render, fmt, lint, flatten, fix, diff, merge, portability, trace, and migrate. | [Tooling](tooling.md) specifies the 0.2 commands `render`, `ast`, `fmt`, `lint`, `diagnostics`, `import`, `migrate-ast`, `flatten` and `fix`. The reference engine ships them as `carve` and adds `upgrade`. |
+| Missing runtime features | Lint, extension pipeline, include expansion, importers, and other output formats work in 0.1. | 0.2 has lint, include expansion, the HTML importer, and Markdown, plain-text and ANSI export renderers (C2-T-003). Export output and options are engine behavior outside the specification. |
 
 ### JavaScript API
 
@@ -870,14 +899,14 @@ The 0.2 entry point is the `carve-js` package root. These are the function repla
 | `fromAstJson`, `fromAstEnvelope` | `decodeTree`; it accepts a 2.0 bare tree or envelope and refuses 1.x. |
 | `parseWithSourceLayout`, `toSourceLayout` | `parseWithLayout`; use its `document`, `layout`, and `diagnostics`. |
 | `renderCarve`, `carveToCarve`, `renderCarveWithReport`, `carveToCarveWithReport` | `write` or `writeWithDiagnostics` for a 2.0 tree. |
-| `carveToCarvePatch`, `createSourcePatch`, `applySourcePatch` | No 0.2 patch API; keep a 0.1 caller or implement the edit outside the engine. |
-| `renderMarkdown`, `renderPlainText`, `renderAnsi` and each `carveTo*` or `*WithReport` variant | No 0.2 renderer for those targets. |
-| `carveToMarkdown`, `carveToPlainText`, `carveToAnsi` and report variants | No 0.2 counterpart. |
+| `carveToCarvePatch`, `createSourcePatch`, `applySourcePatch` | No 0.2 source patch counterpart. For tree changes, use `diffTree` and `applyPatch` with JSON Patch (C2-T-043 to C2-T-045); they do not edit source text. |
+| `renderMarkdown`, `renderPlainText`, `renderAnsi` and each `carveTo*` or `*WithReport` variant | Use the engine's library export renderer for the target (C2-T-003); the old entry point names and report shapes are not specified. |
+| `carveToMarkdown`, `carveToPlainText`, `carveToAnsi` and report variants | Use the engine's library export renderer or `carve render --to markdown`, `--to plain` or `--to ansi` (C2-T-003). |
 | `parseWithProvenance`, `createEditorSession`, `astNodePaths`, node identity, provenance and annotation-range helpers | No 0.2 counterpart. `parseWithLayout` covers source layout only. |
-| `diffAst`, `mergeAst`, `createAstPatch`, `applyAstPatch`, reversible patch and change-format helpers | No 0.2 counterpart. |
+| `diffAst`, `mergeAst`, `createAstPatch`, `applyAstPatch`, reversible patch and change-format helpers | Use `diffTree` and `applyPatch` for JSON Patch on 2.0 trees (C2-T-043 to C2-T-045). Reversible patches, three-way merge and the old change formats have no 0.2 counterpart. |
 | `lintCarve`, `lintIncludes`, `lintAccessibility`, `formatLintWarnings` | `lint(source, options)` with `rules`, `platforms` and `includes` (C2-W-103 to C2-W-109, C2-N-085); the command is `carve lint` (C2-T-031), and its lines replace `formatLintWarnings` (C2-T-019). `parseWithDiagnostics` reports parser and resolution findings. |
 | `htmlToAst`, `htmlToCarve` | The HTML importer is part of 0.2.0: it reads the roundtrip carriers (C2-H-120, C2-H-182 to C2-H-190) and maps every other element as `import-html.md` states. With the import option `rawHtml` off, the default, it drops comments, scripts, styles and embedded content (C2-M-066). The reference engine has it as `importDocument(html, { from: 'html', rawHtml })` in `import/src/index.ts`, outside the `v2/src` entry point, and as `carve import --from html`. |
-| `markdownToCarve`, `djotToCarve`, `bbcodeToCarve`, every `migrate*` helper | The reference engine imports Markdown, GFM and Djot with `importDocument` and `carve import --from markdown`, `gfm` or `djot`; these importers are outside the 0.2 specification (C2-T-003). BBCode has no 0.2 importer. |
+| `markdownToCarve`, `djotToCarve`, `bbcodeToCarve`, every `migrate*` helper | The reference engine imports Markdown, GFM and Djot with `importDocument` and `carve import --from markdown`, `gfm` or `djot`; these importers are outside the 0.2 specification (C2-T-003). The 0.1 `markdownToCarve` is `from: 'gfm'`, not `from: 'markdown'` (see [Markdown import is GFM import](#markdown-import-is-gfm-import)). BBCode has no 0.2 importer. |
 | `expandIncludes`, `findDirectiveSites`, `parseDirective`, include helpers | Pass the `includes` option with a resolver to `parse` or `render` (C2-N-003); `includeDependencies(tree)` lists the files (C2-N-083). The command line expands by default (C2-N-004, C2-T-018). |
 | `Profile`, `LinkPolicy`, `applyProfile` | Use the 0.2 `profile` option; no public mutable profile object API. |
 | `checkPortability`, `normalizeHtml`, `assessTablePreservation`, `carveToPreservationReport` | No 0.2 counterpart. |
@@ -980,6 +1009,47 @@ The remaining 0.1 function exports have no 0.2 counterpart in the current entry 
 
 0.2 checks option names and types. `CarveOptionError` names a refused option. Invalid trees raise `CarveTreeError`; invalid layout records raise `CarveLayoutError`. `renderTree` can raise `CarveRenderError` under `strictLosses`. `parseWithDiagnostics` and `renderWithDiagnostics` return structured findings. Port code that used 0.1 parser callbacks or `*WithReport` loss objects to this channel. Resolution results stay on the 2.0 tree. A caller should not infer them from rendered HTML.
 
+### Markdown import is GFM import
+
+The 0.1 Markdown importer (`markdownToCarve`, `migrate --from markdown`) read GitHub Flavored Markdown: tables, task lists, strikethrough, bare URL autolinks and footnotes. In 0.2, `from: 'markdown'` reads CommonMark only, and `from: 'gfm'` adds the GitHub extensions. A caller that keeps the name `markdown` loses those constructs without an error: a table becomes escaped paragraph text.
+
+Input:
+
+```markdown
+| a | b |
+|---|--:|
+| 1 | 2 |
+
+- [x] done
+
+~~gone~~ https://example.com
+```
+
+`importDocument(input, { from: 'markdown' })`:
+
+```carve
+\| a | b |
+\|-\--|-\-:|
+\| 1 | 2 |
+
+- \[x] done
+
+~~gone~~ https://example.com
+```
+
+`importDocument(input, { from: 'gfm' })`:
+
+```carve
+|= a |={>} b |
+| 1 | 2 |
+
+- [x] done
+
+{-gone-} [https://example.com](https://example.com)
+```
+
+Map every 0.1 Markdown import to `gfm`: `importDocument(input, { from: 'gfm' })` and `carve import --from gfm`. Use `markdown` only for input that must be read as strict CommonMark. A host that offers a "Markdown" import should pass `gfm` by default.
+
 ### HTML and page selectors
 
 The table groups differences observed by rendering the same source with both engines. The comparison included the 0.1 `resources/examples/` fixtures and fenced Carve examples in the six 0.2 documents. Of 850 inputs, 221 had different HTML before source upgrades. Many are intentional source changes in Part 1. The 167 rewrite contract inputs were also rendered before and after the tool. Do not treat those counts as a claim that every existing document differs.
@@ -1015,34 +1085,36 @@ A direct top-level heading and a direct footnote, by contrast, produced the same
 
 ### Command line and missing features
 
-The 0.1 CLI at `dist/cli.js` exists and accepts a file or stdin. It has render targets for HTML, Markdown, plain text, ANSI, Carve, and AST JSON; `fmt`, `flatten`, `fix`, `lint`, `diff`, `merge`, `portability`, `trace`, and `migrate --from html|markdown|djot|bbcode`. It can expand includes. The 0.2 command line is specified in [tooling](tooling.md): `render`, `ast`, `fmt`, `lint`, `diagnostics`, `import` and `migrate-ast`, with their flags, exit codes and reports. The reference engine ships it as `carve`, so far without the reports that `tooling.md` adds; its `upgrade` command and `node upgrade/src/cli.ts` are the rewrite program described in Part 1.
+The 0.1 CLI at `dist/cli.js` exists and accepts a file or stdin. It has render targets for HTML, Markdown, plain text, ANSI, Carve, and AST JSON; `fmt`, `flatten`, `fix`, `lint`, `diff`, `merge`, `portability`, `trace`, and `migrate --from html|markdown|djot|bbcode`. It can expand includes. The 0.2 command line is specified in [tooling](tooling.md): `render`, `ast`, `fmt`, `lint`, `diagnostics`, `import`, `migrate-ast`, `flatten` and `fix`, with their flags, exit codes and reports. The reference engine ships it as `carve`, so far without the reports that `tooling.md` adds; its `upgrade` command and `node upgrade/src/cli.ts` are the rewrite program described in Part 1.
 
 The 0.1 flags map to the 0.2 command line as follows. A 0.1 flag that the table does not name keeps its name where `tooling.md` lists it, or belongs to a target or command that 0.2 does not have.
 
 | 0.1 | 0.2 |
 | --- | --- |
 | `--json`, `--ast` | `carve ast`, a 2.0 tree |
+| `flatten`, `fix` | `carve flatten` (C2-T-047, C2-T-048) and `carve fix`, which is `carve lint --fix` (C2-T-049, C2-T-050) |
+| `-o FILE`, `--output FILE` of the PHP engine | the same flags on `render`, `fmt`, `import` and `flatten` (C2-T-053) |
 | `--from-json` | `--from-ast`, which reads a 2.0 tree; migrate an older tree first with `carve migrate-ast` |
 | `--no-raw-html`, `--safe` | the default; `--raw-html` turns raw HTML on |
 | `--report-losses`, `--allow-loss`, `--max-render-losses`, `--report-includes` | the same names (C2-T-021 to C2-T-029); a loss report holds 0.2 diagnostic entries, and the include report the dependencies of C2-N-083 with `path`, `from`, `file` and `read` |
 | `migrate --from html` | `carve import --from html` |
+| `migrate --from markdown` | `carve import --from gfm`; `--from markdown` reads CommonMark only and leaves tables as text |
 | `migrate --check-loss`, `migrate --report FILE` | `carve import --strict-losses`, `--report-losses FILE` (C2-T-034) |
 | `migrate --mode roundtrip` | `carve import --raw-html` keeps comments and raw elements (C2-M-065, C2-M-066); the carriers of a roundtrip render are read in every import |
 | `lint --rule ID`, `lint --platform NAME` | `carve lint --rules '{"ID":"on"}'`, `--platforms '["NAME"]'` (C2-T-010) |
 | `lint --from-djot` | turn on the `djot-` rules by their ids in `--rules` (C2-T-031) |
 | `lint --caption-hints` | none needed: `caption-looking-paragraph` is on by default |
-| `lint --ignore ID` | no counterpart |
-| `lint` exits with 1 on any finding, a hint included | `carve lint` exits with 1 only for a warning or an error, and with 0 for hints alone, so a hint rule never fails a CI job (C2-T-031) |
+| `lint --ignore ID` | `carve lint --ignore FILE-ID`, repeatable (C2-T-052) |
+| `fmt --migrate` | `carve upgrade --migrate`, the upgrade tool's repair of a reference whose only target differs in case; each respelled line is a record `case-reference` of entry U-429 |
+| `lint` exits with 1 on any finding, a hint included | `carve lint` exits with 1 only for a warning or an error, and with 0 for hints alone, so a hint rule never fails a CI job (C2-T-031); `--strict` restores the 0.1 status (C2-T-051) |
 | include option `maxWarnings` (default 100) and `suppressedWarnings` | the fixed cap `include_diagnostics` of 100 and `suppressedDiagnostics` (C2-T-024) |
 | `-h`, `-V` | `--help`, `--version` |
 
 Not carried over:
 
 - `migrate --from djot --djot-php`, the Djot-PHP import mode of the PHP engine (titles and labeled code fences of Djot-PHP). 0.2 specifies no Djot importer; the Markdown, GFM and Djot importers of the JavaScript engine are outside the 0.2 specification (C2-T-003).
-- `-o FILE` and `--output FILE` of the PHP engine. Every 0.2 command writes its product on standard output (C2-T-014); redirect it to a file.
-- `fmt --migrate`, the repair of a reference whose only target differs in case. The upgrade tool rewrites 0.1 sources for 0.2 (Part 1, "Running the rewrite tool").
 
-The 0.2 engine lacks Markdown, plain text and ANSI renderers and patch and editor APIs. Do not switch a caller that depends on these features without another implementation.
+0.2 offers Markdown, plain-text and ANSI export renderers through the library and command line (C2-T-003), plus `diffTree`, `applyPatch`, `sourceFingerprint` and `treeFingerprint` for tree patches (C2-T-043 to C2-T-046). The editor adapters are outside the specification (C2-T-003); callers that need the old source patch, reversible patch or three-way merge helpers must replace those workflows.
 
 ## Part 3. Tree consumers: AST 1.x to 2.0
 
@@ -1131,4 +1203,3 @@ Treat `data` as opaque JSON keyed by a declared qualified name. Preserve unknown
 - Finish the loss and include reports, the include diagnostics cap and the categories of [tooling](tooling.md) that `carve` lacks. The `lint` command is shipped.
 - Resolve the rewrite tool's `U-114` fifth-input `upgrade-mismatch` and classify remaining corpus mismatches.
 - Align the engine's tree fields and task-item style with the current 0.2 schema and HTML rulings.
-- Finish the non-HTML renderers before those callers switch.
