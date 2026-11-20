@@ -1,8 +1,8 @@
 # Carve 0.2: status
 
-**Freeze candidate 16.** The candidate is the text of `spec/0.2/` on the branch `next2` of `markup-carve/carve`. It is not released and carries no tag. A frozen text changes only by a ruling recorded with its reason; a ruling on a frozen clause makes a new revision of the candidate, and a round of such rulings a new candidate.
+**Freeze candidate 17.** The candidate is the text of `spec/0.2/` on the branch `next2` of `markup-carve/carve`. It is not released and carries no tag. A frozen text changes only by a ruling recorded with its reason; a ruling on a frozen clause makes a new revision of the candidate, and a round of such rulings a new candidate.
 
-Freeze candidate 16 content commit: `9f9aff4c7`, the option rulings of 19 November 2026 (`softBreak`, `allowLosses`, `maxLosses`, `codeBlockRenderer`, `positionOf`; #6091) and the clause case fixes CC-1223 (#6082) and CC-1227 (#6088), with the release names of #6086. This status-only commit follows it. Freeze candidate 15 content commit: `4304a0c97`, the rulings D1 to D8 of 18 November 2026 (#6074, #6070). Freeze candidate 14 content commit: `f2be82f57`. Freeze candidate 13 content commit: `786e2821c`.
+Freeze candidate 17 content commit: `f22c19b9f`, the maintainer rulings of 19 November 2026, 12:00 (#6114), with the tabs `mode` ruling of 12:10 (`821d5d274`, #6113). This status-only commit follows it. Freeze candidate 16 content commit: `9f9aff4c7`, the option rulings of 19 November 2026 (`softBreak`, `allowLosses`, `maxLosses`, `codeBlockRenderer`, `positionOf`; #6091) and the clause case fixes CC-1223 (#6082) and CC-1227 (#6088), with the release names of #6086. Freeze candidate 15 content commit: `4304a0c97`, the rulings D1 to D8 of 18 November 2026 (#6074, #6070). Freeze candidate 14 content commit: `f2be82f57`. Freeze candidate 13 content commit: `786e2821c`.
 
 Freeze candidate 12 commit: `7c9de4372`. The older `eda35624` commit is freeze candidate 10.
 
@@ -50,6 +50,12 @@ After the upgrade replay round: the 9,733-source comparison identified 21 unmapp
 
 Freeze candidate 16 content: the parity ruling of 19 November 2026, which brings four host features of the 0.1 engines into the 0.2 options and calls. `softBreak` (C2-H-203) writes a soft break as a line break, one space or `<br>`, the 0.1 soft break mode of the PHP engine; C2-H-045 and C2-H-065 refer to it. `allowLosses` (C2-H-204) and `maxLosses` (C2-H-205) are the loss allow list and the cap on retained losses of 0.1, read by the render and the HTML importer; `--allow-loss` and `--max-render-losses` set them (C2-T-010, C2-T-027, C2-T-029), and C2-A-174 names them. `codeBlockRenderer` (C2-H-206, C2-H-207) is the host function that writes code blocks, as the reference engine offers it. `positionOf` (C2-T-041) counts a line and a column exactly as C2-T-019 does. The options grow from 20 to 24, the option schema gains the type `count`, `--soft-break` joins the render flags, and the corpus gains the case kind `position` and the harness spelling of `codeBlockRenderer` (`conformance/README.md`). Clause cases rose from 1,177 to 1,244 (CC-1235 to CC-1301); source upgrade rows rose from 314 to 317 (U-420 to U-422). The gaps these additions open are listed under "Engine gaps from the parity ruling of 19 November".
 
+Freeze candidate 17 content: the maintainer rulings of 19 November 2026, 12:00. `lint` reads `headingIds`, so `broken-fragment-link` checks against the ids that value generates, and `--heading-ids` joins the lint flags (C2-T-042, #6104). A line block outside the profile degrades to one paragraph, its lines joined by one space (C2-H-165, #6106). A task item's `aria-label` reads the children of the tree, not their degraded forms (C2-H-032, #6107). The library gains `diffTree`, `applyPatch`, `sourceFingerprint` and `treeFingerprint` with `CarvePatchError` under `ast-json-invalid` (C2-T-043 to C2-T-046), and `encodeTree` writes the JSON Canonicalization Scheme, so a tree fingerprint agrees across engines (C2-A-217, #6099). The transliteration of the `ascii` heading id values is a table of `data/heading-slug.json` that every engine uses (C2-H-147). C2-X-053 to C2-X-055 state the observable result of the transform checks and let a document transform edit core nodes. The standard extensions of the 0.1 catalog get their ruled points (C2-X-061 to C2-X-069), with `:wiki[Page|Display]` in C2-X-057 and several `:cite` keys in C2-X-058. A diagnostic entry may carry the include chain `includedBy` (C2-T-020, C2-N-063), the file resolver takes `allowAbsolute`, on by default (C2-N-012), and an import option that changes the tree, `labels` first, is an option of the importer (C2-M-100, C2-M-101, #6100). Clause cases rose from 1,252 to 1,290 (CC-1310 to CC-1347), with the case kinds `diff`, `patch` and `fingerprint`; source upgrade rows rose from 317 to 320 (U-423 to U-425). The gaps these rulings open are listed under "Engine gaps from the rulings of 19 November, 12:00".
+
+After candidate 17, the spec batch of 19 November: a fallback that is the claimed core node holds it without its attributes (C2-X-024, #6096); only the ids a tabs group writes in its mode move it (C2-X-048, #6112); the commands and flags carried from 0.1, `flatten`, `lint --fix` and `fix`, `--strict`, `lint --ignore` and `--output`, with the categories `include-unresolved` and `flatten-changed` and a `fix` column in the catalog (C2-T-047 to C2-T-053, #6097); a source duplicate id fails no document transform (C2-X-055); `djot-plus-bullet` reads the line after its container prefixes; and the corrected ranges of CC-813, CC-891 (#6068) and CC-1271 (#6095). U-393 reports a line comment in a frame (#6110), U-426 a comment directly after an opener, U-427 and U-428 the class-form tabs and a non-tab block in a group (#6102), and U-429 the case-only reference respelling of `upgrade --migrate`. Tooling clauses rose from 46 to 53, clause cases from 1,290 to 1,313 (CC-1348 to CC-1370), and source upgrade rows from 320 to 324. The points it could not decide are O25.
+
+The upgrade replay of 19 November adds U-430, a delimiter that 0.2 pairs across a braced opener or an attribute block and 0.1 kept as text, and U-431, a hyphen run that C2-I-111 splits into other dashes than 0.1 (#6164). Source upgrade rows rose from 324 to 326. The second replay pass adds U-432, a line comment that 0.1 ended at a closer or read after an opener, written as a braced comment, and U-433, a blank line above a comment line that ended a 0.1 block; source upgrade rows rose from 326 to 328. The third replay pass adds U-434, one space between a bullet and a task box; U-435, a block moved out of a description to the column of its list; U-436, a line indented to the item column that 0.1 read into the item; and U-437, a blank line between item text and a paragraph 0.1 started outside the item. Source upgrade rows rose from 328 to 332.
+
 ## Documents
 
 Clauses are the paragraphs that start with a clause id. Rules and exceptions are counted by one rubric for all documents (an atomic normative statement that decides the tree, the output, the source written, a refusal or a report; an exception is a carve-out or a named interaction). *Labeled* is the number of clauses that start with the word "Exception", which each document counts at its end. The syntax chapters were counted construct by construct; the other documents were read more finely, so their rule counts are not comparable with the two chapters.
@@ -58,15 +64,15 @@ Clauses are the paragraphs that start with a clause id. Rules and exceptions are
 |---|---|---|---|---|---|---|
 | `syntax-blocks.md` | C2-B | 209 | 217 | 31 | 8 | 289 |
 | `syntax-inline.md` | C2-I | 109 | 136 | 30 | 14 | 131 |
-| `ast.md` | C2-A | 198 | 422 | 65 | 3 | 0 |
+| `ast.md` | C2-A | 199 | 422 | 65 | 3 | 0 |
 | `html.md` | C2-H | 199 | 470 | 98 | 6 | 86 |
-| `writer.md` | C2-W | 129 | 294 | 86 | 5 | 45 |
+| `writer.md` | C2-W | 131 | 295 | 87 | 6 | 46 |
 | `source-layout.md` | C2-L | 54 | 95 | 23 | 0 | 0 |
 | `includes.md` | C2-N | 88 | 219 | 54 | 2 | 41 |
-| `extensions.md` | C2-X | 51 | 89 | 9 | 0 | 0 |
-| `import-html.md` | C2-M | 83 | 239 | 46 | 1 | 64 |
-| `tooling.md` | C2-T | 41 | 105 | 7 | 0 | 0 |
-| **Total** | | **1,161** | **2,286** | **449** | **39** | **656** |
+| `extensions.md` | C2-X | 69 | 89 | 9 | 0 | 0 |
+| `import-html.md` | C2-M | 85 | 239 | 46 | 1 | 64 |
+| `tooling.md` | C2-T | 46 | 105 | 7 | 0 | 0 |
+| **Total** | | **1,189** | **2,287** | **450** | **40** | **657** |
 
 In candidates 4 and 5 the columns Rules and Exceptions are the counts of the candidate before moved by the change of each commit of the round, not a recount. Revision 1 of candidate 5 adds no clause and does not move these two columns. Candidate 6 adds one clause, C2-B-230, and amends others; it does not move these two columns either, so they wait for a recount. Candidate 7 adds C2-H-201 and the forty clauses of `tooling.md`; its row of Rules and Exceptions is the count of that document's author, not a rubric reading, and the other rows do not move. The reduction of 17 November 2026 deletes clauses whose rule other clauses state or give; it moves the columns Clauses and Labeled, not Rules and Exceptions, since the rules stay. Candidate 8 recounts the row of `tooling.md`: one rule per sentence of its clauses and one exception per carve-out (C2-T-002, C2-T-009, C2-T-010, C2-T-016, C2-T-031, C2-T-032, C2-T-038), which corrects the author's count of candidate 7. Candidate 9 adds C2-W-138 and C2-L-059 and amends other clauses; it moves the column Clauses, and Rules and Exceptions wait for a recount.
 
@@ -88,6 +94,16 @@ Retired clause ids, deleted in candidate 4 because a general rule gives the same
 - The corpus (`scripts/spec2-conformance.mjs`): 656 examples (325 verified) and 79 refused trees generated from the documents and the fixtures, so the gate fails when they are stale; an example's expected codes come only from its `Reported:` line; 1,129 clause cases, each with the deciding clause or catalog trigger quoted and checked; 821 of them name their call: 434 lint, 94 parse, 84 cli, 53 write, 55 render, 37 layout, 20 tree, 20 import, 19 format, 5 migrate. Their options, diagnostics with positions, refusals, sidecars and command lines are checked against the data tables (`conformance/README.md`), and 25 of the refused trees name the node a reader check refuses them at. The examples are the gate of `html.md` and `writer.md` as well: each of their examples is a case an engine runs.
 
 The gates check the text against itself. No engine runs in them; an engine runs the corpus in its own repository.
+
+## Engine readiness, 20 November 2026
+
+Measured at 08:44 UTC with `npm --prefix scripts run readiness:next2 -- --write-baseline` on the engine `next2` heads below. Each cell is passing cases over total cases; none failed or was unsupported. The 94 extension cases now count toward the readiness gate and its baseline.
+
+| Engine | Commit | Clause cases | Examples | Trees | Extensions |
+|---|---|---:|---:|---:|---:|
+| carve-js | `1acf5564d672bf8525ed804c268d1027fdcd77fe` | 1347/1347 | 657/657 | 705/705 | 94/94 |
+| carve-php | `9766b86759c2756ff22fff28ff792728c9ae1c1c` | 1347/1347 | 657/657 | 705/705 | 94/94 |
+| carve-rs | `19f0453d02b7826bb6acd909ef14285ce76db8f2` | 1347/1347 | 657/657 | 705/705 | 94/94 |
 
 ## What is frozen
 
@@ -158,9 +174,43 @@ What stays unverified: the 328 unverified examples (written by hand from the cla
 - **O10.** Annotation ranges (C2-A-204) are anchored for an unchanged tree only; how their paths follow an edit is not part of 0.2.0.
 - **O12.** For the extension catalog work: a renderer returns an HTML string the host cannot inspect for the escaping and URL policy of C2-X-034; the slots of a supplied node of another extension are walked in the key order of its `slots` object, which can differ from the order of its declaration (C2-X-020); and the annotation ids of C2-A-203 need a reader that is given the range sidecar with the tree.
 - **O22.** Points the restore round of candidate 6 left for a ruling, each restored as narrowly as the ruling required: header rows inside a body take `scope="row"` (U-271, against T-053 and C2-A-092), and a pipe table with `body-rows` keeps its 0.2 head (C2-B-178, U-058); inside a code span a backslash and a trailing space stay (the ruling of 16 November, C2-I-002); and the writer half of F33 (C2-W-098) now writes a row attribute value with a pipe in quotes, which the maintainer should confirm.
+- **O24.** The editor adapters of the importer (`tiptap`, `prosemirror`, `ckeditor`, `tinymce`, `word`, `google-docs`) change the imported tree. They stay reference tooling (C2-T-003) until a ruling makes one an option of C2-M-100 with mapping rows in `data/import-html.json`; no row is written yet, since no engine implements one to measure against. `allowAbsolute` (C2-N-012) and `includedBy` (C2-T-020) have no clause case: the corpus resolver serves names, not paths, and `includedBy` is optional.
+- **O25 resolved.** The 19 November rulings classify a caret line by shape before its host test (C2-B-146), write authored tabs wrapper attributes and give code groups their own id scheme (C2-X-047, C2-X-048), render every entry of a claimed references directive (C2-X-058), carry the three export targets with engine-defined output and loss codes (C2-T-003, C2-W-106), and merge renderer-generated style through the host helper (C2-X-033). See #6121 to #6125.
+
+The O25 cases on the 19 November `next2` engine heads have no readiness regression. CC-1371 passes all three engines. CC-1372 passes `carve-js` and differs in the `carve-php` and `carve-rs` HTML wrappers. CC-1373 passes `carve-rs`; the `carve.codeGroup` registration used by that case is refused by `carve-js` and `carve-php`.
 - **O23.** O15 and O17 have no clause case, since no corpus option registers an extension. The other points of the round of candidate 7 are decided by the ruling of 17 November, 13:55 (UPGRADING, "Rulings of 17 November 2026, 13:55").
 
 ## Engine gaps from the parity ruling of 19 November
 
 - `carve-js`: `softBreak`, `allowLosses`, `maxLosses` and `positionOf` are not offered (CC-1235 to CC-1249, CC-1250 to CC-1271, CC-1287 to CC-1301). `codeBlockRenderer` is offered, but a result that is neither text nor nothing throws a `TypeError` where C2-H-207 asks for `CarveOptionError` (CC-1285). The option table of the engine names `codeBlockRenderer` outside `data/options.json`; it is a row there now. The upgrade tool has no entry for U-420 to U-422.
 - `carve-php` and `carve-rs`: all four features, on the reference engine's lead.
+
+## Engine gaps from the tabs mode ruling of 19 November
+
+- All three engines, C2-X-043, C2-X-047, C2-X-048 and C2-X-056: the standard tabs renderer takes no host option `mode`, so the `aria` cases CC-1302 to CC-1306, CC-1308 and CC-1309 are unsupported in the readiness runners until an engine offers it. CC-1307 fails: the `css` wrapper drops an authored `role` and `aria-labelledby` of the `carve.tabs` node instead of writing them in place of the generated ones.
+
+## Engine gaps from the rulings of 19 November, 12:00
+
+Measured with the readiness runner on the engine heads of `scripts/next2-readiness-baseline.json`.
+
+- `carve-js`: `lint` refuses `headingIds` (CC-1310, CC-1312, CC-1313); a degraded line block writes one paragraph per line (CC-1315, CC-1316); a task item's `aria-label` reads the degraded children (CC-1317, CC-1318); `encodeTree` keeps construction order, so the tree fingerprint differs (CC-1338); the `ascii` transliteration leaves a Hangul syllable decomposed (CC-1341); the standard extensions of C2-X-061 to C2-X-065 and the `wiki` display text are not registered by name (CC-1342 to CC-1346). `diffTree`, `applyPatch` and `sourceFingerprint` pass (CC-1319 to CC-1337); the calls are exported from the package entry, not from `src/index.ts`. The upgrade tool has no entry for U-423 to U-425.
+- `carve-php`: `lint` refuses `headingIds` (CC-1310, CC-1312, CC-1313); `diffTree`, `applyPatch` and the fingerprints are not offered (CC-1319 to CC-1338); the transliteration table (CC-1339 to CC-1341); the standard extensions of C2-X-061 to C2-X-065 and the `wiki` display text (CC-1342 to CC-1346).
+- `carve-rs`: `lint` and `carve lint` do not read `headingIds` (CC-1310, CC-1312 to CC-1314); a degraded line block writes one paragraph per line (CC-1315, CC-1316); `diffTree`, `applyPatch` and the fingerprints are not offered (CC-1319 to CC-1338); the transliteration table (CC-1339, CC-1340); the `details` and spoiler fallback and the `wiki` display text (CC-1345, CC-1346); the importer refuses `labels` (CC-1347).
+
+## Engine gaps from the spec batch of 19 November
+
+Measured with the readiness runner on the engine heads of `scripts/next2-readiness-baseline.json`; the command lines of CC-1352 to CC-1366 were also run against `carve-js` `next2` `7589dbc`.
+
+- All three engines, C2-X-024, C2-X-059 and C2-X-061: an attributed fallback that is the claimed code block writes its attributes on the wrapper only (CC-1348, CC-1349). C2-X-048: an authored id that only starts with `tabs-N-` moves no group in `css` mode (CC-1350); CC-1351 needs the `aria` mode.
+- `carve-js`: the engine at the baseline head has none of the commands of C2-T-047 to C2-T-053; `next2` `7589dbc` passes CC-1352 to CC-1366 but CC-1359, where it writes the include entries before the category line that C2-T-039 puts first. C2-B-109: a `> %%%` line under a comment block opened in `> >` closes it (CC-1369). The upgrade tool has no entry for U-426 to U-429 and still treats U-393 as no change.
+- `carve-php`: the commands and flags of C2-T-047 to C2-T-053 (CC-1352 to CC-1364); `djot-plus-bullet` after a quote marker (CC-1367); the comment closer of C2-B-109 (CC-1369); the `destination-denied` column of CC-1271.
+- `carve-rs`: the commands and flags of C2-T-047 to C2-T-053 (CC-1352 to CC-1365); `djot-plus-bullet` after a quote marker (CC-1367).
+
+## Engine gaps from the lint rulings of 20 November
+
+The maintainer rulings on #6191 to #6196: `blockquote-marker-without-space` and `colon-fence-length-mismatch` state their range, `block-opener-overindented` reports the whole opening mark, an include directive is no block opener for `list-item-block-overindented`, a colon run in a quote or item inside a div is not compared with the div, an attribute-shaped paragraph line gets only `block-opener-without-blank-line`, and C2-W-143 says which lines are blank for lint. Clause cases CC-1389 to CC-1399. Measured on the engine `next2` heads of 20 November.
+
+- All three engines: the frontmatter message is reported on the `>` alone (CC-1390); an overindented code fence is reported on its first backtick (CC-1392).
+- `carve-js`: the overindented div opener is reported on three colons (CC-1391); an include directive line past an item's content column is reported (CC-1393); a colon run in a quote or item inside a div is compared with the div (CC-1395, CC-1396).
+- `carve-php`: CC-1391 and CC-1393 as `carve-js`; the colon run range takes the trailing spaces (CC-1394); an attribute-shaped paragraph line also gets `unattached-block-attribute` (CC-1397); a `>` line in a quote is not blank (CC-1398).
+- `carve-rs`: the line range of `blockquote-marker-without-space` is the `>` alone (CC-1389); CC-1395 and CC-1396 as `carve-js`; CC-1397 as `carve-php`; a `>` line in a quote gets the other message of `unattached-block-attribute` (CC-1398).

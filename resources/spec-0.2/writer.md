@@ -244,6 +244,28 @@ One blank line ends the first list; the attribute line of the second list then s
 
 **C2-W-034** A line comment that is a region marker of an include (`#region`, `#endregion`) keeps its line: the writer moves no marker and opens no new line beside one. As in 0.1 (CARVE-P11-073). Since the line ends a paragraph (C2-B-137), a marker among the inline children of a supplied paragraph has no spelling, and the writer reports `structure-unspellable`. A marker that follows another block is a sibling block, and one blank line stands before it (C2-W-017): `a` directly above `%% #endregion` is written with a blank line between, as the tree is the same with or without it.
 
+**Exception C2-W-144** A line comment that is a `carve-lint-disable-next-line` control comment (C2-B-215) and stands directly above a line that holds content in the source is written directly above the line written after it. No blank line stands between them where C2-W-017, C2-W-030 or C2-W-059 would put one, as long as the tree reads back the same without it (C2-W-002); where it does not, the blank line stays. The comment suppresses findings on the next line (C2-B-216), and a blank line there would leave the line it names unsuppressed. A control comment with a blank line below it in the source suppresses nothing and is written by the general rules, so `fmt` does not make it suppress a line either. A supplied tree with no source has each control comment written directly above the next block.
+
+Example 46 (unverified, C2-W-144, C2-W-059)
+
+Input:
+
+```carve
+- a
+
+%% carve-lint-disable-next-line
+- [b]()
+```
+
+Written:
+
+```carve
+- a
+
+  %% carve-lint-disable-next-line
+- [b]()
+```
+
 **C2-W-114** In a description list no blank line stands between a term and its description or between two entries. A later block of a description follows one blank line, at the content column.
 
 ## Canonical forms: blocks
@@ -1146,7 +1168,7 @@ Written:
 
 **C2-W-105** The severity is one of `hint`, `warning` and `error`, in lower case. The 0.1 engine source writes the first with a capital, `Hint`. The default is `warning`: a rule has that severity unless the catalog names another.
 
-**C2-W-106** Every code is an entry of one catalog, `data/lint-rules.json`. A code is a contract: it is not renamed and not reused. A single plain message applies to every finding of its code. A row may express that same message as one variant whose `when` is `every finding of this code`; it applies to every finding. When a row has several messages, every variant states a `when` condition, and at least one condition must match every finding; if conditions overlap, the first matching variant in `messages` applies. The `reports` text of a row states what the code reports and the clauses it rests on; for a rule kept from 0.1 it is the trigger of the 0.1 engine with the row's `change`, stated on the 0.2 tokens and tree.
+**C2-W-106** Every code is an entry of one catalog, `data/lint-rules.json`. This covers the specified parse, HTML render, write, import and lint operations; export-only loss codes of the renderers of C2-T-003 are engine codes outside that catalog. A catalog code is a contract: it is not renamed and not reused. A single plain message applies to every finding of its code. A row may express that same message as one variant whose `when` is `every finding of this code`; it applies to every finding. When a row has several messages, every variant states a `when` condition, and at least one condition must match every finding; if conditions overlap, the first matching variant in `messages` applies. The `reports` text of a row states what the code reports and the clauses it rests on; for a rule kept from 0.1 it is the trigger of the 0.1 engine with the row's `change`, stated on the 0.2 tokens and tree.
 
 **C2-W-107** Lint is computed by a lint call from the parsed document: its tokens, tree and source ranges assigned by the parse. A render call does not run lint or return lint-channel entries; `unresolved-reference-link` belongs to a lint call, even when C2-H-085 writes the same unresolved reference as text. A source shape counts only where the parse reads it as the construct a catalog row names. A mark that C2-I-010 reads as an escaped character is not the start or end of a source shape that any catalog row reports. Where a rule reports a shape because it stays text, the shape counts only where the parse reads it as text of a paragraph, heading, cell, term, caption or line of a line block. Lint does not search the body of a comment block, a line or braced comment, a code span or block, raw content, an attribute key or value, a link destination or title, frontmatter, math content, or the marks of a braced opener or closer that formed or that C2-I-060 leaves as text, unless the row expressly names that place. The `reports` text cannot extend a trigger beyond a clause it cites: where they give different results for an input, the clause decides and the row must agree.
 
@@ -1297,7 +1319,7 @@ The 29 rules of the migrate and lint design and one rule added since, with the r
 | `ordered-marker-right-aligned` | warning | an ordered marker left of its list that ends at the column where the list's markers end | unchanged |
 | `tight-list-item-with-blank-line` | hint, opt-in | a tight list in which an item holds a blank line and a paragraph | unchanged |
 | `deprecated-loose-attribute` | warning | a list that carries the key `loose` | unchanged |
-| `heading-marker-mixed` | hint | a document with `=` headings and `#` headings, once | unchanged |
+| `heading-marker-mixed` | hint | a document with `=` headings and `#` headings, once, at its first heading | unchanged |
 | `comment-line-in-line-block` | hint | a line of a line block that starts with `%%` and opens no comment block | unchanged |
 | `fence-closer-indented` | hint | a closer whose indent differs from its opener's | unchanged |
 | `ordered-list-kind-split` | warning | a one-item list whose marker is one of the seven roman letters, directly followed by an ordered list of the other letter style in the same case, with fewer than three blank lines between them | the first marker fixes its style (C2-B-042) |
@@ -1315,7 +1337,7 @@ The 29 rules of the migrate and lint design and one rule added since, with the r
 | `deprecated-bare-highlight` | warning | an equals pair that 0.1 read as highlight | unchanged |
 | `deprecated-substitution-arrow` | warning | a braced strike span that holds `~>` | unchanged |
 | `braced-span-opener-as-text` | warning | a braced opener left as text because a bare delimiter inside it closed an outer span | unchanged |
-| `unattached-inline-attribute` | hint | an attribute block in a paragraph that is glued to no host | unchanged |
+| `unattached-inline-attribute` | hint | an attribute block in an inline content that is glued to no host | unchanged |
 | `sigil-after-letter` | hint | a mention or tag shape directly after a letter or number outside ASCII | unchanged |
 | `unclosed-frontmatter` | error | frontmatter with no closer | unchanged (C2-B-163) |
 | `frontmatter-shaped-thematic-break` | warning | frontmatter whose first line is blank or that holds no key line | unchanged |
@@ -1447,6 +1469,8 @@ Reported: `comment-splits-table-row`, severity hint, on line 2, offsets 6 to 10.
 
 **C2-W-138** The range of an entry is the source span of the construct that the catalog row of its code names, in `reports` or `channel_reports`, unless that row states a `range` or names a range in `reports`, or the clause of the rule names another place, as C2-W-137 and C2-M-081 do. A stated catalog range takes precedence over the general extents below. Where that construct is a part of a node, such as an attribute, an option, a destination, a delimiter or a quote, the range is that part and not the node. Where the row states no range, an attribute range is its whole key and value as written, without the enclosing braces; a block opener range is the opening mark only, without indentation or following content. An entry of a run on source carries that range, in the render-loss channel too, and its path, where it has one, names the node that holds the construct. An entry on a supplied tree has the path alone (C2-W-103); where its construct is a field, the path names the field, as `/children/1/href`. A finding about a whole document starts where the document starts.
 
+**C2-W-143** For lint, a line is blank for the rules inside its containers when it holds only spaces and tabs after the prefixes of those containers (C2-B-027). Every rule that tests for a blank line tests this. A line `>` inside a quote is blank for the rules inside the quote, although the parse does not read it as a blank line that ends the quote (C2-B-009, C2-B-032). A mark that is no container prefix is not blank: `>>` at column 1 is text (C2-B-031). The term *blank line* keeps its meaning for the parse.
+
 ## Out of scope
 
 The Markdown, plain-text and ANSI writers are not part of 0.2.0, and neither are the importers other than the HTML importer, which the HTML document defines (C2-H-120). These 0.1 clauses define only those targets and are not ported. Nobody should port them into the canonical writer.
@@ -1533,14 +1557,14 @@ Totals over the 82 clauses: 28 ported, 8 simplified, 6 removed, 40 out of scope.
 |---|---|---|---|---|
 | The writer and its two gates | 13 | 2 | 0 | 2 |
 | What the writer cannot spell | 10 | 0 | 0 | 2 |
-| Layout | 22 | 2 | 0 | 3 |
+| Layout | 23 | 3 | 0 | 4 |
 | Canonical forms: blocks | 24 | 0 | 0 | 22 |
 | Canonical forms: tables | 12 | 0 | 2 | 2 |
 | Canonical forms: inline | 14 | 1 | 0 | 2 |
 | The sidecar | 6 | 0 | 0 | 1 |
 | Escaping | 13 | 0 | 1 | 1 |
 | `carve fmt` | 3 | 0 | 3 | 2 |
-| Diagnostics and lint | 12 | 0 | 0 | 2 |
-| **Total** | **129** | **5** | **6** | **39** |
+| Diagnostics and lint | 13 | 0 | 0 | 2 |
+| **Total** | **131** | **6** | **6** | **40** |
 
-The document has 129 clauses, 5 of them marked with the word "Exception", and 45 examples, 6 generated and 39 unverified. The clause count includes the exceptions. Clauses added after the first draft carry the next free number and stand at the end of their section, so the ids are not in document order everywhere. Freeze candidate 5 deleted Exception C2-W-019, C2-W-042, C2-W-043, C2-W-054, C2-W-072, C2-W-121 and Exception C2-W-132, whose general rules give the same result; their ids are not reused. The reduction of 17 November 2026 deleted C2-W-126, whose rule other clauses state or give; its id is not reused.
+The document has 131 clauses, 6 of them marked with the word "Exception", and 46 examples, 6 generated and 40 unverified. The clause count includes the exceptions. Clauses added after the first draft carry the next free number and stand at the end of their section, so the ids are not in document order everywhere. Freeze candidate 5 deleted Exception C2-W-019, C2-W-042, C2-W-043, C2-W-054, C2-W-072, C2-W-121 and Exception C2-W-132, whose general rules give the same result; their ids are not reused. The reduction of 17 November 2026 deleted C2-W-126, whose rule other clauses state or give; its id is not reused.

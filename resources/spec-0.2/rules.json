@@ -1,5 +1,5 @@
 {
- "commit": "64207ed7281f1a6706e057bb52bc658d9469929b",
+ "commit": "109597c5d6d37d4ea8f256fc854842816f1364df",
  "rules": [
   {
    "id": "C2-A-001",
@@ -65,6 +65,11 @@
    "id": "C2-A-013",
    "document": "ast.md",
    "text": "The envelope and its `document` carry equal `astVersion` strings, and a reader refuses a pair that differs. The envelope does not change the tree."
+  },
+  {
+   "id": "C2-A-217",
+   "document": "ast.md",
+   "text": "`encodeTree` writes the JSON text of the JSON Canonicalization Scheme (RFC 8785): no whitespace, the members of every object in ascending order of their names compared as UTF-16 code units, and each string and number in the one spelling that scheme gives. So one tree has one encoding in every engine, and its `treeFingerprint` (C2-T-046) agrees across engines. A reader does not depend on that order: `decodeTree` reads the members of an object in any order (C2-A-188)."
   },
   {
    "id": "C2-A-014",
@@ -1094,7 +1099,7 @@
   {
    "id": "C2-X-024",
    "document": "extensions.md",
-   "text": "A source transform carries a `source` record with `form`, `name`, canonical `body` text, and any quoted title or bracket label, plus the core node's attributes on the extension node. The class a div takes from its name (C2-B-119) is no attribute of the extension node: `{#t .k}` above `:::: tabs` gives the attributes `id` `t` and the class `k`."
+   "text": "A source transform carries a `source` record with `form`, `name`, canonical `body` text, and any quoted title or bracket label, plus the core node's attributes on the extension node. The class a div takes from its name (C2-B-119) is no attribute of the extension node: `{#t .k}` above `:::: tabs` gives the attributes `id` `t` and the class `k`. Where the fallback is the claimed core node, it is that node without these attributes, which the extension node holds, so the fallback HTML of C2-X-035 writes each of them once."
   },
   {
    "id": "C2-X-025",
@@ -1139,7 +1144,7 @@
   {
    "id": "C2-X-033",
    "document": "extensions.md",
-   "text": "A host registers a renderer by qualified name and version. The renderer receives the node, resolved child lists, fallback, rendering profile, URL policy, render `mode` (C2-H-122) and host helpers for escaped text, attributes, child lists and generated ids. Its `host.attributes(node, { block?, bare? })` returns the attributes for an element, each with a leading space, in core writer order: `block: true` appends a generated `data-source-line` last when `host.sourceLines` is on and the node has a position; `bare: true` omits the node's authored id, classes and key-value attributes, so a synthesized row or row group can take only that generated line. The host also exposes `sourceLines`, the effective boolean render option, and `blockDepth`, the current block indent in two-space units (C2-H-042)."
+   "text": "A host registers a renderer by qualified name and version. The renderer receives the node, resolved child lists, fallback, rendering profile, URL policy, render `mode` (C2-H-122) and host helpers for escaped text, attributes, child lists and generated ids. Its `host.attributes(node, { block?, bare?, style? })` returns the attributes for an element, each with a leading space, in core writer order: `block: true` appends a generated `data-source-line` last when `host.sourceLines` is on and the node has a position; `bare: true` omits the node's authored id, classes and key-value attributes, so a synthesized row or row group can take only that generated line. With `style`, the helper merges the generated style declarations with an authored `style` into one attribute, at the authored key's position and with the value order of C2-H-009; without an authored `style` it writes the generated attribute in the order of C2-H-009. The host also exposes `sourceLines`, the effective boolean render option, and `blockDepth`, the current block indent in two-space units (C2-H-042)."
   },
   {
    "id": "C2-X-034",
@@ -1184,7 +1189,7 @@
   {
    "id": "C2-X-053",
    "document": "extensions.md",
-   "text": "A host may register ordered document transforms. After includes and ordinary resolution, before HTML rendering, each receives a copy of the resolved render view and returns a view; registration order is execution order, and a later transform sees the earlier result. A transform may inspect the whole document, replace or insert nodes declared by its extension, or claim existing directive nodes. It does not change the authored tree, source record or the tree the Carve writer reads."
+   "text": "A host may register ordered document transforms. After includes and ordinary resolution, before HTML rendering, each receives a copy of the resolved render view and returns a view; registration order is execution order, and a later transform sees the earlier result. A transform may inspect the whole document, replace or insert nodes declared by its extension, claim existing directive nodes, and edit core nodes of the view: change their attributes or content, or replace them with core nodes, as a transform that numbers headings or turns inline footnotes into text does. It does not change the authored tree, source record or the tree the Carve writer reads."
   },
   {
    "id": "C2-X-054",
@@ -1194,7 +1199,7 @@
   {
    "id": "C2-X-055",
    "document": "extensions.md",
-   "text": "The host checks ids in the transformed view in document order after each transform. An inserted or replacement node with an authored id already used by a preceding node fails that transform; the first node keeps its id. Generated ids, including heading and extension control ids, are allocated again over the final view by their ordinary rules, avoiding every authored id and earlier generated id. References in that view resolve against the final ids before HTML is written. A failed document transform leaves its input view intact and reports a diagnostic naming the extension, as in C2-X-050."
+   "text": "The host checks ids in the transformed view in document order after each transform. An inserted or replacement node with an authored id already used by a preceding node fails that transform; the first node keeps its id. A duplicate authored id that the view held before the transform ran, which C2-A-039 reports, fails no transform: only the nodes a transform inserted, replaced or edited are checked. Generated ids, including heading and extension control ids, are allocated again over the final view by their ordinary rules, avoiding every authored id and earlier generated id. References in that view resolve against the final ids before HTML is written. A failed document transform leaves its input view intact and reports a diagnostic naming the extension, as in C2-X-050. The checks of C2-X-054 and of this clause are observable only in their result: a view that fails one fails that transform as this clause says, and a view that passes all of them is rendered. An engine may check only the nodes a transform inserted, replaced or edited, since every node it kept passed the same checks before it ran; the result is the one a check of the whole view gives. A render with document transforms therefore resolves twice: once before the first transform, and once over the final view for the generated ids and references of this clause."
   },
   {
    "id": "C2-X-039",
@@ -1219,7 +1224,7 @@
   {
    "id": "C2-X-043",
    "document": "extensions.md",
-   "text": "The tabs renderer writes one radio input, one linked label and one panel per item of `tabs` in order, with the input of the selected tab (C2-X-056) checked. Its build-time renderer, which a host registers for static mode (C2-X-052), writes no input, no `label` element, no generated id and no script: inside the same wrapper `div` it writes, per item in order, a `<section class=\"tabs-panel\">` holding an `<h3 class=\"tabs-label\">` with the content the label would hold, followed by the panel content. The selection does not change static output. Neither mode writes a line break between the elements it writes."
+   "text": "The tabs renderer writes one radio input, one linked label and one panel per item of `tabs` in order, with the input of the selected tab (C2-X-056) checked. That is its output in its default host option `mode`, `css` (C2-X-056). In `aria` mode it writes the WAI-ARIA tab pattern inside the same wrapper `div` instead: per item in order one `button` element with, in this order, `type=\"button\"`, `role=\"tab\"`, its `id`, `aria-selected` (`true` for the selected tab and `false` for the others) and `aria-controls` with the id of its panel, plus `tabindex=\"-1\"` on every button but the selected tab's, holding the content the label would hold; then per item in order one panel, a `div` with, in this order, `class=\"tab-panel\"`, `role=\"tabpanel\"`, its `id` and `aria-labelledby` with the id of its button, plus `hidden` on every panel but the selected tab's. The renderer writes no script in either mode; a host that selects `aria` ships the script that switches the panels. Its build-time renderer, which a host registers for static mode (C2-X-052), writes no input, no `label` element, no generated id and no script: inside the same wrapper `div` it writes, per item in order, a `<section class=\"tabs-panel\">` holding an `<h3 class=\"tabs-label\">` with the content the label would hold, followed by the panel content. The selection does not change static output. Nor does the host option `mode`: the build-time renderer writes no button either. No output of the renderer has a line break between the elements it writes."
   },
   {
    "id": "C2-X-044",
@@ -1239,37 +1244,82 @@
   {
    "id": "C2-X-047",
    "document": "extensions.md",
-   "text": "The tabs renderer groups the controls under the `tabsGroup` label (C2-H-125) and names each panel with the plain text of its title, or, when the title is absent, `Tab`, one space and its position counted from 1, as `Tab 1`. Without a stylesheet every panel stays visible."
+   "text": "The tabs renderer groups the controls under the `tabsGroup` label (C2-H-125) and names each panel with the plain text of its title, or, when the title is absent, `Tab`, one space and its position counted from 1, as `Tab 1`. The wrapper is `<div class=\"tabs\">` with `role=\"group\"` and an `aria-label` with that group label before authored attributes are applied. It writes the authored id, `tabs` followed by the authored classes, and the other authored attributes in the order of C2-H-009. In `aria` mode the wrapper takes `role=\"tablist\"` instead, and a panel takes its name from its button through `aria-labelledby` and carries no `aria-label`; a button without a title holds the `Tab 1` text. An authored `role` of the `carve.tabs` node takes the place of the generated role, and an authored `aria-label` or `aria-labelledby` the place of the generated name, in every mode: the wrapper writes the authored ones of these three attributes after its class, in their authored order, then the generated role and name that no authored attribute replaced. Without a stylesheet every panel of the `css` mode stays visible."
   },
   {
    "id": "C2-X-048",
    "document": "extensions.md",
-   "text": "The tabs renderer gives each radio input a unique document-scoped id and links its label to that id. The groups are counted in document order from 1: group N has the input name `tabs-N`, and its inputs the ids `tabs-N-0`, `tabs-N-1` and so on, counted from 0. Where any authored id or any generated heading id is one of the ids of a group, that group takes the next N whose ids no authored id or generated heading id takes, and later groups count on from it."
+   "text": "The tabs renderer gives each radio input a unique document-scoped id and links its label to that id. The groups are counted in document order from 1: group N has the input name `tabs-N`, and its inputs the ids `tabs-N-0`, `tabs-N-1` and so on, counted from 0. In `aria` mode each button takes the id its input would take, and the panel of button `tabs-N-K` the id `tabs-N-K-panel`. Where any authored id or any generated heading id is one of the ids of a group, that group takes the next N whose ids no authored id or generated heading id takes, and later groups count on from it. The ids of a group are the ids it writes in its mode. A code group uses a separate counter from 1: its Kth tab, counted from 1, has the id `codegroup-N-tab-K`. The collision rule above applies separately to the ids of each tabs or code-group scheme."
   },
   {
    "id": "C2-X-056",
    "document": "extensions.md",
-   "text": "A tab's nonempty quoted title is its only label source (C2-X-040); a bracket label, a `label` attribute or a first heading does not supply a tab title. A tab whose attributes hold the key `selected`, with any value, is marked. The first marked tab is the selected tab, and with no mark the first tab is, so exactly one tab is selected; a later mark is ignored without a diagnostic. The group label of C2-X-047 applies in both modes, and the panel names in interactive mode only: in static mode the heading of each section names it. An `aria` mode or a per-instance host class does not change the standard tabs contract."
+   "text": "A tab's nonempty quoted title is its only label source (C2-X-040); a bracket label, a `label` attribute or a first heading does not supply a tab title. A tab whose attributes hold the key `selected`, with any value, is marked. The first marked tab is the selected tab, and with no mark the first tab is, so exactly one tab is selected; a later mark is ignored without a diagnostic. The standard tabs renderer takes the host option `mode`, `css` or `aria`, with `css` the default, as the code-group extension does; creating the renderer with another value fails. The option is a setting of the renderer, not the render option `mode` of C2-H-122, and it changes only the interactive output (C2-X-043). The group label of C2-X-047 applies in every mode, and the panel names in `css` mode only: in `aria` mode the button names its panel, and in static mode the heading of each section names it. A per-instance host class does not change the standard tabs contract."
   },
   {
    "id": "C2-X-057",
    "document": "extensions.md",
-   "text": "A registered `wiki` inline matcher claims `:wiki[Page]` as an inline extension with the parsed content as its target and core-text fallback. Its renderer may turn that target into a link only through the host URL helper and C2-H-159. A heading reference uses the existing core `</#id>` or `[Label](#id)` forms, and a bare URL or email uses an angle autolink; none gets a new delimiter from an extension (C2-X-013)."
+   "text": "A registered `wiki` inline matcher claims `:wiki[Page]` as an inline extension with the parsed content as its target and core-text fallback. In `:wiki[Page|Display]` the content before the first `|` is the target and the content after it the display text, which is the fallback: `:wiki[Main Page|home]` falls back to `home`. Without a `|` the content is both. Its renderer may turn that target into a link only through the host URL helper and C2-H-159. A heading reference uses the existing core `</#id>` or `[Label](#id)` forms, and a bare URL or email uses an angle autolink; none gets a new delimiter from an extension (C2-X-013)."
   },
   {
    "id": "C2-X-058",
    "document": "extensions.md",
-   "text": "A registered `cite` inline matcher claims `:cite[key]` as an inline extension with the key as its core-text fallback. A locator is an attribute, for example `:cite[doe]{locator=\"p. 4\"}`, not punctuation inside the key. A named `bibliography` or `references` directive may hold definitions as core definition-list entries, with each term the citation key and its description the definition. A document transform may claim that directive and resolve the citations from it (C2-X-053); without that extension, the inline form and directive retain their core fallback."
+   "text": "A registered `cite` inline matcher claims `:cite[key]` as an inline extension with the key as its core-text fallback. A locator is an attribute, for example `:cite[doe]{locator=\"p. 4\"}`, not punctuation inside the key. `:cite[a; b]` names several keys in one citation, separated by `;` and the spaces around it, and each key is resolved on its own. A named `bibliography` or `references` directive may hold definitions as core definition-list entries, with each term the citation key and its description the definition. A document transform may claim that directive and resolve the citations from it (C2-X-053); the claimed directive renders every entry in source order, including entries no citation uses. Without that extension, the inline form and directive retain their core fallback."
   },
   {
    "id": "C2-X-059",
    "document": "extensions.md",
-   "text": "The standard `imgFence` matchers claim code fences whose language is `img` or `image` and whose body is SVG source, producing `carve.imgFence.img` or `carve.imgFence.image`, respectively. Its fallback is that core code block. Its trusted sanitizer removes unsafe elements with their descendants and unsafe attributes, then accepts only a single well-formed SVG root it can reduce to a bounded image without scripts, event attributes, active or external references, or foreign content. If it cannot, the renderer writes the fallback and reports its failure under C2-X-050. It writes the standard SVG namespace on the root and percent-encodes the accepted SVG as UTF-8 in a `data:image/svg+xml` URL for the `src` of one `<img>`; the encoded URL may be no longer than the existing 8 MiB extension payload bound (C2-X-030)."
+   "text": "The standard `imgFence` matchers claim code fences whose language is `img` or `image` and whose body is SVG source, producing `carve.imgFence.img` or `carve.imgFence.image`, respectively. Its fallback is that core code block without its attributes (C2-X-024). Its trusted sanitizer removes unsafe elements with their descendants and unsafe attributes, then accepts only a single well-formed SVG root it can reduce to a bounded image without scripts, event attributes, active or external references, or foreign content. If it cannot, the renderer writes the fallback and reports its failure under C2-X-050. It writes the standard SVG namespace on the root and percent-encodes the accepted SVG as UTF-8 in a `data:image/svg+xml` URL for the `src` of one `<img>`; the encoded URL may be no longer than the existing 8 MiB extension payload bound (C2-X-030)."
   },
   {
    "id": "C2-X-060",
    "document": "extensions.md",
    "text": "Only the `imgFence` sanitizer's own result, passed directly to that `<img>` sink with its provenance intact, receives the URL-policy exception of C2-H-159. A source URL, an authored `data:` attribute, a copied sanitizer string or a value passed to another sink has no exception. The host applies the profile and its other attribute filters to the image and does not pass an unsafe sanitizer result through as HTML."
+  },
+  {
+   "id": "C2-X-061",
+   "document": "extensions.md",
+   "text": "A diagram extension of the fenced renderers, as `carve.fencedRender.mermaid`, and `carve.mathBlock` claim a code block by its language (C2-X-010), and their fallback is that core code block without its attributes (C2-X-024). A diagram extension has a build-time renderer (C2-X-052) only where the host gives it a build function, and the engine makes no network call. In `static` mode without one, C2-X-035 writes the fallback, the plain code block `<pre><code class=\"language-mermaid\">`, and no `<pre class=\"mermaid\">` source element as in 0.1."
+  },
+  {
+   "id": "C2-X-062",
+   "document": "extensions.md",
+   "text": "The renderer of `carve.mathBlock` writes `role=\"math\"` on the element that holds the math, as core display math does (C2-H-072, C2-H-077)."
+  },
+  {
+   "id": "C2-X-063",
+   "document": "extensions.md",
+   "text": "The `code-group` div matcher of `carve.codeGroup` claims a div only when its body holds one or more code blocks and no other blocks; a body with another block stays a core div, as a `tabs` body does (C2-X-040), so no block is lost. The label of a panel is the bracket label of its code block, or, where it has none, its quoted title, or else its language."
+  },
+  {
+   "id": "C2-X-064",
+   "document": "extensions.md",
+   "text": "The spoiler is one extension with two node names, because a definition has one matcher form: `carve.spoiler`, which the `spoiler` inline matcher makes of `:spoiler[...]`, and `carve.spoilerBlock`, which the `spoiler` div matcher makes of `::: spoiler`. A host registers both together."
+  },
+  {
+   "id": "C2-X-065",
+   "document": "extensions.md",
+   "text": "`carve.details`, which the `details` div matcher makes, and `carve.spoilerBlock` take the fallback of a tab (C2-X-042): the quoted title as a `strong` paragraph, when present, followed by the body blocks. The core div with its class is not their fallback."
+  },
+  {
+   "id": "C2-X-066",
+   "document": "extensions.md",
+   "text": "A span key an extension adds for rendering and lint, as `samp`, `var`, `cite` and `dfn`, is an ordinary attribute for C2-A-035: only `abbr`, `time` and `kbd` are semantic keys of the core, so an added key merges with its other spellings by the general rule, and the duplicate checks treat it as any other key."
+  },
+  {
+   "id": "C2-X-067",
+   "document": "extensions.md",
+   "text": "The `glossary` transform writes its definition lists inside the core `<div class=\"glossary\">` wrapper of the directive, which carries the directive's attributes; it does not put those attributes on a list."
+  },
+  {
+   "id": "C2-X-068",
+   "document": "extensions.md",
+   "text": "In `author-date` mode the author and year of a reference entry come from a span around its key in the description term, `:: [doe]{author=\"Doe\" year=\"2020\"}`, since a term takes no attributes in source, or from data the host gives the extension."
+  },
+  {
+   "id": "C2-X-069",
+   "document": "extensions.md",
+   "text": "A document transform does not see the render option `labels`, so the `index` extension takes the label of its back-links as its own option `backrefLabel`; its default is the default of the label `indexBackref`, `Back to`."
   },
   {
    "id": "C2-X-049",
@@ -1409,7 +1459,7 @@
   {
    "id": "C2-H-147",
    "document": "html.md",
-   "text": "With `lower`, each character of the result of C2-H-146 is then mapped to lower case on its own, by the Unicode lowercase mapping of that character with no context, so `Σ` becomes `σ` also at the end of a word and `İ` becomes `i` followed by U+0307. With `ascii`, the result is transliterated to ASCII, a character the table cannot map is kept as it is, and C2-H-146 is applied again; ASCII letters keep their case, as in 0.1. `ascii-strict` works the same, except that each character at or above U+0080 that the transliteration leaves is then treated as a character that is not an ASCII letter or digit, so C2-H-146 makes a run of them one hyphen: `Café 日本語` gives `Cafe` where `ascii` gives `Cafe-日本語`. `ascii-lower` and `ascii-strict-lower` are `ascii` and `ascii-strict` with the result then lowered as with `lower`. The transliteration table belongs to the host, so under these four values an id is outside conformance where the plain text holds a character at or above U+0080; an ASCII heading keeps its slug, `Hello-World` under `ascii` and `hello-world` under `ascii-lower`."
+   "text": "With `lower`, each character of the result of C2-H-146 is then mapped to lower case on its own, by the Unicode lowercase mapping of that character with no context, so `Σ` becomes `σ` also at the end of a word and `İ` becomes `i` followed by U+0307. With `ascii`, the result is transliterated to ASCII by the table `transliteration` of `data/heading-slug.json`: each letter of its `folds` is replaced by its ASCII spelling, so `ß` becomes `ss`, then the text is decomposed canonically, the combining marks U+0300 to U+036F are removed and the rest is composed canonically again, so `é` becomes `e` and a Hangul syllable stays one character. A character the table cannot map is kept as it is, and C2-H-146 is applied again; ASCII letters keep their case, as in 0.1. `ascii-strict` works the same, except that each character at or above U+0080 that the transliteration leaves is then treated as a character that is not an ASCII letter or digit, so C2-H-146 makes a run of them one hyphen: `Café 日本語` gives `Cafe` where `ascii` gives `Cafe-日本語`. `ascii-lower` and `ascii-strict-lower` are `ascii` and `ascii-strict` with the result then lowered as with `lower`. Every engine uses that table, so these four values give one id in every engine; an ASCII heading keeps its slug, `Hello-World` under `ascii` and `hello-world` under `ascii-lower`."
   },
   {
    "id": "C2-H-148",
@@ -1434,7 +1484,7 @@
   {
    "id": "C2-H-032",
    "document": "html.md",
-   "text": "A task item carries the base class `task`. In a bullet list it also carries `style=\"list-style: none\"`, so its bullet is never shown. In an ordered list the number remains visible and the item has no generated style declaration. An authored `style` that is not empty (C2-H-162) follows the generated declaration after `; `, as written, where there is one. The item starts with `<input type=\"checkbox\" disabled aria-label=\"TEXT\">` and one space, with `checked` before `disabled` for `x`; TEXT is the plain text (C2-H-143) of its direct paragraph and heading children, in order and joined by one space; its other blocks give no text. The box and its space stand directly behind `<li>`: before a `<p>` on the same line, and before a nested block at the end of the line. A `<ul>` or `<ol>` with a task item carries class `task-list`; its other items are plain `<li>` elements. The ordered list's `start` and `type` attributes follow C2-H-030."
+   "text": "A task item carries the base class `task`. In a bullet list it also carries `style=\"list-style: none\"`, so its bullet is never shown. In an ordered list the number remains visible and the item has no generated style declaration. An authored `style` that is not empty (C2-H-162) follows the generated declaration after `; `, as written, where there is one. The item starts with `<input type=\"checkbox\" disabled aria-label=\"TEXT\">` and one space, with `checked` before `disabled` for `x`; TEXT is the plain text (C2-H-143) of its direct paragraph and heading children, in order and joined by one space; its other blocks give no text. These are the children of the tree, not their degraded forms (C2-H-165, C2-H-177): a table child gives no text also where the profile writes it as a paragraph, and a heading child gives its plain text without the `#` of its degraded form, so the label does not change with the profile. The box and its space stand directly behind `<li>`: before a `<p>` on the same line, and before a nested block at the end of the line. A `<ul>` or `<ol>` with a task item carries class `task-list`; its other items are plain `<li>` elements. The ordered list's `start` and `type` attributes follow C2-H-030."
   },
   {
    "id": "C2-H-033",
@@ -2179,7 +2229,7 @@
   {
    "id": "C2-H-165",
    "document": "html.md",
-   "text": "The degraded form of a node outside the profile is its plain text, and no placeholder word stands for it: a node writes the text it holds and, where this clause names one, the mark of its kind, and a node that holds no text and has no such mark writes nothing. An inline node is written as the plain text of its children, and a qualified inline extension as the plain text of its fallback (C2-X-032); an image as `[img: ALT]`, the mark of its kind around its alternative text, so `[img: ]` where that is empty; a no-break space as U+00A0, a hard break and a soft break as one space, a smart punctuation node as its glyph; a footnote reference as `[^` and its key and `]`; a `comment` and a `critic_comment` give no text, so a paragraph that holds only comments still writes nothing (C2-H-019); every other inline node with no children as its plain text by C2-H-143, so a `code`, a `literal_inline` and a `math` node give their value and an autolink its visible text, a `raw_inline` as its value, a resolved `xref` as the text it writes in its link (C2-H-096) and an unresolved one as typed, and a `symbol` as `:name:`, as in 0.1. These inline forms hold for an inline node that is degraded while its block stays, and for every node inside it at any depth. Inside a block that is degraded as a whole, the plain text is that of C2-H-143 for every node except an image, which keeps `[img: ALT]`, and a `raw_inline`, an `xref` and a `symbol`, which give the text of the inline forms, so a node with no children writes the same text at both levels. An include is written as the source text of its directive. A block becomes one paragraph of its plain text behind the mark of its kind: for a heading one `#` for each level and a space (the source may have used `=`), `> ` for a quote, `- ` for each item of a list, `---` for a thematic break, one line per table row with ` | ` between the cells and a hard break between the rows, the value without its final line break for a code or raw block, and the title and the blocks joined by single spaces for a div, an admonition and a directive. A block that carries a caption writes it after its degraded form, as one more paragraph of its plain text, in which `caption_number` gives its number (C2-H-143): `^ Figure #: cap` degrades to `Figure 1: cap`, and a figure group with no block still writes its caption. Any other block that holds blocks is written as those blocks in their degraded forms, in order, and any other leaf block as one paragraph of its plain text: a description list gives one paragraph for each term and the degraded blocks of each description, and a block extension the blocks of its fallback. A node that leaves no text is dropped. A degraded node is reported once (C2-H-129), and the nodes inside it are not reported again."
+   "text": "The degraded form of a node outside the profile is its plain text, and no placeholder word stands for it: a node writes the text it holds and, where this clause names one, the mark of its kind, and a node that holds no text and has no such mark writes nothing. An inline node is written as the plain text of its children, and a qualified inline extension as the plain text of its fallback (C2-X-032); an image as `[img: ALT]`, the mark of its kind around its alternative text, so `[img: ]` where that is empty; a no-break space as U+00A0, a hard break and a soft break as one space, a smart punctuation node as its glyph; a footnote reference as `[^` and its key and `]`; a `comment` and a `critic_comment` give no text, so a paragraph that holds only comments still writes nothing (C2-H-019); every other inline node with no children as its plain text by C2-H-143, so a `code`, a `literal_inline` and a `math` node give their value and an autolink its visible text, a `raw_inline` as its value, a resolved `xref` as the text it writes in its link (C2-H-096) and an unresolved one as typed, and a `symbol` as `:name:`, as in 0.1. These inline forms hold for an inline node that is degraded while its block stays, and for every node inside it at any depth. Inside a block that is degraded as a whole, the plain text is that of C2-H-143 for every node except an image, which keeps `[img: ALT]`, and a `raw_inline`, an `xref` and a `symbol`, which give the text of the inline forms, so a node with no children writes the same text at both levels. An include is written as the source text of its directive. A block becomes one paragraph of its plain text behind the mark of its kind: for a heading one `#` for each level and a space (the source may have used `=`), `> ` for a quote, `- ` for each item of a list, `---` for a thematic break, one line per table row with ` | ` between the cells and a hard break between the rows, the value without its final line break for a code or raw block, and the title and the blocks joined by single spaces for a div, an admonition and a directive. A block that carries a caption writes it after its degraded form, as one more paragraph of its plain text, in which `caption_number` gives its number (C2-H-143): `^ Figure #: cap` degrades to `Figure 1: cap`, and a figure group with no block still writes its caption. Any other block that holds blocks is written as those blocks in their degraded forms, in order, and any other leaf block as one paragraph of its plain text: a description list gives one paragraph for each term and the degraded blocks of each description, and a block extension the blocks of its fallback. A line block is a leaf block, since a `line` is no block (C2-A-069): it gives one paragraph of the plain text of its lines, each with the spaces that lead it (C2-B-130), joined by one space as a hard break degrades, and an empty line adds nothing. A node that leaves no text is dropped. A degraded node is reported once (C2-H-129), and the nodes inside it are not reported again."
   },
   {
    "id": "C2-H-166",
@@ -2265,6 +2315,16 @@
    "id": "C2-M-005",
    "document": "import-html.md",
    "text": "`<head>` and everything in it are dropped and reported once with `import-element-dropped`: the title, `<meta>`, `<link>`, `<base>`, and the scripts and styles of the head. The doctype is dropped and reported in the same way."
+  },
+  {
+   "id": "C2-M-100",
+   "document": "import-html.md",
+   "text": "An import option that changes the imported tree is an option of this document, which every engine offers: `rawHtml` (C2-M-066), `labels` (C2-M-101) and those that later rulings add, such as an editor adapter. The mapping rows of such an option stand in `data/import-html.json` next to the element rows. What only the command line does with imported files, as importing a directory, is reference tooling (C2-T-003)."
+  },
+  {
+   "id": "C2-M-101",
+   "document": "import-html.md",
+   "text": "The importer reads `labels` (C2-H-125), the map the HTML was rendered with, a key left out taking its default. An accessible name or text that the renderer writes from a label string, and that equals the string of that key, is generated: it gives no node and no attribute, and the importer reports nothing for it, as for the `aria-label` of an admonition without a title (C2-H-155)."
   },
   {
    "id": "C2-M-006",
@@ -2649,7 +2709,7 @@
   {
    "id": "C2-M-099",
    "document": "import-html.md",
-   "text": "This document holds 83 clauses: 82 rules and 1 exception. It holds 64 examples: 46 verified and 18 unverified. `data/import-html.json` holds 118 element rows, 11 attribute rows, 10 conventions, 7 codes and 18 loss rows."
+   "text": "This document holds 85 clauses: 84 rules and 1 exception. It holds 64 examples: 46 verified and 18 unverified. `data/import-html.json` holds 118 element rows, 11 attribute rows, 10 conventions, 7 codes and 18 loss rows."
   },
   {
    "id": "C2-N-001",
@@ -2674,7 +2734,7 @@
   {
    "id": "C2-N-005",
    "document": "includes.md",
-   "text": "A processor whose output is Carve source does not expand, whether or not a resolver is given: `carve fmt`, a render to the Carve target and every other pipeline whose product is Carve source return the directive as the author wrote it. Such a processor reports no `include-no-resolver` (C2-N-003), since it expands nothing by its own rule. (I15, carried over)"
+   "text": "A processor whose output is Carve source does not expand, whether or not a resolver is given: `carve fmt`, a render to the Carve target and every other pipeline whose product is Carve source return the directive as the author wrote it. `carve flatten`, whose product is the expanded tree, is the one command that expands (C2-T-047). Such a processor reports no `include-no-resolver` (C2-N-003), since it expands nothing by its own rule. (I15, carried over)"
   },
   {
    "id": "C2-N-006",
@@ -2709,7 +2769,7 @@
   {
    "id": "C2-N-012",
    "document": "includes.md",
-   "text": "The resolver of a command-line tool reads files. It resolves the path against the directory of the including file, takes the canonical form of the result with every symbolic link resolved, and returns `outside_root` unless that form lies inside the canonical root. A `..` segment is allowed when the canonical result stays inside the root, and an absolute path is allowed only when it canonicalizes inside the root. A path that starts with a URI scheme, letters and `:` before any `/`, gives `outside_root`: the resolver fetches nothing remote."
+   "text": "The resolver of a command-line tool reads files. It resolves the path against the directory of the including file, takes the canonical form of the result with every symbolic link resolved, and returns `outside_root` unless that form lies inside the canonical root. A `..` segment is allowed when the canonical result stays inside the root, and an absolute path is allowed only when it canonicalizes inside the root. The resolver takes the switch `allowAbsolute`, on by default: on, an absolute path is tested against the root as every other path is; off, an absolute path gives `outside_root` before anything is read, as the 0.1 option of that name did by default. The command line keeps it on. A path that starts with a URI scheme, letters and `:` before any `/`, gives `outside_root`: the resolver fetches nothing remote."
   },
   {
    "id": "C2-N-013",
@@ -2964,7 +3024,7 @@
   {
    "id": "C2-N-063",
    "document": "includes.md",
-   "text": "A failure in an included file is reported at the include node in that file. The range of a finding is counted in the file of the node its path names (C2-A-173, C2-N-053)."
+   "text": "A failure in an included file is reported at the include node in that file. The range of a finding is counted in the file of the node its path names (C2-A-173, C2-N-053). An entry with `file` may also carry `includedBy`, the chain of include nodes that read that file, from the top-level document inward, each with its `file` and `range` (C2-T-020)."
   },
   {
    "id": "C2-N-064",
@@ -4024,7 +4084,7 @@
   {
    "id": "C2-B-146",
    "document": "syntax-blocks.md",
-   "text": "A caption line is `^`, one or more spaces and content, directly below its block with no blank line and owned by the same container as that block, with no column test. The caption text starts at the first character behind those spaces that is not a space or a tab, and a continuation line of a caption loses its indent like every line of a content (C2-I-002)."
+   "text": "A line of `^`, one or more spaces and content is a caption line by its shape. The host test decides only whether it attaches: the line must be directly below its block with no blank line and owned by the same container as that block, with no column test (C2-B-149). The caption text starts at the first character behind those spaces that is not a space or a tab, and a continuation line of a caption loses its indent like every line of a content (C2-I-002)."
   },
   {
    "id": "C2-B-147",
@@ -4039,7 +4099,7 @@
   {
    "id": "C2-B-149",
    "document": "syntax-blocks.md",
-   "text": "After a blank line or below any other block a caption line is text, and `unattached-caption` reports it."
+   "text": "After a blank line or below any other block a caption line is text, and `unattached-caption` reports it. A caption line with no host block is text under the same rule."
   },
   {
    "id": "C2-B-207",
@@ -4844,7 +4904,7 @@
   {
    "id": "C2-T-003",
    "document": "tooling.md",
-   "text": "Outside this specification are the Markdown, GFM and Djot importers of the reference engine (`--from markdown`, `gfm` and `djot`), its `upgrade` command, which is part of the JavaScript engine only and is described in `UPGRADING.md` (\"Running the rewrite tool\"), and its scanner and event helpers. An engine may offer further commands, flags, flag values and calls; none of them takes a name of `data/cli.json` with another meaning."
+   "text": "Outside this specification are the Markdown, GFM and Djot importers of the reference engine (`--from markdown`, `gfm` and `djot`), its `upgrade` command, which is part of the JavaScript engine only and is described in `UPGRADING.md` (\"Running the rewrite tool\"), its `diff` command, which the calls of C2-T-043 to C2-T-046 serve on the command line, the directory import and the editor adapters of its `import` command (C2-M-100), and its scanner and event helpers. Every engine also offers Markdown, plain-text and ANSI export renderers through its library API and `carve render --to markdown`, `--to plain` and `--to ansi`. Their output, options and export-only loss codes are engine behavior outside this specification; those codes are outside `data/lint-rules.json` (C2-W-106). An engine may offer further commands, flags, flag values and calls; none of them takes a name of `data/cli.json` with another meaning."
   },
   {
    "id": "C2-T-004",
@@ -4862,6 +4922,26 @@
    "text": "A call refuses with the typed error of its row in the table of C2-T-040, and with no other error; the command line turns that error into the category of the row."
   },
   {
+   "id": "C2-T-043",
+   "document": "tooling.md",
+   "text": "`diffTree` takes two trees and returns a JSON Patch (RFC 6902): a list of operations that, applied in order by `applyPatch` to the first tree, give a tree whose JSON value is that of the second. Every `path` and `from` is an RFC 6901 pointer into the JSON value of `encodeTree` of the tree the operation applies to, the form of the `path` of a diagnostic (C2-A-173). Two trees whose JSON values are equal give the empty list. The operations an engine chooses and their order are not fixed, so two engines may give two patches for one pair of trees; a host compares the trees a patch gives, not patches."
+  },
+  {
+   "id": "C2-T-044",
+   "document": "tooling.md",
+   "text": "`applyPatch` applies the operations of RFC 6902 (`add`, `remove`, `replace`, `move`, `copy`, `test`) in order to the JSON value of `encodeTree` of the tree and decodes the result as `decodeTree` does (C2-A-188), with the standard extensions of `extensions` registered. It returns the decoded tree and leaves the given tree unchanged. There is no reversible patch and no three-way merge."
+  },
+  {
+   "id": "C2-T-045",
+   "document": "tooling.md",
+   "text": "`applyPatch` refuses with one `CarvePatchError` that carries `path` and `reason`, and applies nothing, in three cases. When `fingerprint` is given and is not the `treeFingerprint` of the tree, `path` is the empty pointer. When an operation is no operation of RFC 6902, its `path` or `from` names no member, or a `test` fails, `path` points into the patch, at the field of that operation (`/0/op`, `/0/path`, `/0/value`). When the result is no tree of contract 2.0, `path` points into the result, at the place where `decodeTree` refuses it."
+  },
+  {
+   "id": "C2-T-046",
+   "document": "tooling.md",
+   "text": "A fingerprint is `sha256:` followed by the 64 lower-case hex digits of the SHA-256 of bytes: for `sourceFingerprint` the UTF-8 bytes of the source as given, text encoded and bytes hashed as they are, with no normalization, so the text and the bytes of one source give one fingerprint; for `treeFingerprint` the UTF-8 bytes of `encodeTree` of the tree (C2-A-217)."
+  },
+  {
    "id": "C2-T-007",
    "document": "tooling.md",
    "text": "A command line is `carve [COMMAND] [FLAG...] [FILE...]`, and its commands are the rows of this table. With no command it is `render`."
@@ -4874,7 +4954,7 @@
   {
    "id": "C2-T-009",
    "document": "tooling.md",
-   "text": "A flag given twice takes its last value, except `--allow-loss`, which collects every value."
+   "text": "A flag given twice takes its last value, except `--allow-loss`, which collects every value. `--ignore` collects every value too."
   },
   {
    "id": "C2-T-010",
@@ -4912,6 +4992,11 @@
    "text": "`--write` replaces each file whose output differs from it and leaves the others untouched. With standard input among the files it is refused with the category `usage`."
   },
   {
+   "id": "C2-T-053",
+   "document": "tooling.md",
+   "text": "`--output` (`-o`) on `render`, `fmt`, `import` and `flatten` takes a path and writes the product of the run to that file instead of standard output, the products of the files before a failure of status 2 included (C2-T-017). `fmt` refuses it with `--write`, `--check` or `--diff`, and a run whose output path resolves to the path of a report flag, as C2-T-015 compares two report paths, is refused, both with the category `usage` before any input is read. A file it cannot write ends the run with the category `output-unwritable`."
+  },
+  {
    "id": "C2-T-017",
    "document": "tooling.md",
    "text": "A failure of status 2 stops the run at its file; what earlier files wrote stays written. Otherwise the status of a run is the highest status of its files."
@@ -4929,7 +5014,7 @@
   {
    "id": "C2-T-020",
    "document": "tooling.md",
-   "text": "An entry of the record (C2-A-173) is a JSON object with the fields of this table. The library gives every field but `line` and `column`; the command line adds those two where the entry has a range. The `message` is the text of the engine, for which the catalog row gives the reference wording (C2-W-106); a comparison of two reports does not compare it. A conformance case that states `messageWhen` compares the selected catalog condition separately, as C2-W-106 defines it."
+   "text": "An entry of the record (C2-A-173) is a JSON object with the fields of this table. The library gives every field but `line` and `column`; the command line adds those two where the entry has a range, and to each object of `includedBy`. `includedBy` is the 0.1 field of that name; an engine may give it and a comparison does not require it. The `message` is the text of the engine, for which the catalog row gives the reference wording (C2-W-106); a comparison of two reports does not compare it. A conformance case that states `messageWhen` compares the selected catalog condition separately, as C2-W-106 defines it."
   },
   {
    "id": "C2-T-021",
@@ -4992,6 +5077,41 @@
    "text": "`lint` writes the entries that the call `lint` returns, as lines or as a report, and ends a file with status 1 when an entry has the severity `warning` or `error`; a run of hints alone ends with 0. The call `lint` returns the record of its run (C2-W-103): the entries of its parse in the parse channel and its findings in the lint channel (C2-W-113), as 0.1 lint reported an unclosed fence. A rule that is off by default, as each `djot-` rule is, is turned on by its id in `--rules`."
   },
   {
+   "id": "C2-T-042",
+   "document": "tooling.md",
+   "text": "`lint` reads `headingIds` (C2-H-131), so a host lints with the option map it renders with. A rule that compares a fragment with the ids of the rendered HTML, as `broken-fragment-link` does, compares it with the heading ids that value generates: under `lower` the heading `= Alpha` has the id `alpha`, so a link to `#alpha` reports nothing, and under the default `keep-case` it has the id `Alpha`, so the same link reports the case-only message that names `Alpha`. Under `off` a heading has no generated id."
+  },
+  {
+   "id": "C2-T-049",
+   "document": "tooling.md",
+   "text": "`lint --fix` rewrites each finding of a rule whose row in `data/lint-rules.json` has a `fix` to the one replacement its message names, at the range of the finding; the `before` and `after` of the `fix` show it on one source. A rule whose message names two replacements, as `deprecated-bare-underline` does, has no fix. The command `fix` is `lint --fix` with the same flags. Under `--fix` every rule that has a fix is on unless `--rules` turns it off, and the other rules keep their defaults (C2-T-031). A range that two findings with different replacements report stays as written: in `~t~`, `djot-subscript-tilde` and `deprecated-bare-strike` disagree, and `--rules` turning one of them off picks the other. A fix is kept only where the fixed source, parsed again, has the construct of its replacement where the finding started: `+ item` directly below a line of paragraph text opens no list with `-` either, so it stays. The fixes repeat until a pass changes nothing."
+  },
+  {
+   "id": "C2-T-050",
+   "document": "tooling.md",
+   "text": "Without `--write`, `lint --fix` writes the fixed source of each file on standard output and the entries that remain as lines on standard error. With `--write` it replaces each file whose fixed source differs from it (C2-T-016), and the entries that remain are its product, as lines or, with `--json`, as a report. A file ends with the status that `lint` gives its fixed source (C2-T-031). `--write` without `--fix`, and `--json` with `--fix` but without `--write`, are refused with the category `usage`."
+  },
+  {
+   "id": "C2-T-051",
+   "document": "tooling.md",
+   "text": "`--strict` on `render` and `lint` ends a file that wrote any entry with status 1 and no category, a hint included. `render --strict` still writes the HTML; `--strict-losses` is the flag that withholds it (C2-T-026)."
+  },
+  {
+   "id": "C2-T-052",
+   "document": "tooling.md",
+   "text": "`lint --ignore` takes a file and drops every entry whose `file` (C2-N-063) is that id, and every entry of an entry file whose name as given (C2-T-013) is that value."
+  },
+  {
+   "id": "C2-T-047",
+   "document": "tooling.md",
+   "text": "`flatten` writes each file as one Carve document: it expands includes as `render` does (C2-T-018) and writes the expanded tree through the canonical writer (C2-W-100), so every include directive is replaced by the blocks it expanded to. It is the one command with Carve source as its product that expands (C2-N-005). The frontmatter of an included file is not written, since it renders nothing."
+  },
+  {
+   "id": "C2-T-048",
+   "document": "tooling.md",
+   "text": "A file of `flatten` writes no source and ends with status 1 in three cases: with the category `include-unresolved` when an include did not expand, and the entries of its causes follow as lines on standard error; with `flatten-changed` when the HTML of the flattened source with the default options differs from that of the expanded tree, as when two included files each define one footnote, link reference or abbreviation key, which are looked up per file (C2-N-054, C2-N-055); and with `writer-refused` for a writer loss of C2-W-134."
+  },
+  {
    "id": "C2-T-032",
    "document": "tooling.md",
    "text": "`diagnostics` writes the entries of the parse channel and ends with status 0 whatever they report."
@@ -5024,7 +5144,7 @@
   {
    "id": "C2-T-038",
    "document": "tooling.md",
-   "text": "A run ends with status 1 and no category when `fmt --check` or `fmt --diff` finds a file that would change (C2-W-100), or `lint` finds an entry of severity `warning` or `error` (C2-T-031)."
+   "text": "A run ends with status 1 and no category when `fmt --check` or `fmt --diff` finds a file that would change (C2-W-100), or `lint` finds an entry of severity `warning` or `error` (C2-T-031), or `--strict` finds any entry (C2-T-051)."
   },
   {
    "id": "C2-T-039",
@@ -5614,7 +5734,7 @@
   {
    "id": "C2-W-106",
    "document": "writer.md",
-   "text": "Every code is an entry of one catalog, `data/lint-rules.json`. A code is a contract: it is not renamed and not reused. A single plain message applies to every finding of its code. A row may express that same message as one variant whose `when` is `every finding of this code`; it applies to every finding. When a row has several messages, every variant states a `when` condition, and at least one condition must match every finding; if conditions overlap, the first matching variant in `messages` applies. The `reports` text of a row states what the code reports and the clauses it rests on; for a rule kept from 0.1 it is the trigger of the 0.1 engine with the row's `change`, stated on the 0.2 tokens and tree."
+   "text": "Every code is an entry of one catalog, `data/lint-rules.json`. This covers the specified parse, HTML render, write, import and lint operations; export-only loss codes of the renderers of C2-T-003 are engine codes outside that catalog. A catalog code is a contract: it is not renamed and not reused. A single plain message applies to every finding of its code. A row may express that same message as one variant whose `when` is `every finding of this code`; it applies to every finding. When a row has several messages, every variant states a `when` condition, and at least one condition must match every finding; if conditions overlap, the first matching variant in `messages` applies. The `reports` text of a row states what the code reports and the clauses it rests on; for a rule kept from 0.1 it is the trigger of the 0.1 engine with the row's `change`, stated on the 0.2 tokens and tree."
   },
   {
    "id": "C2-W-107",
@@ -5655,6 +5775,11 @@
    "id": "C2-W-138",
    "document": "writer.md",
    "text": "The range of an entry is the source span of the construct that the catalog row of its code names, in `reports` or `channel_reports`, unless that row states a `range` or names a range in `reports`, or the clause of the rule names another place, as C2-W-137 and C2-M-081 do. A stated catalog range takes precedence over the general extents below. Where that construct is a part of a node, such as an attribute, an option, a destination, a delimiter or a quote, the range is that part and not the node. Where the row states no range, an attribute range is its whole key and value as written, without the enclosing braces; a block opener range is the opening mark only, without indentation or following content. An entry of a run on source carries that range, in the render-loss channel too, and its path, where it has one, names the node that holds the construct. An entry on a supplied tree has the path alone (C2-W-103); where its construct is a field, the path names the field, as `/children/1/href`. A finding about a whole document starts where the document starts."
+  },
+  {
+   "id": "C2-W-143",
+   "document": "writer.md",
+   "text": "For lint, a line is blank for the rules inside its containers when it holds only spaces and tabs after the prefixes of those containers (C2-B-027). Every rule that tests for a blank line tests this. A line `>` inside a quote is blank for the rules inside the quote, although the parse does not read it as a blank line that ends the quote (C2-B-009, C2-B-032). A mark that is no container prefix is not blank: `>>` at column 1 is text (C2-B-031). The term *blank line* keeps its meaning for the parse."
   }
  ]
 }
