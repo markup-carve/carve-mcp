@@ -15,7 +15,7 @@ use crate::server::{AST_CHILD_FIELDS, MAX_SOURCE_BYTES, lint_values};
 const EXTENSIONS: &[&str] = &[
     "crv", "carve", "md", "markdown", "txt", "html", "htm", "djot",
 ];
-pub(crate) const CARVE_ENGINE_VERSION: &str = "0.1.14";
+pub(crate) const CARVE_ENGINE_VERSION: &str = carve2::api::VERSION;
 
 #[derive(Debug, Clone)]
 struct Root(PathBuf);
@@ -374,6 +374,20 @@ impl Workspace {
         check_links: bool,
         check_anchors: bool,
     ) -> Result<Value, String> {
+        self.review_with_replacement(root_index, max_depth, limit, github,
+            check_links, check_anchors, None)
+    }
+
+    pub(crate) fn review_with_replacement(
+        &self,
+        root_index: usize,
+        max_depth: usize,
+        limit: usize,
+        github: bool,
+        check_links: bool,
+        check_anchors: bool,
+        replacement: Option<(&str, &str)>,
+    ) -> Result<Value, String> {
         let listing = self.list(root_index, max_depth, limit)?;
         let paths = listing["files"].as_array().expect("files array");
         let discovered = paths
@@ -400,10 +414,8 @@ impl Workspace {
                 break;
             }
             total_bytes += bytes;
-            sources.insert(
-                path.to_owned(),
-                read["content"].as_str().unwrap().to_owned(),
-            );
+            sources.insert(path.to_owned(), replacement.filter(|(name, _)| *name == path)
+                .map_or_else(|| read["content"].as_str().unwrap().to_owned(), |(_, value)| value.to_owned()));
         }
         let mut files = Vec::new();
         let mut counts = BTreeMap::<String, usize>::new();
@@ -655,7 +667,8 @@ fn collect_anchor_ids(value: &Value, ids: &mut BTreeSet<String>, all: bool) {
     };
     if all || record.get("type").and_then(Value::as_str) == Some("heading") {
         if let Some(id) = value.pointer("/attrs/id").and_then(Value::as_str)
-            .or_else(|| value.get("generatedId").and_then(Value::as_str)) {
+            .or_else(|| (record.get("type").and_then(Value::as_str) == Some("heading"))
+                .then(|| value.get("generatedId").and_then(Value::as_str)).flatten()) {
             ids.insert(id.to_owned());
         }
     }
@@ -734,13 +747,9 @@ mod tests {
             .expect("Cargo.lock has a carve-lang package");
         assert!(block.contains(&format!("\nversion = \"{CARVE_ENGINE_VERSION}\"\n")));
         let manifest = include_str!("../Cargo.toml");
-        let line = manifest
-            .lines()
-            .find(|line| line.starts_with("carve-lang = "))
-            .expect("Cargo.toml declares carve-lang");
-        if !line.contains("git = ") {
-            assert_eq!(line, format!("carve-lang = \"={CARVE_ENGINE_VERSION}\""));
-        }
+        let line = manifest.lines().find(|line| line.starts_with("carve2 = "))
+            .expect("Cargo.toml declares the Carve 0.2 engine");
+        assert!(line.contains("git = "));
     }
 
     fn temporary_root() -> PathBuf {

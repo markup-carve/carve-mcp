@@ -23,6 +23,7 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 serde_stacker = "0.1"
 regex = "1"
 sha2 = "0.10"
+hmac = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal"] }
 similar = "2.7.0"
 

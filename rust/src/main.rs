@@ -8,10 +8,13 @@ mod ast_patch2;
 mod config;
 mod engine2;
 mod preservation;
+mod reference_graph;
+mod reviewed_edit;
 mod resources;
 mod server;
 mod splice;
 mod transport;
+mod upgrade;
 mod workspace;
 
 const HELP: &str = "carve-mcp-rs - native MCP server for Carve\n\nUsage: carve-mcp-rs [--config FILE] [--root PATH ...] [--allow-write] [--tool-profile PROFILE]\n       carve-mcp-rs [--help | --version]\n\nProfiles: review, convert, structure, workspace, all (default).\nWith or without workspace roots, serves MCP over standard input and output. Workspace access is disabled unless a root is supplied or configured.";

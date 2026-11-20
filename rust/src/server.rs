@@ -1146,6 +1146,18 @@ struct WorkspaceReviewInput {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReferenceGraphInput {
+    root_index: usize,
+    #[serde(default)]
+    #[schemars(range(max = 25))]
+    max_depth: Option<usize>,
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 2000))]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceBatchEditInput {
     root_index: usize,
@@ -1448,6 +1460,25 @@ struct ReplaceSourceInput {
     dry_run: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReviewedEditInput {
+    root_index: usize,
+    path: String,
+    selector: AstSelectorInput,
+    #[serde(default = "default_block_scope")]
+    scope: BlockScope,
+    text: String,
+    #[serde(default)]
+    expected_sha256: Option<String>,
+    #[serde(default = "default_true")]
+    dry_run: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UndoReviewedEditInput { receipt: String }
+
 fn default_block_scope() -> BlockScope {
     BlockScope::Node
 }
@@ -1632,14 +1663,6 @@ struct RenderInput {
     #[serde(default)]
     heading_ids: Option<String>,
     #[serde(default)]
-    #[schemars(description = "Heading ID policy; explicit values override the preset.")]
-    ascii_heading_ids: Option<AsciiMode>,
-    #[serde(default)]
-    #[schemars(
-        description = "Lowercase generated heading IDs; explicit values override the preset."
-    )]
-    lowercase_heading_ids: Option<bool>,
-    #[serde(default)]
     #[schemars(
         default,
         description = "Fail instead of returning output when a raw-format node would be dropped."
@@ -1652,13 +1675,13 @@ struct RenderInput {
     )]
     max_render_losses: Option<usize>,
     #[serde(default)]
-    #[schemars(description = "false is source; { quotes: false } keeps typed quotes only.")]
-    smart_typography: Option<TypographySetting>,
+    #[schemars(description = "Typographic quotes and dashes.")]
+    smart_typography: Option<bool>,
     #[serde(default)]
     #[schemars(
         default = "empty_extensions",
-        length(max = 3),
-        description = "Opt-in extensions; semantic-spans is HTML-only."
+        length(max = 4),
+        description = "Opt-in extensions."
     )]
     extensions: Vec<ExtensionName>,
     #[serde(default)]
@@ -1681,9 +1704,12 @@ struct MigrateInput {
     #[schemars(description = "Document source (maximum 1000000 UTF-8 bytes)")]
     source: String,
     format: SourceFormat,
-    #[serde(default)]
-    #[schemars(description = "Opt-in Markdown flavor constructs; valid only for Markdown input.")]
-    markdown_dialect: Option<MarkdownDialect>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpgradeInput {
+    source: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -2636,7 +2662,7 @@ impl ToolProfile {
             ),
             Self::Convert => matches!(
                 name,
-                "carve_lint" | "carve_render" | "carve_check_targets" | "carve_migrate"
+                "carve_lint" | "carve_render" | "carve_check_targets" | "carve_migrate" | "carve_upgrade"
             ),
             Self::Structure => matches!(
                 name,
@@ -2657,6 +2683,9 @@ impl ToolProfile {
                     | "carve_read_file"
                     | "carve_list_files"
                     | "carve_review_workspace"
+                    | "carve_reviewed_edit"
+                    | "carve_undo_reviewed_edit"
+                    | "carve_reference_graph"
                     | "carve_prepare_edit"
                     | "carve_prepare_workspace_edits"
                     | "carve_write_file"
@@ -2728,6 +2757,9 @@ impl CarveServer {
                 "carve_read_file",
                 "carve_list_files",
                 "carve_review_workspace",
+                "carve_reviewed_edit",
+                "carve_undo_reviewed_edit",
+                "carve_reference_graph",
                 "carve_prepare_edit",
                 "carve_prepare_workspace_edits",
                 "carve_write_file",
@@ -2736,6 +2768,7 @@ impl CarveServer {
             }
         } else if !workspace.as_ref().is_some_and(Workspace::allow_write) {
             tools.remove_route("carve_write_file");
+            tools.remove_route("carve_undo_reviewed_edit");
         }
         // Only a server that may write offers dryRun and the destructive annotation.
         if workspace.as_ref().is_some_and(Workspace::allow_write) {
@@ -2748,11 +2781,20 @@ impl CarveServer {
                         .open_world(false),
                 );
             }
-        } else if let Some(route) = tools.map.get_mut("carve_replace_source")
-            && let Some(Value::Object(properties)) =
-                std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties")
-        {
-            properties.remove("dryRun");
+        } else {
+            if let Some(route) = tools.map.get_mut("carve_reviewed_edit") {
+                route.attr.annotations = Some(rmcp::model::ToolAnnotations::new()
+                    .read_only(true).destructive(false).idempotent(true).open_world(false));
+                if let Some(Value::Object(properties)) =
+                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties") {
+                    properties.remove("dryRun");
+                }
+            }
+            if let Some(route) = tools.map.get_mut("carve_replace_source")
+                && let Some(Value::Object(properties)) =
+                    std::sync::Arc::make_mut(&mut route.attr.input_schema).get_mut("properties") {
+                properties.remove("dryRun");
+            }
         }
         Self { tools, workspace }
     }
@@ -3118,6 +3160,53 @@ impl CarveServer {
             Ok(value) => Self::output(value),
             Err(error) => Self::error(error),
         }
+    }
+
+    #[tool(name = "carve_reference_graph", title = "Build Carve reference graph", description = "Index headings, footnotes, abbreviations, links, and images across bounded Carve workspace files; report resolved edges, broken references, and orphaned definitions.", annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn reference_graph(&self, Parameters(input): Parameters<ReferenceGraphInput>) -> CallToolResult {
+        let Some(workspace) = self.workspace.as_ref() else { return Self::error("No workspace roots are configured."); };
+        match crate::reference_graph::build(workspace, input.root_index,
+            input.max_depth.unwrap_or_else(|| workspace.review_max_depth()),
+            input.limit.unwrap_or_else(|| workspace.review_limit())) {
+            Ok(value) => Self::output(value), Err(error) => Self::error(error),
+        }
+    }
+
+    #[tool(name = "carve_reviewed_edit", title = "Preview or apply a reviewed block edit", description = "Replace one selected Carve block, check the proposed result against local lint and workspace references and includes, then return exact forward and undo patches. A write requires the source hash and a complete project scan.", annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
+    fn reviewed_edit(&self, Parameters(input): Parameters<ReviewedEditInput>) -> CallToolResult {
+        let Some(workspace)=self.workspace.as_ref() else{return Self::error("No workspace roots are configured.");};
+        if !input.path.to_ascii_lowercase().ends_with(".crv") && !input.path.to_ascii_lowercase().ends_with(".carve") {
+            return Self::error("Workspace document tools require a .crv or .carve file.");
+        }
+        if !input.dry_run && !workspace.allow_write(){return Self::error("Workspace writes are disabled.");}
+        if !input.dry_run && input.expected_sha256.is_none(){return Self::error("expectedSha256 is required when dryRun is false.");}
+        let read=match workspace.read(input.root_index,&input.path){Ok(read)=>read,Err(error)=>return Self::error(error)};
+        let source=read["content"].as_str().unwrap_or("");
+        let sha=read["sha256"].as_str().unwrap_or("");
+        let replacement=match replace_source(source, ReplaceRequest{
+            selector:&input.selector,text:&input.text,scope:input.scope,
+            expected_sha256:input.expected_sha256.as_deref(),sha256:sha,include_source:false,
+        }) {Ok(value)=>value,Err(EditFailure::Error(error))=>return Self::error(error),
+            Err(EditFailure::Refusal(message,details))=>return Self::error(format!("{message}: {details}"))};
+        let (path,project,before,_after)=match crate::reviewed_edit::project(workspace,input.root_index,&input.path,&replacement.result) {
+            Ok(value)=>value,Err(error)=>return Self::error(error)
+        };
+        let mut output=replacement.output;
+        output["project"]=project;
+        if !input.dry_run {
+            let written=match workspace.write(input.root_index,&path,&replacement.result,Some(sha),false){
+                Ok(value)=>value,Err(error)=>return Self::error(error)};
+            output["undoReceipt"]=json!(crate::reviewed_edit::receipt(input.root_index,&path,
+                written["sha256"].as_str().unwrap_or(""),sha,&output["undoPatch"],&before));
+            output["write"]=written;
+        }
+        Self::output(output)
+    }
+
+    #[tool(name = "carve_undo_reviewed_edit", title = "Undo a reviewed block edit", description = "Restore exact source bytes from a signed receipt while the edited file hash still matches.", annotations(read_only_hint = false, destructive_hint = true, open_world_hint = false))]
+    fn undo_reviewed_edit(&self, Parameters(input): Parameters<UndoReviewedEditInput>) -> CallToolResult {
+        let Some(workspace)=self.workspace.as_ref() else{return Self::error("No workspace roots are configured.");};
+        match crate::reviewed_edit::undo(workspace,&input.receipt){Ok(value)=>Self::output(value),Err(error)=>Self::error(error)}
     }
 
     #[tool(name = "carve_prepare_edit", title = "Preview canonical Carve formatting", description = "Read and canonically format a Carve workspace file without writing. A lossless result includes a stale-guarded patch with UTF-8 byte ranges; a lossy writer-review result has patch: null.", output_schema = rmcp::handler::server::tool::schema_for_type::<EditOutputSchema>(), annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
@@ -3503,8 +3592,7 @@ impl CarveServer {
         }
         if input.preset == RenderPreset::StaticHtml { options["mode"] = json!("static"); }
         if let Some(typography) = input.smart_typography {
-            options["smartTypography"] = json!(!matches!(typography,
-                TypographySetting::Enabled(false) | TypographySetting::Mode(TypographyMode::Source)));
+            options["smartTypography"] = json!(typography);
         }
         let names: Vec<&str> = input.extensions.iter().map(|extension| match extension {
             ExtensionName::Tabs => "carve.tabs",
@@ -4183,9 +4271,6 @@ impl CarveServer {
     )]
     fn migrate(&self, Parameters(input): Parameters<MigrateInput>) -> CallToolResult {
         if let Err(error) = Self::checked(&input.source) { return Self::error(error); }
-        if input.markdown_dialect.is_some() {
-            return Self::error("markdownDialect is not a Carve 0.2 import option.");
-        }
         let from = match input.format {
             SourceFormat::Html => "html", SourceFormat::Markdown => "markdown",
             SourceFormat::Gfm => "gfm", SourceFormat::Djot => "djot",
@@ -4195,6 +4280,12 @@ impl CarveServer {
             Ok(result) => Self::output(result),
             Err(error) => Self::error(error),
         }
+    }
+
+    #[tool(name = "carve_upgrade", title = "Upgrade Carve 0.1 to 0.2", description = "Rewrite Carve 0.1 source as 0.2. writable is false when a person must review records.", annotations(read_only_hint = true, destructive_hint = false, open_world_hint = false))]
+    fn upgrade(&self, Parameters(input): Parameters<UpgradeInput>) -> CallToolResult {
+        if let Err(error)=Self::checked(&input.source) {return Self::error(error);}
+        match crate::upgrade::upgrade(&input.source) {Ok(value)=>Self::output(value),Err(error)=>Self::error(error)}
     }
 
 }
