@@ -32,8 +32,9 @@ describe('documentation resources', () => {
 
   it('resolves the resource of every warning carve_lint returns', () => {
     const documents = ['= Title {#x}\n', '>quote\n', '[a]:\n', '[x](#nope)\n', '{{}}\n', 'a\n\n---\n', '_word_\n', ':::\n'];
-    const rules = documents.flatMap((document) => lint(document).warnings.map((warning) => warning.rule));
-    expect(rules).toHaveLength(documents.length);
+    const perDocument = documents.map((document) => lint(document).warnings.map((warning) => warning.rule));
+    for (const [index, found] of perDocument.entries()) expect(found.length, documents[index]).toBeGreaterThan(0);
+    const rules = perDocument.flat();
     for (const rule of rules) expect(lintRuleMarkdown(rule), rule).toBeDefined();
   });
 
