@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from './server.js';
-import { format } from './tools.js';
+import { format, upgrade } from './tools.js';
 
 // Copied from markup-carve/carve resources/spec/table-alignment-fixtures.json (3d7a9fff).
 const fixtures = JSON.parse(readFileSync(new URL('./fixtures/table-alignment-fixtures.json', import.meta.url), 'utf8')) as Array<{ name: string; note?: string; canonical: string; aligned: string }>;
@@ -19,9 +19,11 @@ describe('carve_format alignTables', () => {
     });
   }
 
-  it('writes native header cells for an authored separator row', () => {
-    expect(format('| A | B |\n|:--|--:|\n| x | right |\n').value).toBe('|={<} A |={>} B |\n| x | right |\n');
-    expect(format('| A | B |\n|---|---|\n| x | yy |\n', { alignTables: true }).value).toBe('|= A |= B |\n| x  | yy |\n');
+  // U-055: a separator row is an ordinary 0.2 row, so carve_format keeps it and the
+  // upgrade writes the native header cells.
+  it('writes native header cells for an authored separator row through the upgrade', () => {
+    expect(upgrade('| A | B |\n|:--|--:|\n| x | right |\n').value).toBe('|={<} A |={>} B |\n| x | right |\n');
+    expect(format(upgrade('| A | B |\n|---|---|\n| x | yy |\n').value, { alignTables: true }).value).toBe('|= A |= B |\n| x  | yy |\n');
   });
 
   const closeables: Array<{ close(): Promise<void> }> = [];

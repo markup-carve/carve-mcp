@@ -1,0 +1,20 @@
+{
+  "repository": "markup-carve/carve",
+  "branch": "next2",
+  "commit": "109597c5d6d37d4ea8f256fc854842816f1364df",
+  "documents": [
+    "README.md",
+    "STATUS.md",
+    "UPGRADING.md",
+    "ast.md",
+    "extensions.md",
+    "html.md",
+    "import-html.md",
+    "includes.md",
+    "source-layout.md",
+    "syntax-blocks.md",
+    "syntax-inline.md",
+    "tooling.md",
+    "writer.md"
+  ]
+}

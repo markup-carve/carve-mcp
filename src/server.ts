@@ -1,10 +1,10 @@
 import { McpServer, ResourceNotFoundError, ResourceTemplate } from '@modelcontextprotocol/server';
 import { createRequire } from 'node:module';
 import { posix } from 'node:path';
-import { KNOWN_LINT_PLATFORMS, LIB_VERSION, RenderLossError } from '@markup-carve/carve';
+import { CarveRenderError, ENGINE_VERSION as LIB_VERSION, LINT_PLATFORMS as KNOWN_LINT_PLATFORMS } from './engine.js';
 import * as z from 'zod/v4';
-import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, parseForTool, planSemanticAstEdit, render, selectAstNodes, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
-import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
+import { applyReversibleStructuredAstPatch, applyStructuredAstPatch, createReversibleStructuredAstPatch, createStructuredAstPatch, format as formatCarve, lint, MAX_AST_PATCH_OPERATIONS, MAX_SEMANTIC_EDIT_STEPS, MAX_SOURCE_BYTES, migrate, parse, parseForTool, planSemanticAstEdit, render, selectAstNodes, upgrade, type SemanticAstEdit, type SemanticAstEditStep } from './tools.js';
+import { authoringGuide, ruleIds, ruleIndexMarkdown, ruleMarkdown, specDocument, specDocumentNames, specIndexMarkdown, upgradeEntryIds, upgradeEntryMarkdown, upgradeMapMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
 import { prepareWorkspace, type Workspace, type WorkspaceOptions } from './workspace.js';
 import { includeScope } from './includes.js';
@@ -32,21 +32,15 @@ const sourcePatchOutput = z.object({ version: z.literal(1), sourceFingerprint: z
   unresolved: z.array(sourceEditOutput.extend({ message: z.string().min(1) })) }).strict();
 const readOnly = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
 const renderSettings = {
-  preset: z.enum(['default', 'portable', 'static-html']).default('default').describe('portable lowercases IDs and transliterates where possible; static-html is HTML-only.'),
-  asciiHeadingIds: z.enum(['off', 'fold', 'strict']).optional().describe('Heading ID policy; explicit values override the preset.'),
-  lowercaseHeadingIds: z.boolean().optional().describe('Lowercase generated heading IDs; explicit values override the preset.'),
-  strictLosses: z.boolean().default(false).describe('Fail instead of returning output when a raw-format node would be dropped.'),
+  preset: z.enum(['default', 'portable', 'static-html']).default('default').describe('portable gives ascii-lower heading IDs; static-html is HTML-only.'),
+  headingIds: z.enum(['off', 'keep-case', 'lower', 'ascii', 'ascii-lower', 'ascii-strict', 'ascii-strict-lower']).optional().describe('Generated heading ID policy; overrides the preset.'),
+  strictLosses: z.boolean().default(false).describe('Fail instead of returning output when content would be lost.'),
   maxRenderLosses: z.number().int().min(0).max(10_000).optional().describe('Maximum detailed losses to return.'),
-  smartTypography: z.union([z.enum(['glyph', 'source']), z.boolean(), z.object({ quotes: z.boolean().optional() }).strict()]).optional().describe('false is source; { quotes: false } keeps typed quotes only.'),
-  extensions: z.array(z.enum(['autolink', 'semantic-spans', 'wikilinks'])).max(3).default([]).describe('Opt-in extensions; semantic-spans is HTML-only.'),
-  allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output. Disabled by default.'),
+  smartTypography: z.boolean().optional().describe('Typographic quotes and dashes.'),
+  extensions: z.array(z.enum(['tabs', 'autolink', 'semantic-spans', 'wikilinks'])).max(4).default([]).describe('Opt-in extensions.'),
+  allowRawHtml: z.boolean().default(false).describe('Pass trusted raw HTML through on HTML output (rawHtml). Disabled by default.'),
   sanitizeUrls: z.boolean().default(true).describe('Report blocked authored URL schemes as render losses. A dangerous scheme is always blanked; this server never emits one.'),
 };
-const markdownDialect = z.object({
-  highlight: z.boolean().optional(), superscript: z.boolean().optional(), math: z.boolean().optional(),
-  inlineFootnotes: z.boolean().optional(), abbreviations: z.boolean().optional(),
-  fencedDivs: z.boolean().optional(), attributes: z.boolean().optional(),
-}).strict().optional().describe('Opt-in Markdown flavor constructs; valid only for Markdown input.');
 
 const warningOutput = z.object({
   rule: z.string(), message: z.string(), line: z.number().int(), column: z.number().int(),
@@ -59,7 +53,7 @@ const diagnosticFixOutput = lintOutput.extend({
   patch: sourcePatchOutput, undoPatch: sourcePatchOutput,
 }).loose();
 const renderOutput = z.object({ value: z.string(), losses: z.array(z.unknown()), totalLosses: z.number().int(), truncated: z.boolean() }).loose();
-const parseOutput = z.object({ type: z.string(), children: z.array(z.unknown()), srcByteLength: z.number().int() }).loose();
+const parseOutput = z.object({ type: z.string(), astVersion: z.string(), children: z.array(z.unknown()) }).loose();
 const patchChangeOutput = z.object({ kind: z.enum(['add', 'remove', 'replace']), path: z.string(), target: z.string(), summary: z.string() }).loose();
 const astPatchCreateOutput = z.object({ operations: z.array(z.unknown()), operationCount: z.number().int(), changes: z.array(patchChangeOutput), changeCount: z.number().int() }).loose();
 const astPatchApplyOutput = z.object({ ast: z.unknown(), source: z.string() }).loose();
@@ -88,14 +82,13 @@ const blockOutput = z.object({ sha256: z.string(), sourceBytes: z.number().int()
     startLine: z.number().int(), endLine: z.number().int(), source: z.string(), node: z.unknown().optional() }).loose()), truncated: z.boolean() }).loose();
 const migrationDiagnostic = z.object({
   code: z.string().min(1), message: z.string().min(1), severity: z.enum(['info', 'warning', 'error']),
-  fidelity: z.enum(['preserved', 'normalized', 'degraded', 'dropped']), confidence: z.enum(['exact', 'inferred', 'fallback']),
-  path: z.string().optional(), line: z.number().int().positive().optional(), column: z.number().int().positive().optional(),
+  path: z.string().optional(),
 }).loose();
 const migrateOutput = z.object({ value: z.string(), report: z.object({
-  schemaVersion: z.literal(2), sourceFormat: z.enum(['html', 'markdown', 'djot', 'bbcode']),
-  mode: z.string().optional(), adapter: z.string().optional(), diagnostics: z.array(migrationDiagnostic),
+  schemaVersion: z.literal(3), sourceFormat: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']), diagnostics: z.array(migrationDiagnostic),
 }).loose() }).loose();
-const compatibilityOutput = z.object({ receiptVersion: z.number().int().min(1).max(1), source: z.object({ format: z.literal('carve'), sha256: z.string().regex(/^[0-9a-f]{64}$/) }), versions: z.object({ engine: z.string(), mcp: z.string() }), compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int() }), targets: z.array(z.unknown()) }).loose();
+const upgradeOutput = z.object({ value: z.string(), writable: z.boolean(), records: z.array(z.unknown()) }).loose();
+const compatibilityOutput = z.object({ receiptVersion: z.number().int().min(2).max(2), source: z.object({ format: z.literal('carve'), sha256: z.string().regex(/^[0-9a-f]{64}$/) }), versions: z.object({ engine: z.string(), mcp: z.string() }), compatible: z.boolean(), targetCount: z.number().int(), summary: z.object({ compatible: z.number().int(), warning: z.number().int(), lossy: z.number().int(), unavailable: z.number().int() }), targets: z.array(z.unknown()) }).loose();
 const readOutput = z.object({ rootIndex: z.number().int(), path: z.string(), content: z.string(), sha256: z.string(), bytes: z.number().int() }).loose();
 const listOutput = z.object({ rootIndex: z.number().int(), files: z.array(z.string()), truncated: z.boolean(), maxDepth: z.number().int(), limit: z.number().int() }).loose();
 const workspaceInfoOutput = z.object({ roots: z.array(z.object({ rootIndex: z.number().int() })), allowWrite: z.boolean() }).loose();
@@ -172,8 +165,9 @@ function safe<T extends unknown[]>(tool: string, observe: ToolObserver | undefin
       observeSafely(observe, { tool, status: 'error', durationMs: Math.round(performance.now() - started) });
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof SourceEditRefusal) return failure(message, error.details);
-      if (error instanceof RenderLossError) {
-        return failure(message, { losses: error.losses, totalLosses: error.totalLosses, truncated: error.truncated });
+      if (error instanceof CarveRenderError) {
+        const losses = error.diagnostics.filter((entry) => entry.channel === 'render-loss');
+        return failure(message, { losses, totalLosses: losses.length, truncated: false });
       }
       return failure(message);
     }
@@ -374,7 +368,7 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   server.registerResource('carve-rule-index', 'carve://rules', {
     title: 'Normative Carve rule index',
-    description: 'Versioned map of the normative rule categories and lookup resource.',
+    description: 'The Carve 0.2 clause documents and the clause lookup resource.',
     mimeType: 'text/markdown',
   }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: ruleIndexMarkdown() }] }));
 
@@ -383,12 +377,52 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     complete: { ruleId: (value) => ruleIds.filter((id) => id.startsWith(value.toUpperCase())) },
   }), {
     title: 'Carve rule',
-    description: 'A normative rule summary selected by stable rule ID.',
+    description: 'One normative Carve 0.2 clause selected by its C2-* ID.',
     mimeType: 'text/markdown',
   }, async (uri, variables) => {
     const ruleId = String(variables.ruleId);
     const text = ruleMarkdown(ruleId);
     if (!text) throw new ResourceNotFoundError(uri.href, `Unknown Carve rule ID: ${ruleId.slice(0, 100)}`);
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
+  });
+
+  server.registerResource('carve-spec-index', 'carve://spec', {
+    title: 'Carve 0.2 specification',
+    description: 'Index of the vendored Carve 0.2 specification documents.',
+    mimeType: 'text/markdown',
+  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: specIndexMarkdown() }] }));
+
+  server.registerResource('carve-spec', new ResourceTemplate('carve://spec/{document}', {
+    list: undefined,
+    complete: { document: (value) => specDocumentNames.filter((name) => name.startsWith(value)) },
+  }), {
+    title: 'Carve 0.2 specification document',
+    description: 'One document of the Carve 0.2 specification, such as syntax-blocks or UPGRADING.',
+    mimeType: 'text/markdown',
+  }, async (uri, variables) => {
+    const name = String(variables.document);
+    const text = specDocument(name);
+    if (!text) throw new ResourceNotFoundError(uri.href, `Unknown Carve specification document: ${name.slice(0, 100)}`);
+    return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
+  });
+
+  server.registerResource('carve-upgrade-map', 'carve://upgrade-map', {
+    title: 'Carve 0.1 to 0.2 upgrade map',
+    description: 'Every source and tree change between Carve 0.1 and 0.2.',
+    mimeType: 'text/markdown',
+  }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: 'text/markdown', text: upgradeMapMarkdown() }] }));
+
+  server.registerResource('carve-upgrade-entry', new ResourceTemplate('carve://upgrade-map/{entryId}', {
+    list: undefined,
+    complete: { entryId: (value) => upgradeEntryIds.filter((id) => id.startsWith(value.toUpperCase())) },
+  }), {
+    title: 'Carve upgrade map entry',
+    description: 'The 0.1 and 0.2 spelling of one upgrade map entry.',
+    mimeType: 'text/markdown',
+  }, async (uri, variables) => {
+    const id = String(variables.entryId);
+    const text = upgradeEntryMarkdown(id);
+    if (!text) throw new ResourceNotFoundError(uri.href, `Unknown Carve upgrade entry: ${id.slice(0, 100)}`);
     return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] };
   });
 
@@ -442,9 +476,8 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
     inputSchema: z.object({ source: sourceSchema, target: z.enum(['html', 'markdown', 'plain', 'ansi']), ...renderSettings, ...includeSettings }),
     outputSchema: renderOutput,
     annotations: readOnly,
-  }, safe('carve_render', observe, ({ source: document, target, asciiHeadingIds, includeRootIndex, sourcePath, ...settings }) => render(document, target, {
-    ...settings, asciiHeadingIds: asciiHeadingIds === 'off' ? false : asciiHeadingIds,
-  }, includeScope(workspace, { includeRootIndex, sourcePath }))));
+  }, safe('carve_render', observe, ({ source: document, target, includeRootIndex, sourcePath, ...settings }) => render(document, target, settings,
+    includeScope(workspace, { includeRootIndex, sourcePath }))));
 
   if (toolEnabled(toolProfile, 'carve_check_targets')) server.registerTool('carve_check_targets', {
     title: 'Check Carve publishing targets',
@@ -566,11 +599,19 @@ export async function createServer(workspaceOptions?: WorkspaceOptions, observe?
 
   if (toolEnabled(toolProfile, 'carve_migrate')) server.registerTool('carve_migrate', {
     title: 'Migrate to Carve',
-    description: 'Migrate HTML, Markdown, Djot, or BBCode source to Carve with version 2 fidelity diagnostics.',
-    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'djot', 'bbcode']), markdownDialect }),
+    description: 'Import HTML, Markdown, GFM, Djot, or BBCode as Carve 0.2 with diagnostics. Use gfm for ordinary or GitHub Markdown, as the 0.1 markdown format read: markdown is strict CommonMark and keeps tables, task lists and strikethrough as text.',
+    inputSchema: z.object({ source: sourceSchema, format: z.enum(['html', 'markdown', 'gfm', 'djot', 'bbcode']) }),
     outputSchema: migrateOutput,
     annotations: readOnly,
-  }, safe('carve_migrate', observe, ({ source: document, format: sourceFormat, markdownDialect }) => migrate(document, sourceFormat, markdownDialect)));
+  }, safe('carve_migrate', observe, ({ source: document, format: sourceFormat }) => migrate(document, sourceFormat)));
+
+  if (toolEnabled(toolProfile, 'carve_upgrade')) server.registerTool('carve_upgrade', {
+    title: 'Upgrade Carve 0.1 to 0.2',
+    description: 'Rewrite Carve 0.1 source as 0.2. writable is false when a person must review records.',
+    inputSchema: z.object({ source: sourceSchema }).strict(),
+    outputSchema: upgradeOutput,
+    annotations: readOnly,
+  }, safe('carve_upgrade', observe, ({ source: document }) => upgrade(document)));
 
   return server;
 }

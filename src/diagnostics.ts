@@ -1,4 +1,4 @@
-import type { LintPlatform } from '@markup-carve/carve';
+import type { LintPlatform } from './engine.js';
 import { lint } from './tools.js';
 import { createSourcePatch } from './source-patch.js';
 

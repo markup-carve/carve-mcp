@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { includeScope } from './includes.js';
-import { applyStructuredAstPatch, format, MAX_WRITER_DEPTH, parse, planSemanticAstEdit, render } from './tools.js';
+import { applyStructuredAstPatch, format, MAX_WRITER_DEPTH, nestingDepth, parse, planSemanticAstEdit, render } from './tools.js';
 import { prepareWorkspace } from './workspace.js';
 
 async function fixture(files: Record<string, string>) {
@@ -32,9 +32,10 @@ describe('include workspace policy', () => {
     it(`does not expand {{ ${path} }}, which carve_read_file refuses`, async () => {
       const { workspace } = await fixture(secrets);
       const scope = includeScope(workspace, { includeRootIndex: 0 });
-      const out = render(`{{ ${path} }}\n`, 'plain', {}, scope);
+      const out = render(`{{ ${path} }}\n`, 'html', {}, scope);
       expect(out.value).not.toContain('SECRET');
-      expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual(['include-unresolved']);
+      // C2-N-013: the 0.2 parse names the resolver cause instead of include-unresolved.
+      expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual([expect.stringMatching(/^include-(?:not-found|outside-root|unreadable)$/)]);
       expect(out.includes?.dependencies.every((dependency) => !dependency.resolved)).toBe(true);
       expect(JSON.stringify(parse(`{{ ${path} }}\n`, scope))).not.toContain('SECRET');
       await expect(workspace.read(0, path)).rejects.toThrow();
@@ -45,7 +46,7 @@ describe('include workspace policy', () => {
     const { root, workspace } = await fixture({ '.env': 'SECRET=env\n' });
     await mkdir(join(root, 'docs'));
     await symlink('../.env', join(root, 'docs', 'env.md'));
-    const out = render('{{ docs/env.md }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    const out = render('{{ docs/env.md }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
     expect(out.value).not.toContain('SECRET');
     await expect(workspace.read(0, 'docs/env.md')).rejects.toThrow(/Hidden paths/);
   });
@@ -60,7 +61,7 @@ describe('include workspace policy', () => {
 
   it('still expands a normal document reached through ..', async () => {
     const { workspace } = await fixture({ 'shared/glossary.crv': 'Glossary text.\n', 'chapters/one.crv': '{{ ../shared/glossary.crv }}\n' });
-    const out = render('{{ chapters/one.crv }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    const out = render('{{ chapters/one.crv }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
     expect(out.value).toContain('Glossary text.');
   });
 
@@ -68,9 +69,9 @@ describe('include workspace policy', () => {
     const { root, workspace } = await fixture({});
     execFileSync('mkfifo', [join(root, 'pipe.crv')]);
     const started = performance.now();
-    const out = render('{{ pipe.crv }}\n', 'plain', {}, includeScope(workspace, { includeRootIndex: 0 }));
+    const out = render('{{ pipe.crv }}\n', 'html', {}, includeScope(workspace, { includeRootIndex: 0 }));
     expect(performance.now() - started).toBeLessThan(5_000);
-    expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual(['include-unresolved']);
+    expect(out.includes?.warnings.map((warning) => warning.rule)).toEqual([expect.stringMatching(/^include-(?:not-found|outside-root|unreadable)$/)]);
   }, 10_000);
 });
 
@@ -96,9 +97,13 @@ describe('host paths stay out of results', () => {
 });
 
 describe('writer depth guard', () => {
-  it('refuses carve_format on a tree past the writer limit, quickly', () => {
+  // C2-B-190: 0.2 block nesting stops at depth 200, so a parsed source never reaches the writer
+  // limit; carve_format writes it quickly, and the guard still refuses a supplied tree (below).
+  it('formats a source nested past the block limit quickly, inside the writer limit', () => {
     const started = performance.now();
-    expect(() => format(looseList(230))).toThrow(new RegExp(`deeper than ${MAX_WRITER_DEPTH} AST levels`));
+    const source = looseList(230);
+    expect(nestingDepth(parse(source))).toBeLessThanOrEqual(MAX_WRITER_DEPTH);
+    expect(format(source).value).toContain('- x');
     expect(performance.now() - started).toBeLessThan(5_000);
   });
 

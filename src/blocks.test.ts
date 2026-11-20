@@ -98,7 +98,8 @@ describe('document tools on workspace files', () => {
     const plan = planned.structuredContent as { reversiblePatch: unknown; sha256: string };
     expect(plan.sha256).toBe(sha256Text('# Before\n'));
     const applied = await client.callTool({ name: 'carve_apply_reversible_ast_patch', arguments: { rootIndex: 0, path: 'doc.crv', patch: plan.reversiblePatch } });
-    expect(applied.structuredContent).toMatchObject({ source: '{#Before}\n# After\n', sha256: plan.sha256 });
+    // C2-W-035: the 0.2 writer spells the heading with `=`.
+    expect(applied.structuredContent).toMatchObject({ source: '{#Before}\n= After\n', sha256: plan.sha256 });
     expect(applied.structuredContent).not.toHaveProperty('ast');
     const withAst = await client.callTool({ name: 'carve_apply_reversible_ast_patch', arguments: { source: '# Before\n', patch: plan.reversiblePatch, includeAst: true } });
     expect(withAst.structuredContent).toMatchObject({ ast: { type: 'document' } });

@@ -7,7 +7,7 @@ export const writerPrompts = [
   {
     name: 'convert-markdown', title: 'Convert Markdown safely',
     description: 'Convert Markdown to Carve while explaining fidelity warnings.',
-    text: 'Convert the supplied Markdown with carve_migrate. Explain fidelity diagnostics in plain language, preserve meaning and structure, then lint the converted Carve. Do not hide dropped or degraded content.',
+    text: 'Convert the supplied Markdown with carve_migrate and format gfm, unless the user asks for strict CommonMark. Explain fidelity diagnostics in plain language, preserve meaning and structure, then lint the converted Carve. Do not hide dropped or degraded content.',
   },
   {
     name: 'prepare-for-github', title: 'Prepare writing for GitHub',

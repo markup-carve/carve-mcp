@@ -8,6 +8,17 @@ import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { lintRuleNames } from '../dist/lint-rules.js';
 import { ruleIds } from '../dist/resources.js';
+import { reportRustGap, rustServerOn01 } from './rust-engine-gap.mjs';
+
+// The 0.2 branch keeps the 0.1 cases below as history, while its native
+// server compares the pinned 2.0 tree and tool surface directly.
+if (readFileSync(new URL('../rust/Cargo.toml', import.meta.url), 'utf8').includes('carve2 = ')) {
+  await import('./rust-conformance-v2.mjs');
+} else {
+if (rustServerOn01()) {
+  reportRustGap('rust-conformance');
+  process.exit(0);
+}
 
 const metadata = JSON.parse(execFileSync('cargo', [
   'metadata', '--manifest-path', 'rust/Cargo.toml', '--format-version=1', '--no-deps',
@@ -587,4 +598,5 @@ try {
   deepStrictEqual(normalizeEquivalentDiffs(rustWorkspace), normalizeEquivalentDiffs(typescriptWorkspace));
 } finally {
   rmSync(workspaceRoot, { recursive: true, force: true });
+}
 }

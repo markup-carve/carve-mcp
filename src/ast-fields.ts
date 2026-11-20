@@ -1,33 +1,33 @@
 /**
- * Every field the AST schema puts nodes in, in the order a document reads
- * them, so a walk keyed by field name reaches all of them.
- *
- * Spelled once here rather than in each walk. The names and the order are the
- * engine's own `ALL_OWNED_CHILD_FIELDS`, derived in `dist/owned-child-fields.js`
- * from the schema-generated `NODE_POSITION_KIND`, less the `terms` and
- * `definitions` slots that only the engine's internal record shape uses.
- * `ast-fields.test.ts` compares against both the schema field set and that
- * order, and reaches into a definition list to keep the exclusion honest.
+ * Every field the 0.2 tree (contract 2.0) puts nodes in, in reading order, so
+ * a walk keyed by field name reaches all of them. `slots` maps a slot name to
+ * a node list; `childEntries` flattens it.
  */
 export const AST_CHILD_FIELDS = [
-  'target',
   'title',
-  'children',
-  'items',
-  'rows',
-  'cells',
-  'blocks',
-  'inline',
-  'content',
-  'prefix',
-  'locator',
-  'suffix',
-  'old',
-  'new',
-  'pairs',
   'base',
   'annotation',
+  'prefix',
+  'children',
+  'suffix',
+  'short',
+  'longDescription',
+  'pairs',
+  'columns',
   'caption',
-  'shortCaption',
   'fallback',
+  'slots',
 ] as const;
+
+/** The node-holding fields of `record` as `[pointer segments, value]`, with slots expanded. */
+export function childEntries(record: Record<string, unknown>): Array<[string[], unknown]> {
+  const entries: Array<[string[], unknown]> = [];
+  for (const field of AST_CHILD_FIELDS) {
+    if (!Object.hasOwn(record, field)) continue;
+    const value = record[field];
+    if (field === 'slots' && value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [name, nodes] of Object.entries(value)) entries.push([[field, name], nodes]);
+    } else entries.push([[field], value]);
+  }
+  return entries;
+}

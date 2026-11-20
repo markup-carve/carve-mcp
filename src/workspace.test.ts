@@ -80,16 +80,14 @@ describe('workspace operations', () => {
       '',
       '- # In A List',
       '',
-      '| x |',
-      '|---|',
+      '|= x |',
       '| y |',
       '',
-      ':::note',
+      '::: note',
       '# In A Note',
       ':::',
       '',
       '> # In A Quote',
-      '',
       '^ Caption',
       '',
     ].join('\n'));
@@ -207,7 +205,8 @@ describe('workspace operations', () => {
     expect(review.filesRead).toEqual(['child.crv', 'code.txt', 'index.crv']);
     expect(review.scope.excluded).toEqual(['excluded']);
     expect(review.projectWarnings.filter(({ message }) => message.includes('include-lines-out-of-range'))).toHaveLength(1);
-    expect(review.projectWarnings.some(({ message }) => message.includes('include-unresolved'))).toBe(true);
+    // C2-N-013, C2-N-070: the 0.2 parse names the resolver cause; an excluded file is refused as outside the root.
+    expect(review.projectWarnings.some(({ message }) => message.includes('include-outside-root'))).toBe(true);
     expect(review.checks.complete).toBe(false);
   });
 
@@ -220,7 +219,7 @@ describe('workspace operations', () => {
     expect(review.projectWarnings).toEqual([]);
   });
 
-  it('checks resolved reference links and records harmless include id renames', async () => {
+  it('checks resolved reference links and renames no included id', async () => {
     const root = await mkdtemp(join(tmpdir(), 'carve-mcp-'));
     await writeFile(join(root, 'child.crv'), '{#same}\nChild.\n');
     await writeFile(join(root, 'index.crv'), '{#same}\nParent.\n\n{{ child.crv }}\n\n[missing][target]\n\n[target]: child.crv#Gone\n');
@@ -228,7 +227,8 @@ describe('workspace operations', () => {
     expect(review.projectWarnings.map(({ rule, target }) => ({ rule, target }))).toEqual([
       { rule: 'broken-local-anchor', target: 'child.crv#Gone' },
     ]);
-    expect(review.includeAdjustments).toContainEqual(expect.objectContaining({ rule: 'include-id-rename' }));
+    // C2-N-057: 0.2 renames no authored id across included files, so there is no include-id-rename.
+    expect(review.includeAdjustments).toEqual([]);
   });
 
   it('compares reference graph keys exactly', async () => {

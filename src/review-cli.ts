@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { isAbsolute, resolve } from 'node:path';
-import { LIB_VERSION } from '@markup-carve/carve';
+import { ENGINE_VERSION as LIB_VERSION } from './engine.js';
 import { prepareWorkspace } from './workspace.js';
 import { reviewWorkspace } from './project.js';
 

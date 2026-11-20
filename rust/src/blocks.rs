@@ -36,31 +36,24 @@ pub(crate) fn validate_selector(selector: &AstSelectorInput) -> Result<(), Strin
     Ok(())
 }
 
-/// Engine positions count Unicode code points over the source as given, with
-/// CRLF and a leading BOM intact; this maps them to UTF-8 byte offsets.
+/// Carve 2.0 positions use UTF-8 byte offsets directly.
 pub(crate) struct SourceOffsets<'a> {
     source: &'a str,
-    bytes: Vec<usize>,
 }
 
 impl<'a> SourceOffsets<'a> {
     pub(crate) fn new(source: &'a str) -> Self {
-        let mut bytes = source
-            .char_indices()
-            .map(|(byte, _)| byte)
-            .collect::<Vec<_>>();
-        bytes.push(source.len());
-        Self { source, bytes }
+        Self { source }
     }
 
     pub(crate) fn code_points(&self) -> usize {
-        self.bytes.len() - 1
+        self.source.len()
     }
 
     pub(crate) fn byte(&self, point: u64) -> Result<usize, String> {
         usize::try_from(point)
             .ok()
-            .and_then(|point| self.bytes.get(point).copied())
+            .filter(|point| self.source.is_char_boundary(*point))
             .ok_or_else(|| "AST position lies outside the source.".into())
     }
 
@@ -159,9 +152,7 @@ pub(crate) fn node_range(
 }
 
 pub(crate) fn positioned_ast(source: &str) -> Result<Value, String> {
-    let options = carve::Options::default().with_positions(true);
-    crate::server::json_value(&carve::to_json_with_options(source, &options))
-        .map_err(|error| format!("AST serialization failed: {error}"))
+    crate::engine2::parse(source, true)
 }
 
 pub(crate) fn get_blocks(
