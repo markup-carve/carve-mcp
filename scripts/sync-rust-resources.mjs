@@ -1,40 +1,34 @@
-import { reportRustGap, rustServerOn01 } from './rust-engine-gap.mjs';
 import { readFile, writeFile } from 'node:fs/promises';
+import {
+  authoringGuide, ruleIndexMarkdown, ruleMarkdown, ruleIds, specIndexMarkdown,
+  specDocument, specDocumentNames, upgradeMapMarkdown, upgradeEntryMarkdown,
+  upgradeEntryIds,
+} from '../dist/resources.js';
+import { lintRuleMarkdown, lintRuleNames } from '../dist/lint-rules.js';
 
-if (rustServerOn01()) {
-  reportRustGap('rust-resources');
-  process.exit(0);
-}
+const root = new URL('../', import.meta.url);
+const text = {
+  'carve://guide': authoringGuide,
+  'carve://rules': ruleIndexMarkdown(),
+  'carve://spec': specIndexMarkdown(),
+  'carve://upgrade-map': upgradeMapMarkdown(),
+};
+for (const id of ruleIds) text[`carve://rules/${id}`] = ruleMarkdown(id);
+for (const name of specDocumentNames) text[`carve://spec/${name}`] = specDocument(name);
+for (const id of upgradeEntryIds) text[`carve://upgrade-map/${id}`] = upgradeEntryMarkdown(id);
+for (const name of lintRuleNames) text[`carve://lint-rules/${name}`] = lintRuleMarkdown(name);
 
-const sourceUrl = new URL('../src/rules.generated.ts', import.meta.url);
-const outputUrl = new URL('../rust/resources/rules.json', import.meta.url);
-const source = await readFile(sourceUrl, 'utf8');
-const commit = source.match(/RULE_SOURCE_COMMIT = '([0-9a-f]+)'/)?.[1];
-const rawIndex = source.match(/export const ruleIndex = ([\s\S]+?) as const;/)?.[1];
-if (!commit || !rawIndex) throw new Error('Could not read generated rule data.');
-
-const generated = `${JSON.stringify({ sourceCommit: commit, index: JSON.parse(rawIndex) }, null, 2)}\n`;
-
-// The Rust server serves the same lint rule descriptions as src/lint-rules.ts.
-const lintSourceUrl = new URL('../src/lint-rules.ts', import.meta.url);
-const lintOutputUrl = new URL('../rust/resources/lint-rules.json', import.meta.url);
-const lintSource = await readFile(lintSourceUrl, 'utf8');
-const lintBody = lintSource.match(/export const lintRuleDescriptions = \{\n([\s\S]*?)\n\} as const;/)?.[1];
-if (!lintBody) throw new Error('Could not read lint rule descriptions.');
-const lintLines = lintBody.split('\n');
-const lintRules = lintLines.map((line) => {
-  const match = line.match(/^ {2}'([a-z-]+)': '((?:[^'\\]|\\.)*)',$/);
-  if (!match) throw new Error(`Unexpected lint rule line: ${line}`);
-  return [match[1], match[2].replace(/\\(.)/g, '$1')];
-});
-const lintGenerated = `${JSON.stringify(lintRules, null, 2)}\n`;
-
-if (process.argv.includes('--check')) {
-  const current = await readFile(outputUrl, 'utf8').catch(() => '');
-  if (current !== generated) throw new Error('Rust rule resources are stale; run npm run sync:rust-resources.');
-  const lintCurrent = await readFile(lintOutputUrl, 'utf8').catch(() => '');
-  if (lintCurrent !== lintGenerated) throw new Error('Rust lint rule resources are stale; run npm run sync:rust-resources.');
-} else {
-  await writeFile(outputUrl, generated);
-  await writeFile(lintOutputUrl, lintGenerated);
+const artifacts = [
+  ['rust/resources/resource-texts.json', `${JSON.stringify({ text, ruleIds, specDocumentNames, upgradeEntryIds, lintRuleNames }, null, 2)}\n`],
+  ['rust/resources/rules.json', await readFile(new URL('resources/spec-0.2/rules.json', root), 'utf8')],
+  ['rust/resources/lint-rules.json', await readFile(new URL('resources/spec-0.2/lint-rules.json', root), 'utf8')],
+];
+for (const [path, generated] of artifacts) {
+  const url = new URL(path, root);
+  if (process.argv.includes('--check')) {
+    const current = await readFile(url, 'utf8').catch(() => '');
+    if (current !== generated) throw new Error(`${path} is stale; run npm run sync:rust-resources.`);
+  } else {
+    await writeFile(url, generated);
+  }
 }
