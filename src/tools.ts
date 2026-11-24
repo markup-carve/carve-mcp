@@ -1,7 +1,7 @@
 import { childEntries } from './ast-fields.js';
 import {
   CarveRenderError, assertTree, extensionOptions, formatSource, importHtml, lintDiagnostics, parseTree, renderHtml,
-  importFormat, lineColumn, runCarve, stringOffsetOfByte, toWarning, treeJson, writeCarve, writeTarget,
+  importFormat, lineColumn, stringOffsetOfByte, upgradeSource, toWarning, treeJson, writeCarve, writeTarget,
   type Diagnostic, type DocumentNode, type ExtensionName, type HeadingIds, type LintPlatform, type RegistryTarget, type Warning,
 } from './engine.js';
 import { applyAstPatch, createAstPatch, POSITION_KEYS, withoutPositions as stripPositions, type AstPatchOperation } from './ast-patch.js';
@@ -681,18 +681,10 @@ export function migrate(source: string, format: SourceFormat): MigrationResult {
 export interface UpgradeRecord { [field: string]: unknown }
 export interface UpgradeResult { value: string; changed: boolean; check: string; writable: boolean; records: UpgradeRecord[]; engine01: string }
 
-/** `carve_upgrade`: rewrite Carve 0.1 source as 0.2 with `carve upgrade`. */
+/** `carve_upgrade`: rewrite Carve 0.1 source as 0.2 with the engine's upgrade tool. */
 export function upgrade(source: string): UpgradeResult {
   validateSource(source);
-  const output = runCarve(['upgrade'], source);
-  const report = runCarve(['upgrade', '--json'], source);
-  if (output.status === 2 || report.status === 2) throw new Error(`carve upgrade failed: ${(output.stderr || report.stderr).trim()}`);
-  let parsed: { engine01?: string; files?: Array<{ changed?: boolean; check?: string; records?: UpgradeRecord[] }> };
-  try { parsed = JSON.parse(report.stdout) as typeof parsed; }
-  catch { throw new Error('carve upgrade returned no JSON report.'); }
-  const file = parsed.files?.[0];
-  if (!file) throw new Error('carve upgrade returned an empty report.');
-  const check = String(file.check ?? 'unknown');
-  return { value: output.stdout, changed: file.changed === true, check, writable: check === 'pass' || check === 'explained',
-    records: file.records ?? [], engine01: String(parsed.engine01 ?? '') };
+  const result = upgradeSource(source);
+  return { value: result.output, changed: result.changed, check: result.check, writable: result.check === 'pass' || result.check === 'explained',
+    records: result.records as unknown as UpgradeRecord[], engine01: result.engine01 };
 }

@@ -343,6 +343,13 @@ describe('Carve operations', () => {
     expect(result.records).toEqual(expect.arrayContaining([expect.objectContaining({ entry: 'U-001' })]));
     expect(upgrade('Plain text.\n')).toMatchObject({ changed: false, writable: true });
   });
+  it('runs the upgrade in process and reports the 0.1 engine and the check', () => {
+    const result = upgrade('# Heading\n\n[Label]\n');
+    expect(result.check).toMatch(/^(pass|explained|mismatch)$/);
+    expect(result.writable).toBe(result.check !== 'mismatch');
+    expect(result.engine01).not.toBe('');
+    expect(upgrade('\uFEFFPlain text.\n').value).toBe('\uFEFFPlain text.\n');
+  });
   it('rejects oversized input', () => expect(() => validateSource('x'.repeat(MAX_SOURCE_BYTES + 1))).toThrow(/limit/));
 });
 

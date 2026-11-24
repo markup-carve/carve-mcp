@@ -1,6 +1,4 @@
-import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
 import {
   AST_VERSION,
   CarveRenderError,
@@ -28,6 +26,7 @@ import {
 import { autolink, semanticSpan, wikilinks } from '@markup-carve/carve/extensions';
 import { registerExports } from '@markup-carve/carve/export';
 import { importDocument as importForeign } from '@markup-carve/carve/import';
+import { upgrade as upgradeV2, type UpgradeResult as UpgradeOutcome } from '@markup-carve/carve/upgrade';
 
 const require = createRequire(import.meta.url);
 const enginePackagePath = require.resolve('@markup-carve/carve/package.json');
@@ -154,26 +153,7 @@ export function importFormat(input: string, from: 'markdown' | 'gfm' | 'djot' | 
   return importForeign(input, { from });
 }
 
-const CLI_TIMEOUT_MS = 30_000;
-const CLI_MAX_BUFFER = 64 * 1024 * 1024;
-
-/** `carve`, the command line of the pinned engine package. */
-function carvePath(): string {
-  return join(dirname(enginePackagePath), 'dist', 'cli.js');
-}
-
-export interface CarveRun { status: number; stdout: string; stderr: string }
-
-/**
- * Run `carve` on `input` as standard input.
- *
- * Only for the 0.2 call the library does not export (the upgrade tool); the
- * arguments are fixed by the caller, never taken from a client.
- */
-export function runCarve(args: readonly string[], input: string): CarveRun {
-  const run = spawnSync(process.execPath, [carvePath(), ...args, '-'], {
-    input, encoding: 'utf8', timeout: CLI_TIMEOUT_MS, maxBuffer: CLI_MAX_BUFFER, stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  if (typeof run.status !== 'number') throw new Error(`carve did not finish${run.signal ? ` (${run.signal})` : ''}.`);
-  return { status: run.status, stdout: run.stdout ?? '', stderr: run.stderr ?? '' };
+/** The 0.1 to 0.2 source upgrade of the pinned engine (C2-T-003), in process. */
+export function upgradeSource(source: string): UpgradeOutcome {
+  return upgradeV2(source);
 }

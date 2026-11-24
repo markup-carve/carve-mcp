@@ -189,8 +189,9 @@ BBCode through `@markup-carve/carve/import`, since 0.2 specifies no importer for
 them (C2-T-003). It has no dialect switches on 0.2. Raw HTML passthrough is disabled by default (`rawHtml`), and
 the URL policy blanks dangerous schemes unless a caller explicitly disables it.
 
-`carve_upgrade` runs the engine's 0.1-to-0.2 upgrade tool (`carve upgrade`)
-and returns its records; the vendored upgrade map is served as
+`carve_upgrade` calls the engine's 0.1-to-0.2 upgrade tool in process
+(`upgrade` from `@markup-carve/carve/upgrade`, no `carve` subprocess) and
+returns its records; the vendored upgrade map is served as
 `carve://upgrade-map`.
 
 Inputs are limited to 1 MB. Tools that run the Carve writer (`carve_format`,
