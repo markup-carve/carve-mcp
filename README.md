@@ -1,6 +1,6 @@
 # Carve MCP server
 
-MCP server for the Carve parser, linter, formatter, and renderers, using @markup-carve/carve 0.1.15 or later. File access is enabled only for configured roots. Read the [Carve documentation](https://markup-carve.github.io/carve/) for the language syntax.
+MCP server for the Carve parser, linter, formatter, and renderers. This branch (`next2`) runs the unreleased Carve 0.2 engine, pinned by commit from carve-js `next2`. File access is enabled only for configured roots. Read the [Carve documentation](https://markup-carve.github.io/carve/) for the language syntax.
 
 ## Install
 

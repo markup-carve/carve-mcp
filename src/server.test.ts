@@ -30,14 +30,14 @@ describe('MCP server', () => {
 
     const called = await client.callTool({
       name: 'carve_render',
-      arguments: { source: '# Hello', target: 'html' },
+      arguments: { source: '= Hello', target: 'html' },
     });
     expect(called.isError).not.toBe(true);
     expect(called.content).toEqual([{ type: 'text', text: 'Produced the requested output.' }]);
     expect(called.structuredContent).toEqual(expect.objectContaining({ value: expect.stringContaining('<h1') }));
     expect(listed.tools.every((tool) => tool.outputSchema?.type === 'object')).toBe(true);
-    const matrix = await client.callTool({ name: 'carve_check_targets', arguments: { source: '# Hello', targets: ['html', 'github'] } });
-    expect(matrix.structuredContent).toMatchObject({ compatible: true, targetCount: 2, summary: { compatible: 2, warning: 0, lossy: 0 } });
+    const matrix = await client.callTool({ name: 'carve_check_targets', arguments: { source: '= Hello', targets: ['html', 'pdf'] } });
+    expect(matrix.structuredContent).toMatchObject({ compatible: true, targetCount: 2, summary: { compatible: 2, warning: 0, lossy: 0, unavailable: 0 } });
 
     const diagnosed = await client.callTool({ name: 'carve_diagnose_and_fix', arguments: { source: '::: tip\nBody' } });
     const fixId = (diagnosed.structuredContent as { fixes: Array<{ id: string }> }).fixes[0]!.id;
@@ -62,6 +62,19 @@ describe('MCP server', () => {
     expect(sourceEdit.structuredContent).toMatchObject({ direction: 'forward', source: expect.stringContaining('After'), sourcePatch: { edits: expect.any(Array) } });
   });
 
+  it('returns every migrate source format through the output schema', async () => {
+    const server = await createServer();
+    const client = new Client({ name: 'test-client', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    closeables.push(client, server);
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    for (const [format, source] of [['html', '<p><b>Hello</b></p>'], ['markdown', '**Hello**'], ['gfm', '~~gone~~'], ['djot', '*Hello*'], ['bbcode', '[b]Hello[/b]']]) {
+      const migrated = await client.callTool({ name: 'carve_migrate', arguments: { source, format } });
+      expect(migrated.isError, format).not.toBe(true);
+      expect(migrated.structuredContent, format).toMatchObject({ report: { sourceFormat: format } });
+    }
+  });
+
   it('offers a small set of writer-controlled workflows', async () => {
     const server = await createServer();
     const client = new Client({ name: 'test-client', version: '1.0.0' });
@@ -84,7 +97,7 @@ describe('MCP server', () => {
     closeables.push(client, server);
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
-      'carve_lint', 'carve_render', 'carve_check_targets', 'carve_migrate',
+      'carve_lint', 'carve_render', 'carve_check_targets', 'carve_migrate', 'carve_upgrade',
     ]);
   });
 
@@ -96,13 +109,17 @@ describe('MCP server', () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     const listed = await client.listResources();
-    expect(listed.resources.map((resource) => resource.uri)).toEqual(['carve://guide', 'carve://rules']);
+    expect(listed.resources.map((resource) => resource.uri)).toEqual(['carve://guide', 'carve://rules', 'carve://spec', 'carve://upgrade-map']);
     const guide = await client.readResource({ uri: 'carve://guide' });
     expect(guide.contents[0]).toMatchObject({ mimeType: 'text/markdown', text: expect.stringContaining('quick start') });
-    const rule = await client.readResource({ uri: 'carve://rules/CARVE-P0-001' });
-    expect(rule.contents[0]).toMatchObject({ text: expect.stringContaining('A LEADING BYTE ORDER MARK') });
+    const rule = await client.readResource({ uri: 'carve://rules/C2-T-005' });
+    expect(rule.contents[0]).toMatchObject({ text: expect.stringContaining('tooling') });
     const lintRule = await client.readResource({ uri: 'carve://lint-rules/unclosed-container-fence' });
-    expect(lintRule.contents[0]).toMatchObject({ text: expect.stringContaining('without a closer') });
+    expect(lintRule.contents[0]).toMatchObject({ text: expect.stringContaining('Severity') });
+    const spec = await client.readResource({ uri: 'carve://spec/UPGRADING' });
+    expect(spec.contents[0]).toMatchObject({ text: expect.stringContaining('U-001') });
+    const entry = await client.readResource({ uri: 'carve://upgrade-map/U-001' });
+    expect(entry.contents[0]).toMatchObject({ text: expect.stringContaining('Before (0.1)') });
   });
 
   it('returns an MCP tool error for oversized input', async () => {

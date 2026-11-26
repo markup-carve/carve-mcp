@@ -9,7 +9,8 @@
     "carve-mcp-review": "dist/review-cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "resources"
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.build.json",
@@ -17,8 +18,8 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "prepack": "npm run build",
     "release:check": "npm run check && npm test && npm run build && node scripts/check-schema-budget.mjs && node scripts/release-check.mjs",
-    "sync:rust-resources": "node scripts/sync-rust-resources.mjs",
-    "check:rust-resources": "node scripts/sync-rust-resources.mjs --check",
+    "sync:rust-resources": "npm run build && node scripts/sync-rust-resources.mjs",
+    "check:rust-resources": "npm run build && node scripts/sync-rust-resources.mjs --check && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-resource-conformance-v2.mjs",
     "check:schema-budget": "npm run build && node scripts/check-schema-budget.mjs",
     "check:engine-current": "node scripts/check-engine-current.mjs",
     "test:rust-conformance": "npm run build && cargo build --locked --manifest-path rust/Cargo.toml && node scripts/rust-conformance.mjs",
@@ -48,7 +49,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@markup-carve/carve": "^0.1.16",
+    "@markup-carve/carve": "github:markup-carve/carve-js#edd6e00a76729cb086dcb15c38818e1cc34159fb",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "diff": "^8.0.4",

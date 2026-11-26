@@ -9,7 +9,7 @@ export const DOCUMENT_TOOLS = [
   'carve_check_targets', 'carve_parse', 'carve_create_ast_patch',
   'carve_apply_ast_patch', 'carve_select_ast_nodes', 'carve_get_block', 'carve_replace_source', 'carve_plan_ast_edit',
   'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch',
-  'carve_migrate',
+  'carve_migrate', 'carve_upgrade',
 ] as const;
 
 const WORKSPACE_TOOLS = [
@@ -21,7 +21,7 @@ const WORKSPACE_TOOLS = [
 
 const PROFILE_TOOLS: Record<ToolProfile, ReadonlySet<string>> = {
   review: new Set(['carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets']),
-  convert: new Set(['carve_lint', 'carve_render', 'carve_check_targets', 'carve_migrate']),
+  convert: new Set(['carve_lint', 'carve_render', 'carve_check_targets', 'carve_migrate', 'carve_upgrade']),
   structure: new Set(['carve_lint', 'carve_parse', 'carve_create_ast_patch', 'carve_apply_ast_patch',
     'carve_select_ast_nodes', 'carve_get_block', 'carve_replace_source', 'carve_plan_ast_edit', 'carve_create_reversible_ast_patch', 'carve_apply_reversible_ast_patch']),
   workspace: new Set([...WORKSPACE_TOOLS, 'carve_get_block', 'carve_replace_source', 'carve_lint', 'carve_diagnose_and_fix', 'carve_format', 'carve_render', 'carve_check_targets']),

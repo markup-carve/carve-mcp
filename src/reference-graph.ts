@@ -1,5 +1,5 @@
 import { dirname, extname, posix } from 'node:path';
-import { AST_CHILD_FIELDS } from './ast-fields.js';
+import { childEntries } from './ast-fields.js';
 import { parse } from './tools.js';
 import type { Workspace } from './workspace.js';
 
@@ -34,17 +34,18 @@ function collect(path: string, ast: unknown): { definitions: Definition[]; refer
     const node = value as Record<string, unknown>;
     const at = location(path, node);
     const attrs = (node.attrs ?? {}) as Record<string, unknown>;
-    if (node.type === 'heading' && typeof attrs.id === 'string') definitions.push({ ...at, kind: 'heading', id: attrs.id });
-    if (node.type === 'footnote' && typeof node.label === 'string') definitions.push({ ...at, kind: 'footnote', id: node.label });
-    if (node.type === 'abbreviation_def' && typeof node.abbr === 'string') definitions.push({ ...at, kind: 'abbreviation', id: node.abbr });
-    if (node.type === 'heading_ref' && typeof node.target === 'string') references.push({ ...at, kind: 'heading', id: node.target, targetPath: path, targetId: node.target });
-    if (node.type === 'footnote_ref' && typeof node.label === 'string') references.push({ ...at, kind: 'footnote', id: node.label, targetPath: path, targetId: node.label });
+    const headingId = typeof attrs.id === 'string' ? attrs.id : typeof node.generatedId === 'string' ? node.generatedId : undefined;
+    if (node.type === 'heading' && headingId !== undefined) definitions.push({ ...at, kind: 'heading', id: headingId });
+    if (node.type === 'footnote' && typeof node.key === 'string') definitions.push({ ...at, kind: 'footnote', id: node.key });
+    if (node.type === 'abbreviation_def' && typeof node.key === 'string') definitions.push({ ...at, kind: 'abbreviation', id: node.key });
+    if (node.type === 'xref' && node.namespace === 'heading' && typeof node.key === 'string') references.push({ ...at, kind: 'heading', id: node.key, targetPath: path, targetId: node.key });
+    if (node.type === 'footnote_ref' && typeof node.key === 'string') references.push({ ...at, kind: 'footnote', id: node.key, targetPath: path, targetId: node.key });
     if ((node.type === 'link' || node.type === 'image') && typeof (node.href ?? node.src) === 'string') {
       const href = String(node.href ?? node.src);
       const target = linkTarget(path, href);
       references.push({ ...at, kind: node.type, id: href, targetPath: target?.path ?? href, targetId: target?.id });
     }
-    for (const field of AST_CHILD_FIELDS) if (Object.hasOwn(node, field)) walk(node[field]);
+    for (const [, child] of childEntries(node)) walk(child);
   };
   walk(ast);
   return { definitions, references };

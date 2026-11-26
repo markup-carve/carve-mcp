@@ -9,41 +9,40 @@ export function sha256Text(source: string): string {
 
 type Position = { startLine: number; endLine: number; startOffset: number; endOffset: number };
 
-function position(node: Record<string, unknown>): Position | undefined {
+export function position(node: Record<string, unknown>): Position | undefined {
   const pos = node.pos as Partial<Position> | undefined;
   if (!pos || typeof pos.startOffset !== 'number' || typeof pos.endOffset !== 'number') return undefined;
   return pos as Position;
 }
 
-// Engine positions count Unicode code points over the source as given, with
-// CRLF and a leading BOM intact. Slicing and patches need UTF-16 indexes and
-// UTF-8 bytes, so every offset passes through here.
+// 0.2 engine positions are UTF-8 byte offsets over the source as given, with
+// CRLF and a leading BOM intact. Slicing needs UTF-16 indexes, so every offset
+// passes through here.
 export class SourceOffsets {
-  private readonly units: number[] = [];
-  private readonly bytes: number[] = [];
+  private readonly units = new Map<number, number>();
+  private readonly length: number;
 
   constructor(readonly source: string) {
     let unit = 0;
     let byte = 0;
     for (const character of source) {
-      this.units.push(unit);
-      this.bytes.push(byte);
+      this.units.set(byte, unit);
       const point = character.codePointAt(0)!;
       unit += character.length;
       byte += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
     }
-    this.units.push(unit);
-    this.bytes.push(byte);
+    this.units.set(byte, unit);
+    this.length = byte;
   }
 
-  get codePoints(): number { return this.units.length - 1; }
-  unit(point: number): number { return this.units[this.checked(point)]!; }
-  byte(point: number): number { return this.bytes[this.checked(point)]!; }
+  get codePoints(): number { return this.length; }
+  unit(offset: number): number { return this.units.get(this.checked(offset))!; }
+  byte(offset: number): number { return this.checked(offset); }
   slice(start: number, end: number): string { return this.source.slice(this.unit(start), this.unit(end)); }
 
-  private checked(point: number): number {
-    if (!Number.isInteger(point) || point < 0 || point > this.codePoints) throw new Error('AST position lies outside the source.');
-    return point;
+  private checked(offset: number): number {
+    if (!Number.isInteger(offset) || !this.units.has(offset)) throw new Error('AST position lies outside the source.');
+    return offset;
   }
 }
 
@@ -52,9 +51,27 @@ export interface SourceRange { start: number; end: number; startLine: number; en
 // A section runs from its heading to the last node before the next heading of
 // the same or a higher level in the same container. Trailing blank lines and a
 // following heading's attribute line stay outside it.
-export function nodeRange(ast: Record<string, unknown>, path: string, node: Record<string, unknown>, scope: BlockScope): SourceRange {
-  const own = position(node);
-  if (!own) throw new Error(`The selected ${String(node.type)} has no source position.`);
+/**
+ * A 0.2 block position starts at its attribute lines; the block's own source
+ * starts after them, so a replacement keeps the attributes.
+ */
+export function withoutAttributeLines(pos: Position, node: Record<string, unknown>, offsets: SourceOffsets): Position {
+  if (!node.attrs) return pos;
+  let start = pos.startOffset;
+  let line = pos.startLine;
+  for (;;) {
+    const rest = offsets.source.slice(offsets.unit(start), offsets.unit(pos.endOffset));
+    const match = /^[ \t]*\{[^\n]*\}[ \t]*\r?\n/.exec(rest);
+    if (!match || match[0].length >= rest.length) return { ...pos, startOffset: start, startLine: line };
+    start += Buffer.byteLength(match[0], 'utf8');
+    line += 1;
+  }
+}
+
+export function nodeRange(ast: Record<string, unknown>, path: string, node: Record<string, unknown>, scope: BlockScope, offsets: SourceOffsets): SourceRange {
+  const positioned = position(node);
+  if (!positioned) throw new Error(`The selected ${String(node.type)} has no source position.`);
+  const own = withoutAttributeLines(positioned, node, offsets);
   if (scope === 'node') return { start: own.startOffset, end: own.endOffset, startLine: own.startLine, endLine: own.endLine };
   if (node.type !== 'heading') throw new Error('scope "section" requires a heading.');
   const location = parentArrayLocation(ast as never, path);
@@ -89,7 +106,7 @@ function identityField(node: Record<string, unknown>) {
 export function getBlocks(source: string, selector: AstSelector, options: { scope?: BlockScope; includeAst?: boolean; sha256?: string } = {}) {
   const scope = options.scope ?? 'node';
   const { ast, offsets, selected } = resolveSourceBlocks(source, selector);
-  const blocks = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => ({ path, node, range: nodeRange(ast, path, node, scope) })).map(({ path, node, range }) => ({
+  const blocks = selected.slice(0, MAX_AST_SELECTOR_MATCHES).map(({ path, node }) => ({ path, node, range: nodeRange(ast, path, node, scope, offsets) })).map(({ path, node, range }) => ({
     path, type: String(node.type), ...identityField(node),
     start: offsets.byte(range.start), end: offsets.byte(range.end), startLine: range.startLine, endLine: range.endLine,
     source: offsets.slice(range.start, range.end),

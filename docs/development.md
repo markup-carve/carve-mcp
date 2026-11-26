@@ -178,15 +178,21 @@ arguments override configured depth, limit, and platforms for one call.
 `carve_render` supports `default`, `portable`, and HTML-only `static-html`
 presets. The portable preset lowercases heading IDs and transliterates where it
 can. Callers can also choose heading-ID behavior, loss policy, smart typography,
-and the `autolink`, `semantic-spans`, or `wikilinks` extensions. Smart typography
-takes carve-js's option shape: `glyph` or `true` (the default), `source` or
-`false` for the punctuation the author typed, or `{ "quotes": false }`, which
-keeps typed quotes and apostrophes and still substitutes ellipses and dashes.
+and extensions. On Carve 0.2 smart typography is a boolean (`true` substitutes
+quotes, ellipses and dashes, `false` keeps what the author typed); the 0.1
+`glyph`, `source` and `{ "quotes": false }` shapes are gone. The `tabs`
+extension, the `autolink` extension and the `semantic-spans` and `wikilinks`
+bundles of `@markup-carve/carve/extensions` work.
 
-`carve_migrate` exposes Markdown dialect switches explicitly, so migration does
-not invent constructs the source format did not enable. Raw HTML passthrough is
-disabled by default, and dangerous URL sanitization remains enabled unless a
-caller explicitly disables it.
+`carve_migrate` imports HTML through the core entry and Markdown, GFM, Djot and
+BBCode through `@markup-carve/carve/import`, since 0.2 specifies no importer for
+them (C2-T-003). It has no dialect switches on 0.2. Raw HTML passthrough is disabled by default (`rawHtml`), and
+the URL policy blanks dangerous schemes unless a caller explicitly disables it.
+
+`carve_upgrade` calls the engine's 0.1-to-0.2 upgrade tool in process
+(`upgrade` from `@markup-carve/carve/upgrade`, no `carve` subprocess) and
+returns its records; the vendored upgrade map is served as
+`carve://upgrade-map`.
 
 Inputs are limited to 1 MB. Tools that run the Carve writer (`carve_format`,
 `carve_apply_ast_patch`, `carve_apply_reversible_ast_patch`, `carve_plan_ast_edit`, the workspace formatting
@@ -359,6 +365,12 @@ differ. Both directions are verified during apply so a successful preview is
 also safe to reverse.
 
 ## Native Rust server
+
+On the `next2` branch the native server still links the Carve 0.1 engine
+(`carve-lang`), while the TypeScript server runs Carve 0.2. Its port to the
+carve-rs 0.2 API waits on markup-carve/carve-mcp#132, so
+`npm run test:rust-conformance` and `npm run check:rust-resources` report an
+expected skip that names each pending carve-rs call instead of comparing.
 
 The native server uses `carve-lang` directly and exposes the same document
 tools, prompts, structured results, authoring resources, and guarded workspace

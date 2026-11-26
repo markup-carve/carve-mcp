@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { LIB_VERSION, SPEC_VERSION } from '@markup-carve/carve';
-import { authoringGuide, findRule, ruleIds, ruleIndexMarkdown, ruleMarkdown } from './resources.js';
+import { ENGINE_VERSION, SPEC_VERSION } from './engine.js';
+import { authoringGuide, findRule, ruleIds, ruleIndexMarkdown, ruleMarkdown, specDocument, specDocumentNames, upgradeEntryIds, upgradeEntryMarkdown, upgradeMapMarkdown } from './resources.js';
 import { lintRuleMarkdown, lintRuleNames } from './lint-rules.js';
-import { lint } from './tools.js';
+import { lint, render } from './tools.js';
 
 describe('documentation resources', () => {
   it('keeps the quick start concise and task focused', () => {
@@ -10,48 +10,57 @@ describe('documentation resources', () => {
     expect(authoringGuide).toContain('Everyday text');
     expect(authoringGuide).toContain('Good defaults');
     expect(authoringGuide).toContain(`specification ${SPEC_VERSION}`);
-    expect(authoringGuide).toContain(`engine ${LIB_VERSION}`);
+    expect(authoringGuide).toContain(`engine ${ENGINE_VERSION}`);
   });
 
-  it('documents every stable lint diagnostic name', () => {
-    expect(lintRuleNames).toHaveLength(94);
+  it('teaches spellings that render as the guide says in 0.2', () => {
+    expect(render('{_u_} {~s~} {=m=}', 'html').value).toBe('<p><u>u</u> <s>s</s> <mark>m</mark></p>');
+    // A line that starts with `{_` is reported by block-marker-as-text (C2-B-090), so the spans follow text.
+    expect(lint('See {_u_} {~s~}\n').warningCount).toBe(0);
+    expect(render('= A heading', 'html').value).toContain('<h1>A heading</h1>');
+  });
+
+  it('documents every 0.2 lint diagnostic name', () => {
+    expect(lintRuleNames.length).toBeGreaterThan(150);
     expect(lintRuleNames).toEqual(expect.arrayContaining([
-      'platform-mention-token', 'platform-issue-reference', 'table-span-marker-blocked',
-      'continuation-marker-refused', 'list-marker-below-content-column', 'ordered-list-split-by-indent',
-      'consumed-key-near-miss', 'include-duplicate-option', 'include-non-text',
-      'description-separator-below-content-column',
+      'platform-mention-token', 'platform-issue-reference', 'unclosed-container-fence', 'deprecated-bare-underline', 'a11y/image-alt',
     ]));
-    expect(lintRuleMarkdown('unclosed-container-fence')).toContain('without a closer');
-    for (const retired of ['fence-delimiter-indentation', 'raw-block-syntax', 'table-alignment-run-padding', 'table-cell-attribute-before-marker']) {
-      expect(lintRuleMarkdown(retired), retired).toBeUndefined();
-    }
+    expect(lintRuleMarkdown('unclosed-container-fence')).toContain('Severity');
     expect(lintRuleMarkdown('constructor')).toBeUndefined();
     expect(lintRuleMarkdown('__proto__')).toBeUndefined();
   });
 
   it('resolves the resource of every warning carve_lint returns', () => {
-    const documents = ['> {.k}\n', '# Title {#x}\n', '>quote\n', '[a]:\n', '``` raw html\n<b>\n```\n', '[x](#nope)\n', '{{}}\n', '- a\n  :: term\n : detail\n',
-      'a\n\n---\n', '|=> A |\n| 1 |\n', '_word_\n'];
-    const rules = documents.flatMap((document) => lint(document).warnings.map((warning) => warning.rule));
-    // `[a]:` also reports unused-link-reference-definition.
-    expect(rules).toHaveLength(documents.length + 1);
+    const documents = ['= Title {#x}\n', '>quote\n', '[a]:\n', '[x](#nope)\n', '{{}}\n', 'a\n\n---\n', '_word_\n', ':::\n'];
+    const perDocument = documents.map((document) => lint(document).warnings.map((warning) => warning.rule));
+    for (const [index, found] of perDocument.entries()) expect(found.length, documents[index]).toBeGreaterThan(0);
+    const rules = perDocument.flat();
     for (const rule of rules) expect(lintRuleMarkdown(rule), rule).toBeDefined();
   });
 
-  it('indexes every active and retired rule exactly once', () => {
+  it('indexes every 0.2 clause exactly once', () => {
     expect(new Set(ruleIds).size).toBe(ruleIds.length);
-    expect(ruleIds.length).toBeGreaterThan(200);
+    expect(ruleIds.length).toBeGreaterThan(1_000);
   });
 
-  it('looks up stable IDs case-insensitively', () => {
-    expect(findRule('carve-p0-001')).toMatchObject({ id: 'CARVE-P0-001', scope: 'parsing' });
-    expect(ruleMarkdown('CARVE-PRE-001')).toContain('retired');
-    expect(ruleMarkdown('CARVE-PRE-001')).toContain('https://github.com/markup-carve/carve/');
+  it('looks up clause IDs case-insensitively', () => {
+    expect(findRule('c2-t-005')).toMatchObject({ id: 'C2-T-005', document: 'tooling.md' });
+    expect(ruleMarkdown('C2-T-005')).toContain('https://github.com/markup-carve/carve/blob/');
     expect(ruleMarkdown('NOT-A-RULE')).toBeUndefined();
   });
 
-  it('links readers to the full human-readable rule views', () => {
-    expect(ruleIndexMarkdown()).toContain('https://markup-carve.github.io/carve/rules/parsing');
+  it('links readers to the clause documents', () => {
+    expect(ruleIndexMarkdown()).toContain('carve://spec/syntax-blocks');
     expect(ruleIndexMarkdown()).toContain('diagnostic namespace');
+  });
+
+  it('serves the vendored specification and upgrade map', () => {
+    expect(specDocumentNames).toEqual(expect.arrayContaining(['UPGRADING', 'syntax-blocks', 'tooling']));
+    expect(specDocument('tooling')).toContain('C2-T-005');
+    expect(specDocument('../package')).toBeUndefined();
+    expect(upgradeEntryIds).toEqual(expect.arrayContaining(['U-001', 'T-001']));
+    expect(upgradeMapMarkdown()).toContain('| U-001 |');
+    expect(upgradeEntryMarkdown('u-001')).toContain('Before (0.1)');
+    expect(upgradeEntryMarkdown('U-999999')).toBeUndefined();
   });
 });

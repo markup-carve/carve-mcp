@@ -36,7 +36,8 @@ describe('carve_parse output size', () => {
 
   it('keeps an authored pos attribute when positions are omitted', () => {
     const ast = parseForTool('[Hi]{pos=1}\n', undefined, false);
-    expect(JSON.stringify(ast)).toContain('"keyValues":{"pos":"1"}');
+    // C2-A-032: 0.2 keyValues is an ordered list of [key, value] pairs.
+    expect(JSON.stringify(ast)).toContain('"keyValues":[["pos","1"]]');
     expect(JSON.stringify(ast)).not.toContain('"startLine"');
   });
 

@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "text-processing"]
 
 [dependencies]
 atomic-write-file = "0.3.1"
-carve-lang = "=0.1.14"
+carve2 = { package = "carve-lang", git = "https://github.com/markup-carve/carve-rs", rev = "8388a5a4f77452174ad04d9ee99f03a35244a960" }
 rmcp = { version = "3.2.0", features = ["transport-io"] }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }
@@ -22,8 +22,12 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 serde_stacker = "0.1"
 regex = "1"
 sha2 = "0.10"
+hmac = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal"] }
 similar = "2.7.0"
+
+[dev-dependencies]
+carve = { package = "carve-lang", version = "=0.1.14" }
 
 [[bin]]
 name = "carve-mcp-rs"
