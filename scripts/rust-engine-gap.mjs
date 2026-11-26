@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-// On next2 the TypeScript server runs the Carve 0.2 engine while the Rust server
+// On main the TypeScript server runs the Carve 0.2 engine while the Rust server
 // still links carve-lang 0.1 (markup-carve/carve-mcp#132), so the comparisons
 // would only measure the version gap. Each pending carve-rs call is named.
 export const RUST_GAPS = [

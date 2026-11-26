@@ -366,7 +366,7 @@ also safe to reverse.
 
 ## Native Rust server
 
-On the `next2` branch the native server still links the Carve 0.1 engine
+On the `main` branch the native server still links the Carve 0.1 engine
 (`carve-lang`), while the TypeScript server runs Carve 0.2. Its port to the
 carve-rs 0.2 API waits on markup-carve/carve-mcp#132, so
 `npm run test:rust-conformance` and `npm run check:rust-resources` report an

@@ -6,8 +6,8 @@ Give MCP-compatible assistants the same Carve parser, linter, formatter, and
 renderers used by the JavaScript implementation. Filesystem access is absent by
 default and can be enabled for explicitly configured document roots.
 
-The `next2` branch runs the Carve 0.2 engine (`@markup-carve/carve` from carve-js
-`next2`). Run `carve_upgrade` on Carve 0.1 source before editing it as 0.2.
+The `main` branch runs the Carve 0.2 engine (`@markup-carve/carve` from carve-js
+`main`). Run `carve_upgrade` on Carve 0.1 source before editing it as 0.2.
 
 ## Tools
 
