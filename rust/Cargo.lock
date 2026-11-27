@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "carve-mcp"
-version = "0.1.13"
+version = "0.2.0"
 dependencies = [
  "atomic-write-file",
  "carve-lang 0.1.14 (registry+https://github.com/rust-lang/crates.io-index)",
